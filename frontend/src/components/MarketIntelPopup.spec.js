@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import MarketIntelPopup, { collectNewMarketIntelItems } from "./MarketIntelPopup";
-import { MI_POPUP_LEFT_KEY, MI_POPUP_MIN_KEY } from "@/lib/marketIntel";
+import { MI_POPUP_BOTTOM_KEY, MI_POPUP_LEFT_KEY, MI_POPUP_MIN_KEY } from "@/lib/marketIntel";
 import { deskHeaderClearance, MI_POPUP_WIDTH_KEY } from "@/lib/carryDock";
 import { api } from "@/lib/api";
 
@@ -68,6 +68,20 @@ describe("MarketIntelPopup docking", () => {
     expect(localStorage.getItem("oiCarryBriefLeftPx")).toBe("12");
   });
 
+  it("starts at the bottom-right after reload despite a previously dragged position", async () => {
+    const width = Math.min(420, window.innerWidth - 16);
+    localStorage.setItem(MI_POPUP_LEFT_KEY, "140");
+    localStorage.setItem(MI_POPUP_BOTTOM_KEY, "180");
+
+    await act(async () => {
+      root.render(<MarketIntelPopup enabled />);
+    });
+
+    const chip = container.querySelector('[data-testid="market-intel-popup-chip"]');
+    expect(Number.parseInt(chip.style.left, 10)).toBe(window.innerWidth - width - 12);
+    expect(chip.style.bottom).toBe("12px");
+  });
+
   it("limits expanded height to the available viewport after browser zoom", async () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 420 });
     await act(async () => {
@@ -109,7 +123,7 @@ describe("MarketIntelPopup docking", () => {
     expect(localStorage.getItem(MI_POPUP_WIDTH_KEY)).toBe("444");
   });
 
-  it("keeps the minimized phone chip fixed to the bottom-right despite a saved desktop position", async () => {
+  it("starts the minimized phone chip at the bottom-right despite a saved desktop position", async () => {
     localStorage.setItem(MI_POPUP_LEFT_KEY, "140");
     jest.spyOn(window, "matchMedia").mockImplementation((query) => ({
       matches: query === "(max-width: 767px)",
@@ -128,7 +142,7 @@ describe("MarketIntelPopup docking", () => {
     expect(chip.style.left).toBe("");
     expect(chip.style.right).toBe("12px");
     expect(chip.style.bottom).toBe("52px");
-    expect(localStorage.getItem(MI_POPUP_LEFT_KEY)).toBe("140");
+    expect(localStorage.getItem(MI_POPUP_LEFT_KEY)).toBe(String(window.innerWidth - 420 - 12));
   });
 
   it("suppresses the existing queue and returns each newly arriving Market Intel story once", () => {

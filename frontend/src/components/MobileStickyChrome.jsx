@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Plus, RotateCcw } from "lucide-react";
 
 import { DESK_IDS, INDEX_SHORT, INDEX_DOT, usesIndexOverflow } from "@/lib/universe";
@@ -38,29 +39,51 @@ export default function MobileStickyChrome({
   const [draggingId, setDraggingId] = useState(null);
   const [overId, setOverId] = useState(null);
   const [hiddenMenuOpen, setHiddenMenuOpen] = useState(false);
+  const [hiddenMenuPos, setHiddenMenuPos] = useState({ top: 0, left: 0 });
   const hiddenPagesWrapRef = useRef(null);
+  const hiddenPagesButtonRef = useRef(null);
+  const hiddenPagesMenuRef = useRef(null);
   const skipClickRef = useRef(false);
 
   const canReorder = typeof onReorder === "function";
   const canFavorite = typeof onFavorite === "function";
   const canMove = typeof onMove === "function";
   const canCustomizePages = typeof onHideTab === "function" && typeof onRestoreTab === "function";
+  const hasHiddenTabs = canCustomizePages && hiddenTabs.length > 0;
+
+  const placeHiddenMenu = useCallback(() => {
+    const button = hiddenPagesButtonRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const width = 176;
+    setHiddenMenuPos({
+      top: Math.round(rect.bottom + 4),
+      left: Math.round(Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))),
+    });
+  }, []);
 
   useEffect(() => {
     if (!hiddenMenuOpen) return undefined;
+    placeHiddenMenu();
     const onDoc = (event) => {
-      if (!hiddenPagesWrapRef.current?.contains(event.target)) setHiddenMenuOpen(false);
+      if (hiddenPagesWrapRef.current?.contains(event.target)) return;
+      if (hiddenPagesMenuRef.current?.contains(event.target)) return;
+      setHiddenMenuOpen(false);
     };
     const onKey = (event) => {
       if (event.key === "Escape") setHiddenMenuOpen(false);
     };
+    window.addEventListener("resize", placeHiddenMenu);
+    window.addEventListener("scroll", placeHiddenMenu, true);
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
+      window.removeEventListener("resize", placeHiddenMenu);
+      window.removeEventListener("scroll", placeHiddenMenu, true);
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [hiddenMenuOpen]);
+  }, [hiddenMenuOpen, placeHiddenMenu]);
 
   useEffect(() => {
     if (hiddenTabs.length === 0) setHiddenMenuOpen(false);
@@ -305,25 +328,28 @@ export default function MobileStickyChrome({
               );
             })}
           </div>
-          {canCustomizePages && (
+          {hasHiddenTabs && (
             <div ref={hiddenPagesWrapRef} className="relative z-30 shrink-0">
               <button
+                ref={hiddenPagesButtonRef}
                 type="button"
                 data-testid="dashboard-add-page-mobile"
                 aria-label="Add a hidden dashboard page"
                 aria-expanded={hiddenMenuOpen}
-                title={hiddenTabs.length ? "Restore a hidden dashboard page" : "All available pages are shown"}
-                disabled={savingPagePreferences || hiddenTabs.length === 0}
+                title="Restore a hidden dashboard page"
+                disabled={savingPagePreferences}
                 onClick={() => setHiddenMenuOpen((open) => !open)}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-emerald-950/40"
               >
                 <Plus className="h-4 w-4" />
               </button>
-              {hiddenMenuOpen && hiddenTabs.length > 0 && (
+              {hiddenMenuOpen && typeof document !== "undefined" && createPortal(
                 <div
+                  ref={hiddenPagesMenuRef}
                   role="menu"
                   data-testid="dashboard-hidden-pages-menu-mobile"
-                  className="absolute right-0 top-full mt-1 min-w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                  className="fixed z-[240] min-w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                  style={{ top: hiddenMenuPos.top, left: hiddenMenuPos.left }}
                 >
                   {hiddenTabs.map((tab) => (
                     <button
@@ -342,7 +368,8 @@ export default function MobileStickyChrome({
                       {tab.l}
                     </button>
                   ))}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}
