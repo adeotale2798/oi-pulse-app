@@ -4,6 +4,37 @@
  */
 export const RELEASE_NOTES = [
   {
+    version: "20.37",
+    date: "2026-10-15",
+    user: [
+      "Account settings now keep a private history of subscription changes and provide a direct way to subscribe again after access ends.",
+    ],
+    admin: [
+      "Subscription health now lists individual Basic-blocked accounts and payment states needing review, with direct member management actions.",
+    ],
+  },
+  {
+    version: "20.36",
+    date: "2026-10-15",
+    user: [
+      "Cancelling a paid plan or losing paid access returns your account to Basic immediately.",
+    ],
+    admin: [
+      "The subscriptions dashboard now summarizes current plan access and all-time billing events, including members blocked by the Basic-plan setting.",
+    ],
+  },
+  {
+    version: "20.10",
+    date: "2026-10-14",
+    user: [
+      "Plan walkthroughs now distinguish OI Change, Open Interest, Strike Table, Build-up, and Straddle, with neutral preview-only market measurements.",
+      "Premium's alert-inbox example now demonstrates OI, Market Intel, Global Markets, major-move, and event rows using fictional data.",
+    ],
+    admin: [
+      "Admin-captured Desk AI context and live dashboard behavior remain unchanged.",
+    ],
+  },
+  {
     version: "14.49",
     date: "2026-09-24",
     user: [
@@ -985,7 +1016,7 @@ export const RELEASE_NOTES = [
       "Kite login returns to striklenz.com. Desk alert sounds play again. Notifications can be turned off. Alerts from another tab collapse to one summary. The top LIVE bar stays one slim scrolling row. Home-screen icon is full green (no white frame) and the in-app mark pulses.",
     ],
     admin: [
-      "Kite Connect redirect URL: https://striklenz.com/kite-callback. Saving Admin configuration applies pages immediately and no longer re-seeds expiries unless enabled indices changed. Disabled indices are not clickable in the header ticker.",
+      "Kite Connect redirect URL: https://striklenz.com/api/kite/user/callback. Saving Admin configuration applies pages immediately and no longer re-seeds expiries unless enabled indices changed. Disabled indices are not clickable in the header ticker.",
     ],
   },
   {

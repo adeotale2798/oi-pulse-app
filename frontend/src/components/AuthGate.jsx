@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Navigate, Link } from "react-router-dom";
+import { Navigate, Link, useLocation } from "react-router-dom";
 import { api, clearGuestAuth, clearAdminAuth, persistGuestAuth, persistAdminSession } from "@/lib/api";
 import { isTransientHttpError, storedDeskSession, optimisticDeskAuthState, withTimeout } from "@/lib/authBoot";
 import useQuiescentAwarePolling from "@/hooks/useQuiescentAwarePolling";
@@ -13,8 +13,45 @@ import AuthShell from "@/components/AuthShell";
 import MaintenanceScreen from "@/components/MaintenanceScreen";
 import DataLoadingState from "@/components/DataLoadingState";
 
+function MembershipAccessNotice({ plan, availablePlans = ["premium", "pro"] }) {
+  const planName = plan === "normal" ? "Basic" : plan === "pro" ? "Pro" : "Premium";
+  const planLabels = { premium: "StrikLenz Premium", pro: "StrikLenz Pro" };
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 text-slate-900">
+      <section className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-xl sm:p-9">
+        <OiPulseLogo className="mx-auto mb-4 h-12 w-12" pulse={false} />
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">StrikLenz membership</p>
+        <h1 className="mt-2 text-2xl font-bold">The {planName} plan is currently unavailable</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          Your account is still active, but this plan is paused. Choose an available subscription to continue to the market desk, or return later if you want to use Basic access.
+        </p>
+        {availablePlans.length > 0 ? (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {availablePlans.map((planId) => (
+              <Link
+                key={planId}
+                to={`/account?plan=${planId}`}
+                className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              >
+                View {planLabels[planId] || "subscription"}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+            Subscriptions are not available right now. Please check back later.
+          </p>
+        )}
+        <Link to="/account" className="mt-5 inline-block text-sm font-semibold text-slate-600 underline underline-offset-4">
+          Open account settings
+        </Link>
+      </section>
+    </main>
+  );
+}
+
 /**
- * AuthGate — three modes:
+ * AuthGate — admin, durable member, and guest entry:
  *   1. Admin login (default when public access is closed)
  *   2. Guest name prompt (when public access is open but caller has no guest token)
  *   3. Pass-through (admin or guest already authenticated)
@@ -23,6 +60,7 @@ import DataLoadingState from "@/components/DataLoadingState";
  * market close unless Settings → expire_admin_on_market_close is explicitly ON.
  */
 export default function AuthGate({ children }) {
+  const location = useLocation();
   const [state, setState] = useState(() => optimisticDeskAuthState() || {
     loading: true, requires_login: true, is_admin: false, is_guest: false, needs_guest_name: false,
   });
@@ -70,10 +108,10 @@ export default function AuthGate({ children }) {
       }
       if (!data) throw lastErr || new Error("auth state unavailable");
 
-      if (data.requires_login && !data.is_admin) {
+      if (data.requires_login && !data.is_admin && !data.is_member) {
         clearGuestAuth();
       }
-      if (!data.is_guest && !data.is_admin) {
+      if (!data.is_guest && !data.is_admin && !data.is_member) {
         if (!data.public_access_open) clearGuestAuth();
       }
       if (data.suggested_guest_name) {
@@ -415,7 +453,7 @@ export default function AuthGate({ children }) {
     );
   }
 
-  // Admin always passes. Guest only while public access remains open.
+  // Member sessions are account-authenticated and independent of the guest door.
   if (state.is_admin) {
     return (
       <>
@@ -432,6 +470,18 @@ export default function AuthGate({ children }) {
       </>
     );
   }
+  if (state.is_member) {
+    if (state.membership?.enabled === false && location.pathname !== "/account") {
+      return (
+        <MembershipAccessNotice
+          plan={state.membership.plan}
+          availablePlans={state.membership.available_paid_plans}
+        />
+      );
+    }
+    return children;
+  }
+  // Guest sessions remain controlled by the separate public-access switch.
   if (state.is_guest && state.public_access_open) return children;
   // Stale guest token after public access closed → force login/guest prompt
   if (state.is_guest && !state.public_access_open) {

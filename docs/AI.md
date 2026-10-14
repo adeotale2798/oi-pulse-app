@@ -2,7 +2,19 @@
 
 The OI Change chart already shows PCR, CE/PE change, and walls. Desk AI must **not** recap that.
 
-It answers: *what could change an options trade that is not visible from OI alone?*
+For Admin, Desk AI can combine market evidence with the Admin book for a review.
+Pro members get market-context summaries only: their positions and private
+journal are not sent to Desk AI, and member-facing Desk AI does not provide
+position guidance or trade instructions.
+
+The Pro Desk AI surface is a market-session briefing, not a conversational chat
+window. It summarizes shared inputs such as heavyweight constituent moves
+with index weight, market breadth, Global Markets, news, and events. It never
+accesses, analyzes, or comments on member positions and does not provide
+personal trade guidance. The public plan preview uses an Admin-captured
+snapshot where available; missing feeds appear as clearly labeled fictional
+samples, not live data. Weight and constituent move are shown as separate
+observations, not as a projected index contribution.
 
 Deterministic code scores:
 
@@ -11,23 +23,28 @@ Deterministic code scores:
 - **News** — public RSS (Google News + ET markets), including India-linked international company coverage. A dedicated Google News feed searches visa / IT, steel, chemical, construction, and related company developments. Material headlines naming companies in the uploaded NIFTY / SENSEX constituent list receive stronger India relevance so they are not discarded by the general-market threshold; routine mentions and unrelated global sector news remain filtered.
 - **Corporate calendar** — `nse_events` joined onto those same constituents
 - **India VIX** when the poller has it
-- **Day capital** — Positions booked % of wallet (−3% caution, −5% stop adds, −8% defend). At stop/defend, Desk AI **What to do** leads with the capital line, hides sell ideas, and does not chase “prefer CE shorts”. Book score stays path-risk only.
+- **Admin book context** — Admin-only position risk and capital context. This
+  does not appear in Pro member Desk AI.
 
 OpenAI is optional. Prefer **Admin configuration → Desk AI keys** (OpenAI, DeepSeek, Grok, Groq, OpenRouter, or a custom OpenAI-compatible base URL). Keys are Fernet-encrypted in Mongo and never returned to the browser. Env `OPENAI_API_KEY` / `DESK_GUIDE_API_KEY` remains a fallback.
 
 ## Who sees what
 
-Desk AI is **open for the whole desk** (admin and guests share one switch). It is **off** until someone turns it on from the header **AI** chip.
+The Admin controls the shared Desk AI availability from the header **AI** chip.
+Pro members can view market context when the feature is enabled, but never
+receive the Admin book, journal, Radar, or carry guidance.
 
 | Control | Where | Who it applies to |
 |---------|--------|-------------------|
-| **On / Off** | Header AI chip only | Everyone — one flag |
-| **Open in side panel** | Header AI menu (desktop) | Full **cash / news** tape in the right panel |
-| **Phone popup** | Tap the AI chip | Same cash tape; close returns to the chart |
-| **Carry brief AI** | Toggle on the carry card (desktop) | Overnight **impact** only (gap-risk movers / HIGH events). Hidden on phones |
-| **Book radar intelligence** | Radar panel tick | Book risk vs cash; tiles reorder up/down |
+| **On / Off** | Header AI chip only | Admin controls availability |
+| **Market context** | Desk AI surface | Pro members and Admin; publisher/shared sources only for members |
+| **Admin side panel / phone view** | Header AI menu / AI chip | Admin cash, news, book, and calendar context |
+| **Carry brief AI** | Admin carry card (desktop) | Admin-only overnight scenarios and book context |
+| **Book radar intelligence** | Admin Radar panel | Admin-only book risk review |
 
-There is no chart strip and no Desk AI section in Admin configuration.
+There is no chart strip and no Desk AI section in Admin configuration. The
+`POST /desk-guide` route is Admin-only because its response can contain explicit
+trade actions.
 
 The floating Market Intel popup uses the same impact-ranked news candidates as
 the Market Intel page. Newly arriving candidates produce an in-app alert; if
@@ -130,18 +147,21 @@ These reads do not alter Desk AI scores, OI, alerts, or orders.
 ## APIs
 
 - **GET /api/desk-outside** — optional `?index=GOLD` when that MCX name is selected; otherwise cash heavyweight tape. Cached ~45s.
-- `GET/POST /api/desk-guide` — POST attaches outside tape server-side
-- `GET /api/desk-memory?days=180` — owner-scoped trade-cycle aggregates for the signed-in desk user
+- `POST /api/desk-guide` — Admin-only; attaches outside tape server-side
+- `GET /api/desk-memory?days=180` — Admin-only trade-cycle aggregates for the Admin book
 - `POST /api/desk-ai` — signed-in desk user: `desk_ai_show` and `desk_ai_carry`. Radar ticks stay admin-only
 
-Desk Guide's LLM cache is isolated by authenticated desk identity and compacted snapshot. A shared provider cooldown prevents guests from forcing extra calls; only admins can bypass it. Snapshot strings are treated as untrusted data by the model prompt.
+Desk Guide's LLM cache is isolated by authenticated desk identity and compacted
+snapshot. The route is Admin-only; a shared provider cooldown prevents guests
+from forcing extra calls. Snapshot strings are treated as untrusted data by the
+model prompt.
 
 ## Personal strategy memory
 
-Main Desk, Overnight Hold, and Radar use the same read-only `/desk-memory`
-summary from the current user's `trade_cycles` owner scope (up to 180 days).
-Admins see the admin book; guests see only the book keyed to their own guest /
-Kite identity. This memory endpoint is separate from the admin-only journal.
+Admin Desk, Overnight Hold, and Radar use the same read-only `/desk-memory`
+summary from the current Admin's `trade_cycles` owner scope (up to 180 days).
+This memory endpoint is separate from the admin-only journal. Pro member market
+context does not request this endpoint or include member trade cycles.
 It returns aggregated index/option-side/direction and weekday cohorts, sample
 counts, win/loss rate, expectancy (average booked P&L per closed cycle), average
 win/loss, and—separately as execution/process evidence—average holding time,
@@ -153,13 +173,12 @@ pattern. Smaller samples are labeled limited; fewer than three total closed
 cycles are explicitly reported as insufficient history. These summaries are
 descriptive only: they do not establish causation or predict a future outcome.
 If the database read fails, the API returns an error and Desk AI says the
-memory read is unavailable—not that the user has no history. The summary can
-inform advice only: it cannot alter settings, journal entries, positions, or
-trades, and it can never place or route an order.
+memory read is unavailable—not that the user has no history. The summary can inform Admin review only: it cannot alter settings, journal
+entries, positions, or trades, and it can never place or route an order.
 
 ## Overnight evidence and scenarios
 
-The carry brief remains rule-scored: Desk AI cannot change its deterministic
+The Admin-only carry brief remains rule-scored: Desk AI cannot change its deterministic
 band, the OI poll, CAS, app settings, code, or any order. It is a read-only
 analyst over the compact evidence submitted by the app—not an autonomous agent
 with tools to perform app or broker actions. The server reports timestamp

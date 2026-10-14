@@ -123,7 +123,7 @@ export default function StrikeTable({ current, previous, atm, timeframeMin, oiSe
             <span className="uppercase tracking-widest text-[9px] opacity-70 flex items-center gap-1">
               ATM IV Rank
               <InfoTip title="ATM IV Rank" testId="tip-iv-rank">
-                Where today&apos;s ATM option implied volatility (IV) sits inside the typical range of India VIX (7–35 %). 0 = extremely cheap (buy options), 100 = extremely rich (sell options). Rule of thumb: rank &gt; 70 favours option sellers, rank &lt; 30 favours option buyers, in between = neutral.
+                Where today&apos;s ATM option implied volatility (IV) sits inside its typical range (estimated using India VIX). A lower rank means IV is near the bottom of that range; a higher rank means it is near the top. The rank describes relative IV only and is not a trade signal.
               </InfoTip>
             </span>
             <div className="text-lg font-semibold font-mono-data">{atmRow.ivRank}<span className="text-xs opacity-70">/100</span></div>

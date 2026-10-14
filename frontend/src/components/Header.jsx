@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import BigClock from "@/components/BigClock";
 import GiftSessionsModal from "@/components/GiftSessionsModal";
-import { KeyRound, Bell, BellOff, Settings2, Download, Moon, Sun, PanelLeftClose, PanelLeftOpen, Volume2, Send, Database, UploadCloud, SlidersHorizontal, Shield, UserCheck, LogOut, X, BookOpen, Sparkles, Layers, ScrollText, Newspaper, Globe2, ServerCog } from "lucide-react";
+import { KeyRound, Bell, BellOff, Settings2, Download, Moon, Sun, PanelLeftClose, PanelLeftOpen, Volume2, Send, Database, UploadCloud, SlidersHorizontal, Shield, UserCheck, UserRound, LogOut, X, BookOpen, Sparkles, Layers, ScrollText, Newspaper, Globe2, ServerCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import DeskAiConfigMenu from "@/components/DeskAiConfigMenu";
@@ -72,17 +72,6 @@ function AdminToggleTile({ label, on, onChange, testId, className = "", disabled
   );
 }
 
-function IepPopupSwitch({ on, onChange, testId, className = "" }) {
-  return (
-    <AdminToggleTile
-      label="Indicative"
-      on={on}
-      onChange={onChange}
-      testId={testId}
-      className={className}
-    />
-  );
-}
 function HeaderTodayPnl({ enabled, status: _status, pollMs: _pollMs = 30_000, className, compact = false }) {
   const cached = readTodayPnlCache();
   const [pnl, setPnl] = useState(() => cached?.total ?? null);
@@ -179,6 +168,9 @@ export default function Header({
   current,
   dataStatus,
   onOpenCreds,
+  memberBrokerStatus = null,
+  onOpenMemberBroker,
+  memberCanUseBroker = false,
   onOpenMorningRefresh: _onOpenMorningRefresh, // kept for API compat; token refresh via Kite API
   onOpenTelegramPrefs,
   onOpenSettings,
@@ -188,6 +180,7 @@ export default function Header({
   onOpenApiConfiguration,
   onDownloadCsv,
   onOpenSounds,
+  showAlertSounds = true,
   onOpenUpload,
   notifEnabled,
   onToggleNotif,
@@ -226,12 +219,11 @@ export default function Header({
   onOpenMiSettings,
   onOpenAdrSettings,
   showDeskAi = false,
+  deskAiAvailable = true,
   onDeskAiChange,
   onOpenDeskAiPanel,
   onOpenDeskAiMobile,
   onToggleSlimStatusRail,
-  casIepPopup = true,
-  onToggleCasIepPopup,
 }) {
   const price = current?.price ?? 0;
   const pcr = current?.pcr ?? 0;
@@ -293,6 +285,49 @@ export default function Header({
   // Guests never see Admin/Kite. Prefer Dashboard's assumedAdmin; never promote guests.
   const isGuestUser = !demoMode && !!authState.is_guest && !assumedAdmin;
   const isAdmin = !demoMode && !isGuestUser && (devForce || !!assumedAdmin || (!!authState.is_admin && !authState.is_guest));
+  const isProMember = !demoMode && !!memberCanUseBroker;
+  const memberAccountMenu = (mobile = false) => {
+    const memberName = authState.guest_name || authState.membership?.email || "Member";
+    const memberEmail = authState.membership?.email;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid={mobile ? "member-account-trigger-mobile" : "member-account-trigger"}
+            aria-label={`Open account menu for ${memberName}`}
+            title="Account and plan"
+            className={`h-8 min-w-0 gap-1.5 rounded-md border-slate-200 bg-white px-2 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 ${mobile ? "w-8 px-0" : "max-w-28"}`}
+          >
+            <UserRound className="h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-400" />
+            {!mobile && <span className="max-w-16 truncate text-xs font-semibold">{memberName}</span>}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60" data-testid={mobile ? "member-account-menu-mobile" : "member-account-menu"}>
+          <DropdownMenuLabel className="min-w-0">
+            <span className="block truncate text-sm font-semibold">{memberName}</span>
+            {memberEmail && <span className="block truncate text-xs font-normal text-slate-500">{memberEmail}</span>}
+            {authState.membership?.plan && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wider text-emerald-700">{authState.membership.plan} plan</span>}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="member-account"
+            onSelect={() => window.location.assign("/account")}
+          >
+            <UserRound className="h-4 w-4" />
+            Account &amp; plan
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+  const brokerStatus = memberBrokerStatus || authState.user_kite || {};
+  const memberBrokerId = brokerStatus.connected && brokerStatus.kite_user_id
+    ? String(brokerStatus.kite_user_id)
+    : null;
+  const memberBrokerLabel = memberBrokerId || "Connect broker";
   const showHeaderPnl = isAdmin;
   const [errorUnseen, setErrorUnseen] = useState(0);
 
@@ -580,6 +615,7 @@ export default function Header({
               await logoutGuest();
               window.location.reload();
             };
+            if (authState.is_member) return memberAccountMenu(true);
             return (
               <div
                 className="flex flex-col items-start leading-tight min-w-0"
@@ -590,15 +626,31 @@ export default function Header({
                 </span>
                 <button
                   type="button"
-                  onClick={exitGuest}
-                  className="text-[9px] font-medium text-rose-600 hover:text-rose-700 hover:underline"
-                  data-testid="guest-session-exit-mobile"
-                >
-                  Exit
-                </button>
+                  onClick={authState.is_member ? () => window.location.assign("/account") : exitGuest}
+                  className={`text-[9px] font-medium hover:underline ${authState.is_member ? "text-emerald-700" : "text-rose-600 hover:text-rose-700"}`}
+                  data-testid={authState.is_member ? "member-account-mobile" : "guest-session-exit-mobile"}
+                >{authState.is_member ? "Account" : "Exit"}</button>
               </div>
             );
           })()}
+          {isProMember && (
+            <Button
+              type="button"
+              data-testid="header-member-broker-mobile"
+              variant="outline"
+              size="sm"
+              className={`h-8 max-w-28 shrink-0 truncate px-2 ${memberBrokerId
+                ? "border-emerald-300 bg-emerald-50 font-semibold text-emerald-700"
+                : "border-slate-200 bg-white text-slate-700"}`}
+              onClick={onOpenMemberBroker}
+              title={memberBrokerId
+                ? `Connected broker account ${memberBrokerId} · manage credentials`
+                : "Connect your broker account"}
+            >
+              <KeyRound className={`mr-1 h-3.5 w-3.5 shrink-0 ${memberBrokerId ? "text-emerald-600" : ""}`} />
+              <span className="truncate">{memberBrokerLabel}</span>
+            </Button>
+          )}
         </div>
         {showHeaderPnl && (
           <HeaderTodayPnl
@@ -610,7 +662,7 @@ export default function Header({
           />
         )}
         <div className="flex items-center gap-1 shrink-0 ml-auto">
-          {deskAiChipMobile}
+          {deskAiAvailable ? deskAiChipMobile : null}
           <Button
             data-testid="btn-toggle-compact-mobile"
             variant="outline" size="sm" className={toolBtn}
@@ -652,13 +704,15 @@ export default function Header({
                 {notifEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
                 {notifEnabled ? "Turn notifications off" : "Turn notifications on"}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="mobile-menu-sounds"
-                onSelect={(e) => { e.preventDefault(); onOpenSounds?.(); }}
-              >
-                <Volume2 className="w-4 h-4" />
-                Alert sounds
-              </DropdownMenuItem>
+              {showAlertSounds && (
+                <DropdownMenuItem
+                  data-testid="mobile-menu-sounds"
+                  onSelect={(e) => { e.preventDefault(); onOpenSounds?.(); }}
+                >
+                  <Volume2 className="w-4 h-4" />
+                  Alert sounds
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 data-testid="mobile-menu-csv"
                 onSelect={(e) => { e.preventDefault(); onDownloadCsv?.(); }}
@@ -707,12 +761,6 @@ export default function Header({
               <X className="w-4 h-4" />
             </button>
           </div>
-          <IepPopupSwitch
-            className="w-full"
-            on={casIepPopup}
-            onChange={onToggleCasIepPopup}
-            testId="mobile-toggle-iep-popup"
-          />
           <AdminToggleTile
             label="Site walkthrough"
             on={siteWalkthroughEnabled}
@@ -807,10 +855,12 @@ export default function Header({
             <ServerCog className="w-4 h-4 mr-1.5" />
             API
           </Button>
-          <Button data-testid="btn-mobile-sounds" variant="outline" size="sm" className="rounded-sm min-h-11" onClick={onOpenSounds}>
-            <Volume2 className="w-4 h-4 mr-1.5" />
-            Sounds
-          </Button>
+          {showAlertSounds && (
+            <Button data-testid="btn-mobile-sounds" variant="outline" size="sm" className="rounded-sm min-h-11" onClick={onOpenSounds}>
+              <Volume2 className="w-4 h-4 mr-1.5" />
+              Sounds
+            </Button>
+          )}
           <Button data-testid="btn-mobile-csv" variant="outline" size="sm" className="rounded-sm min-h-11" onClick={onDownloadCsv}>
             <Download className="w-4 h-4 mr-1.5" />
             CSV
@@ -834,7 +884,7 @@ export default function Header({
       {/* Row 1: brand + status + essential actions */}
       <div className={`px-3 sm:px-4 flex items-center gap-1.5 lg:gap-2 flex-nowrap min-w-0 ${headerRail ? "py-1" : "py-2 gap-2 lg:gap-3"}`}>
         <BrandMark compact={headerRail} className="shrink-0" />
-        {deskAiChipDesktop}
+        {deskAiAvailable ? deskAiChipDesktop : null}
 
         {/* VIX / GIFT — always visible; slim = chips, normal = stacked metrics */}
         <div className={`flex items-center ${headerRail ? "gap-1.5" : "gap-3"} pl-2 border-l border-slate-200 dark:border-slate-700 shrink-0`}>
@@ -942,6 +992,7 @@ export default function Header({
                 await logoutGuest();
                 window.location.reload();
               };
+              if (authState.is_member) return memberAccountMenu();
               return (
                 <div
                   className="hidden sm:flex flex-col items-end justify-center px-2.5 py-1 rounded-md border border-slate-200/80 bg-slate-50/90 dark:border-slate-700 dark:bg-slate-800/80 leading-tight"
@@ -955,20 +1006,39 @@ export default function Header({
                       role="tooltip"
                       className="pointer-events-none absolute right-0 bottom-full z-50 mb-1.5 hidden whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-medium text-white shadow-md group-hover:block dark:bg-slate-700"
                     >
-                      User auto exits at 6:00 AM
+                      {authState.is_member ? "Manage your plan and preferences" : "Guest access ends at 6:00 AM"}
                     </span>
                   </span>
                   <button
                     type="button"
-                    onClick={exitGuest}
-                    className="text-[10px] font-medium text-rose-600 hover:text-rose-700 hover:underline"
-                    data-testid="guest-session-exit"
-                  >
-                    Exit
-                  </button>
+                    onClick={authState.is_member ? () => window.location.assign("/account") : exitGuest}
+                    className={`text-[10px] font-medium hover:underline ${authState.is_member ? "text-emerald-700" : "text-rose-600 hover:text-rose-700"}`}
+                    data-testid={authState.is_member ? "member-account" : "guest-session-exit"}
+                  >{authState.is_member ? "Account" : "Exit"}</button>
                 </div>
               );
             })()
+          )}
+
+          {isProMember && (
+            <Button
+              type="button"
+              data-testid="header-member-broker"
+              variant="outline"
+              size="sm"
+              className={`h-8 max-w-36 truncate ${memberBrokerId
+                ? "border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+                : "border-slate-200 bg-white text-slate-700"}`}
+              onClick={onOpenMemberBroker}
+              title={memberBrokerId
+                ? `Connected broker account ${memberBrokerId} · manage credentials`
+                : brokerStatus.expired
+                  ? "Today's broker session is stale · connect to refresh"
+                  : "Connect your broker account"}
+            >
+              <KeyRound className={`mr-1.5 h-4 w-4 shrink-0 ${memberBrokerId ? "text-emerald-600" : ""}`} />
+              <span className="truncate">{memberBrokerLabel}</span>
+            </Button>
           )}
 
           {isAdmin && (
@@ -1023,13 +1093,15 @@ export default function Header({
                 {notifEnabled ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
                 {notifEnabled ? "Turn notifications off" : "Turn notifications on"}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="menu-open-sounds"
-                onSelect={(e) => { e.preventDefault(); onOpenSounds?.(); }}
-              >
-                <Volume2 className="w-4 h-4" />
-                Alert sounds
-              </DropdownMenuItem>
+              {showAlertSounds && (
+                <DropdownMenuItem
+                  data-testid="menu-open-sounds"
+                  onSelect={(e) => { e.preventDefault(); onOpenSounds?.(); }}
+                >
+                  <Volume2 className="w-4 h-4" />
+                  Alert sounds
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 data-testid="menu-download-csv"
                 onSelect={(e) => { e.preventDefault(); onDownloadCsv?.(); }}
@@ -1077,14 +1149,6 @@ export default function Header({
                   data-testid="menu-toggle-public-landing"
                 >
                   Public landing page
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                  checked={!!casIepPopup}
-                  onCheckedChange={(ck) => onToggleCasIepPopup?.(!!ck)}
-                  onSelect={(e) => e.preventDefault()}
-                  data-testid="menu-toggle-iep-popup"
-                >
-                  Indicative price popup
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={!!siteWalkthroughEnabled}
@@ -1307,12 +1371,6 @@ export default function Header({
           <div className="col-span-3 w-full px-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
             Admin Settings
           </div>
-          <IepPopupSwitch
-            className="w-full"
-            on={casIepPopup}
-            onChange={onToggleCasIepPopup}
-            testId="tablet-toggle-iep-popup"
-          />
           <AdminToggleTile
             label="Site walkthrough"
             on={siteWalkthroughEnabled}
@@ -1407,10 +1465,12 @@ export default function Header({
             <ServerCog className="w-4 h-4 mr-1.5" />
             API Configuration
           </Button>
-          <Button data-testid="btn-tablet-sounds" variant="outline" size="sm" className="rounded-sm" onClick={onOpenSounds}>
-            <Volume2 className="w-4 h-4 mr-1.5" />
-            Sounds
-          </Button>
+          {showAlertSounds && (
+            <Button data-testid="btn-tablet-sounds" variant="outline" size="sm" className="rounded-sm" onClick={onOpenSounds}>
+              <Volume2 className="w-4 h-4 mr-1.5" />
+              Sounds
+            </Button>
+          )}
           <Button data-testid="btn-tablet-csv" variant="outline" size="sm" className="rounded-sm" onClick={onDownloadCsv}>
             <Download className="w-4 h-4 mr-1.5" />
             CSV

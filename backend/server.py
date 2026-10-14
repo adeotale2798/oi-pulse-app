@@ -7,7 +7,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import os
 import asyncio
+import base64
+import binascii
 import gzip
+import hashlib
+import hmac
+import json
 import logging
 import math
 import re
@@ -49,6 +54,7 @@ from market_hours import (
 from gift_vix_service import extra_tickers
 from fii_dii_service import fii_dii
 from guest_access import require_approval_flag
+from local_dev_auth import local_test_password_matches, parse_local_test_users
 import event_risk_service as ers
 import trade_journal as journal
 import trade_ledger as ledger
@@ -83,6 +89,22 @@ LOCAL_DEV_ADMIN_BYPASS_ENABLED = os.environ.get("LOCAL_DEV_ADMIN_BYPASS", "false
 }
 if LOCAL_DEV_ADMIN_BYPASS_ENABLED and APP_ENV != "development":
     raise RuntimeError("LOCAL_DEV_ADMIN_BYPASS is allowed only when APP_ENV=development")
+try:
+    LOCAL_DEV_MEMBER_USERS = parse_local_test_users(
+        os.environ.get("LOCAL_DEV_MEMBER_USERS", ""),
+        APP_ENV,
+    )
+except ValueError as exc:
+    raise RuntimeError(str(exc)) from exc
+
+
+def _local_dev_member_account_emails():
+    plan_order = {"normal": 0, "premium": 1, "pro": 2}
+    return sorted(
+        LOCAL_DEV_MEMBER_USERS,
+        key=lambda email: (plan_order[LOCAL_DEV_MEMBER_USERS[email]["plan"]], email),
+    )
+
 
 # Create Mongo client and db during startup event to keep import-time footprint low.
 client = None
@@ -361,7 +383,12 @@ def _is_loopback_host(host: Optional[str]) -> bool:
 
 def _is_local_dev_admin_bypass_request(request: Request) -> bool:
     """Permit passwordless admin only for explicitly enabled loopback development."""
-    if not LOCAL_DEV_ADMIN_BYPASS_ENABLED or APP_ENV != "development":
+    return bool(LOCAL_DEV_ADMIN_BYPASS_ENABLED and _is_local_dev_request(request))
+
+
+def _is_local_dev_request(request: Request) -> bool:
+    """Keep local test identities bound to development and loopback HTTP requests."""
+    if APP_ENV != "development":
         return False
     client = request.client
     return bool(
@@ -397,13 +424,209 @@ async def require_admin(request: Request):
 
 
 async def require_desk_user(request: Request):
-    """Admin or approved guest — blocks fully anonymous callers."""
+    """Admin, approved guest, or durable Google member."""
     if await _is_admin_request(request):
         return "admin"
+    member = await _member_session_from_request(request)
+    if member:
+        await _require_member_route_access(request)
+        return "guest"
     guest = await _guest_from_request(request)
     if guest:
         return "guest"
     raise HTTPException(401, "Sign in required")
+
+
+MEMBER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+
+
+def _member_session_storage_id(token: str) -> str:
+    """Store only a one-way lookup key for the member's bearer token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _member_session_from_request(request: Request):
+    """Resolve durable Google member sessions independently of guest-door state."""
+    if db is None:
+        return None
+    token = (
+        _extract_bearer(request, "x-member-token")
+        or _extract_bearer(request, "x-guest-token")
+    )
+    if not token:
+        return None
+    token_key = _member_session_storage_id(token)
+    session = await _find_one_capped(
+        db.member_sessions,
+        {"_id": {"$in": [token_key, token]}},
+    )
+    if not session or session.get("revoked_at"):
+        return None
+    expires = session.get("expires_at")
+    if isinstance(expires, str):
+        try:
+            expires = datetime.fromisoformat(expires)
+        except ValueError:
+            return None
+    if not isinstance(expires, datetime):
+        return None
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if now >= expires:
+        return None
+    member_id = session.get("user_id")
+    if not member_id:
+        return None
+    member = await _find_one_capped(db.members, {"_id": member_id})
+    if not member or member.get("disabled_at"):
+        return None
+    if member.get("local_dev_test_account"):
+        local_email = str(member.get("email") or "").lower()
+        if (
+            not _is_local_dev_request(request)
+            or local_email not in LOCAL_DEV_MEMBER_USERS
+        ):
+            return None
+    try:
+        last_seen = session.get("last_seen_at")
+        if isinstance(last_seen, str):
+            last_seen = datetime.fromisoformat(last_seen)
+        if not isinstance(last_seen, datetime) or (now - last_seen).total_seconds() >= 60:
+            await db.member_sessions.update_one(
+                {"_id": session["_id"]},
+                {"$set": {
+                    "last_seen_at": now,
+                    "expires_at": now + timedelta(seconds=MEMBER_SESSION_TTL_SECONDS),
+                }},
+            )
+    except Exception:
+        pass
+    return {
+        "_id": token,
+        "name": member.get("name") or member.get("email") or "Member",
+        "email": member.get("email"),
+        "is_member": True,
+        "member_id": member_id,
+        "member": member,
+        "started_at": session.get("started_at"),
+        "expires_at": (now + timedelta(seconds=MEMBER_SESSION_TTL_SECONDS)).isoformat(),
+    }
+
+
+def _effective_member_plan(member: dict, now: Optional[datetime] = None) -> str:
+    """Grant paid features only for a current subscription or explicit admin grant."""
+    if not member or member.get("disabled_at"):
+        return "normal"
+    plan = str(member.get("plan") or "normal").lower()
+    if plan not in ("normal", "premium", "pro"):
+        return "normal"
+    if plan == "normal" or member.get("admin_plan_override"):
+        return plan
+    subscription = member.get("subscription") or {}
+    # Cancellation and payment/provider failure end paid entitlement immediately.
+    if subscription.get("status") != "active":
+        return "normal"
+    current_end = subscription.get("current_end")
+    if isinstance(current_end, (int, float)):
+        current_end = datetime.fromtimestamp(current_end, timezone.utc)
+    elif isinstance(current_end, str):
+        try:
+            current_end = datetime.fromisoformat(current_end)
+        except ValueError:
+            current_end = None
+    if current_end is None:
+        return "normal"
+    if current_end is not None:
+        if current_end.tzinfo is None:
+            current_end = current_end.replace(tzinfo=timezone.utc)
+        if current_end <= (now or datetime.now(timezone.utc)):
+            return "normal"
+    return plan
+
+
+async def _record_member_audit(
+    member_id: str,
+    event_type: str,
+    actor: str,
+    details: Optional[dict] = None,
+):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    await db.member_audit.insert_one({
+        "member_id": member_id,
+        "event_type": event_type,
+        "actor": actor,
+        "details": details or {},
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def _member_context(request: Request, feature: Optional[str] = None):
+    """Require a member identity and, when requested, its currently entitled feature."""
+    sess = await _member_session_from_request(request)
+    if not sess:
+        raise HTTPException(401, "Member sign-in required")
+    config = _platform_membership(await _load_platform_config())
+    member = sess["member"]
+    is_local_test = bool(
+        member.get("local_dev_test_account") and _is_local_dev_request(request)
+    )
+    if not config["experience_enabled"] and not is_local_test:
+        raise HTTPException(403, "Member experience is disabled")
+    plan = _effective_member_plan(member)
+    if feature:
+        from membership import plan_features
+        feature_config = config
+        if is_local_test:
+            # Local test identities exercise tier features without opening member rollout.
+            feature_config = {**config, "experience_enabled": True}
+        if feature not in plan_features(feature_config, plan):
+            raise HTTPException(403, "This feature is not included in your plan")
+    return sess, config, plan
+
+
+_MEMBER_ROUTE_FEATURES = (
+    ("/positions", "positions"),
+    ("/kite/user", "positions"),
+    ("/trades", "trade_journal"),
+    ("/journal", "trade_journal"),
+    ("/desk-ai", "desk_ai"),
+    ("/desk-guide", "desk_ai"),
+    ("/market-intel", "market_intel"),
+    ("/global-markets", "global_markets"),
+    ("/adrs", "global_markets"),
+    ("/alerts", "alerts"),
+)
+
+
+async def _require_member_route_access(request: Request):
+    path = request.url.path.removeprefix("/api")
+    feature = next(
+        (feature for prefix, feature in _MEMBER_ROUTE_FEATURES if path.startswith(prefix)),
+        None,
+    )
+    if feature:
+        await _member_context(request, feature)
+
+
+def require_member_feature(feature: str):
+    """Gate a shared-data API for paid members without changing legacy guest access."""
+    async def _check(request: Request):
+        if await _is_admin_request(request):
+            return True
+        sess = await _member_session_from_request(request)
+        if sess:
+            await _member_context(request, feature)
+        return True
+    return _check
+
+
+async def require_member(request: Request):
+    sess = await _member_session_from_request(request)
+    if not sess:
+        raise HTTPException(401, "Member sign-in required")
+    return sess
 
 
 async def _publisher_api_key_secret():
@@ -431,6 +654,11 @@ async def _publisher_api_key_secret():
 async def _load_user_kite_doc(guest_sess: Optional[dict]):
     if not guest_sess:
         return None
+    member_id = guest_sess.get("member_id")
+    if member_id:
+        by_member = await db.user_kite.find_one({"member_id": member_id})
+        if by_member:
+            return by_member
     if guest_sess.get("kite_access_token_enc"):
         return {
             "access_token_enc": guest_sess.get("kite_access_token_enc"),
@@ -461,12 +689,19 @@ async def _save_user_kite(guest_sess: dict, *, access_token: str, kite_user_id: 
         "access_token_enc": enc,
         "kite_user_id": uid or None,
         "valid_until": until.isoformat(),
-        "guest_token": guest_sess["_id"],
-        "guest_name": guest_sess.get("name"),
+        "guest_token": None if guest_sess.get("member_id") else guest_sess["_id"],
+        "member_id": guest_sess.get("member_id"),
+        "guest_name": guest_sess.get("name") if not guest_sess.get("member_id") else None,
         "ip": guest_sess.get("ip"),
         "updated_at": now_iso,
     }
-    if uid:
+    if guest_sess.get("member_id"):
+        await db.user_kite.update_one(
+            {"member_id": guest_sess["member_id"]},
+            {"$set": {**fields, "_id": f"member:{guest_sess['member_id']}"}},
+            upsert=True,
+        )
+    elif uid:
         await db.user_kite.update_one({"_id": uid}, {"$set": fields}, upsert=True)
     else:
         await db.user_kite.update_one(
@@ -474,27 +709,109 @@ async def _save_user_kite(guest_sess: dict, *, access_token: str, kite_user_id: 
             {"$set": {**fields, "_id": guest_sess["_id"]}},
             upsert=True,
         )
-    await db.guest_sessions.update_one(
-        {"_id": guest_sess["_id"]},
-        {"$set": {
-            "kite_access_token_enc": enc,
-            "kite_user_id": uid or None,
-            "kite_valid_until": until.isoformat(),
-        }},
-    )
+    if not guest_sess.get("member_id"):
+        await db.guest_sessions.update_one(
+            {"_id": guest_sess["_id"]},
+            {"$set": {
+                "kite_access_token_enc": enc,
+                "kite_user_id": uid or None,
+                "kite_valid_until": until.isoformat(),
+            }},
+        )
     return fields
+
+
+async def _bind_member_kite_identity(member_id: str, kite_user_id: Optional[str]) -> str:
+    """Bind a Google member to the first successful Kite account without race-based replacement."""
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    account_id = str(kite_user_id or "").strip().upper()
+    if not account_id:
+        raise HTTPException(400, "The broker did not return an account ID.")
+    member = await db.members.find_one(
+        {"_id": member_id},
+        {"linked_kite_user_id": 1},
+    )
+    if not member:
+        raise HTTPException(404, "Member account not found.")
+    existing_id = str(member.get("linked_kite_user_id") or "").strip().upper()
+    if not existing_id:
+        # Older member rows may already have a connected broker ID in user_kite.
+        saved_kite = await db.user_kite.find_one(
+            {"member_id": member_id},
+            {"kite_user_id": 1},
+        )
+        existing_id = str((saved_kite or {}).get("kite_user_id") or "").strip().upper()
+    identity_to_bind = existing_id or account_id
+    result = await db.members.update_one(
+        {
+            "_id": member_id,
+            "$or": [
+                {"linked_kite_user_id": {"$exists": False}},
+                {"linked_kite_user_id": None},
+                {"linked_kite_user_id": identity_to_bind},
+            ],
+        },
+        {"$set": {"linked_kite_user_id": identity_to_bind}},
+    )
+    if result.matched_count:
+        if identity_to_bind != account_id:
+            raise HTTPException(
+                403,
+                f"This Google account is already linked to Zerodha account {identity_to_bind}.",
+            )
+        return identity_to_bind
+    member = await db.members.find_one(
+        {"_id": member_id},
+        {"linked_kite_user_id": 1},
+    )
+    linked_id = str((member or {}).get("linked_kite_user_id") or "").strip().upper()
+    if linked_id:
+        if linked_id == account_id:
+            return linked_id
+        raise HTTPException(
+            403,
+            f"This Google account is already linked to Zerodha account {linked_id}.",
+        )
+    raise HTTPException(503, "Could not lock the broker account to this member.")
 
 
 async def _user_kite_client(guest_sess: Optional[dict]):
     from kiteconnect import KiteConnect
     from user_kite import public_status
     doc = await _load_user_kite_doc(guest_sess)
-    st = public_status(doc)
+    member_id = (guest_sess or {}).get("member_id")
+    if member_id:
+        member_api_key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+        member_api_secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+        st = {
+            **public_status(doc),
+            "credentials_configured": bool(member_api_key and member_api_secret),
+            "api_key_hint": f"••••{member_api_key[-4:]}" if member_api_key else None,
+            "credentials_updated_at": doc.get("credentials_updated_at") if doc else None,
+            "member_name": (guest_sess or {}).get("name"),
+            "member_email": (guest_sess or {}).get("email"),
+        }
+    else:
+        st = public_status(doc)
     if not st["connected"]:
         return None, st
-    key, _secret = await _publisher_api_key_secret()
+    if member_id:
+        key = member_api_key
+        if not key or not member_api_secret:
+            return None, {
+                **st,
+                "connected": False,
+                "error": "Save your broker API key and secret once before connecting today's session.",
+            }
+    else:
+        key, _secret = await _publisher_api_key_secret()
     if not key:
-        return None, {**st, "connected": False, "error": "Publisher Kite app is not configured."}
+        error = (
+            "Your broker app credentials are not configured."
+            if member_id else "Publisher Kite app is not configured."
+        )
+        return None, {**st, "connected": False, "error": error}
     try:
         token = _fernet().decrypt(doc["access_token_enc"].encode()).decode()
     except Exception:
@@ -513,6 +830,19 @@ async def _auth_user_kite_payload(is_admin: bool, guest_sess: Optional[dict]) ->
     if not guest_sess:
         return {"role": "guest", "connected": False, "expired": False, "kite_user_id": None, "publisher": False}
     doc = await _load_user_kite_doc(guest_sess)
+    if guest_sess.get("member_id"):
+        api_key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+        api_secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+        return {
+            "role": "member",
+            "publisher": False,
+            **public_status(doc),
+            "credentials_configured": bool(api_key and api_secret),
+            "api_key_hint": f"••••{api_key[-4:]}" if api_key else None,
+            "credentials_updated_at": doc.get("credentials_updated_at") if doc else None,
+            "member_name": guest_sess.get("name"),
+            "member_email": guest_sess.get("email"),
+        }
     return {"role": "guest", "publisher": False, **public_status(doc)}
 
 
@@ -638,6 +968,9 @@ async def _market_day_poll_watchdog():
 
 
 async def _guest_from_request(request: Request):
+    member = await _member_session_from_request(request)
+    if member:
+        return member
     tok = _extract_bearer(request, "x-guest-token")
     if not tok:
         return None
@@ -769,6 +1102,13 @@ async def _get_guest_require_approval() -> bool:
         return False
     doc = await _find_one_capped(db.settings, {"_id": "public_access"}) or {}
     return require_approval_flag(doc)
+
+
+async def _get_guest_login_enabled() -> bool:
+    if db is None:
+        return False
+    doc = await _load_platform_config()
+    return (doc or {}).get("guest_login_enabled") is True
 
 
 async def _revoke_guest_sessions(reason: Optional[str] = None):
@@ -3010,7 +3350,7 @@ async def ws_spot(websocket: WebSocket):
 
 
 @api_router.get("/alerts")
-async def get_alerts(limit: int = 50):
+async def get_alerts(request: Request, limit: int = Query(50, ge=1, le=100)):
     """Return alerts for the active board session only.
 
     Uses session_anchor_date so weekend/holiday views stay on the last session,
@@ -3020,11 +3360,25 @@ async def get_alerts(limit: int = 50):
     if db is None or not hasattr(db, "alerts"):
         return {"alerts": []}
 
+    member_sess = None if await _is_admin_request(request) else await _member_session_from_request(request)
+    prefs = None
+    cutoff = None
+    if member_sess:
+        _sess, membership_config, plan = await _member_context(request, "alerts")
+        if plan == "normal":
+            raise HTTPException(403, "Personalized alerts require Premium or Pro")
+        from membership import member_alert_purge_cutoff, normalize_member_preferences
+        prefs = normalize_member_preferences(
+            member_sess["member"].get("preferences"),
+            membership_config.get("preference_defaults"),
+        )
+        cutoff = member_alert_purge_cutoff()
+
     docs = []
     try:
         anchor = session_anchor_date()
         start_utc, _ = session_window_utc(anchor)
-        query = {"created_at": {"$gte": start_utc.isoformat()}}
+        query = {"created_at": {"$gte": (cutoff or start_utc).isoformat()}}
         try:
             if tracker:
                 tracker._refresh_alert_indices_for_today()
@@ -3038,19 +3392,116 @@ async def get_alerts(limit: int = 50):
                     # Never treat blank focus as "alert nobody".
                     from market_hours import default_alert_indices_for_today
                     focus = list(default_alert_indices_for_today() or [])
-                if focus:
+                if focus and not prefs:
                     query["index"] = {"$in": focus}
         except Exception:
             pass
 
+        if prefs:
+            query["index"] = {"$in": prefs["alert_indices"]}
         docs = await db.alerts.find(
             query,
-            {"_id": 0},
-        ).sort("created_at", -1).to_list(length=limit)
+            {"_id": 1, "index": 1, "created_at": 1, "price": 1, "atm": 1,
+             "direction": 1, "severity": 1, "strikes": 1, "message": 1},
+        ).sort("created_at", -1).to_list(length=500 if prefs else limit)
     except Exception:
         logger.warning("alerts query failed; returning empty list", exc_info=True)
         docs = []
 
+    if prefs:
+        if db is None:
+            raise HTTPException(503, "Alert inbox storage unavailable")
+        threshold = float(prefs["oi_change_threshold_pct"])
+        filtered = []
+        source_ids = [str(doc.get("_id")) for doc in docs if doc.get("_id") is not None]
+        shift_events = []
+        if prefs["alert_types"].get("oi_shift", True) and prefs["alert_indices"]:
+            from membership import member_alert_purge_cutoff
+            shift_events = await db.member_alert_events.find(
+                {
+                    "user_id": member_sess["member_id"],
+                    "created_at": {"$gte": (cutoff or member_alert_purge_cutoff()).isoformat()},
+                    "index": {"$in": prefs["alert_indices"]},
+                },
+                {
+                    "_id": 0,
+                    "alert_id": 1,
+                    "type": 1,
+                    "index": 1,
+                    "created_at": 1,
+                    "price": 1,
+                    "atm": 1,
+                    "direction": 1,
+                    "severity": 1,
+                    "strikes": 1,
+                    "message": 1,
+                    "side": 1,
+                    "window": 1,
+                    "value": 1,
+                },
+            ).sort("created_at", -1).to_list(length=500)
+        source_ids.extend(
+            str(event.get("alert_id"))
+            for event in shift_events
+            if event.get("alert_id")
+        )
+        seen_ids = set()
+        if source_ids:
+            seen_docs = await db.member_alerts.find(
+                {"user_id": member_sess["member_id"], "source_alert_id": {"$in": source_ids}},
+                {"_id": 0, "source_alert_id": 1, "seen": 1},
+            ).to_list(length=len(source_ids))
+            seen_ids = {
+                item["source_alert_id"] for item in seen_docs if item.get("seen") is True
+            }
+        for doc in docs:
+            if not prefs["alert_types"].get("oi_change", True):
+                continue
+            strikes = doc.get("strikes") or []
+            def crosses_threshold(strike):
+                if not isinstance(strike, dict):
+                    return False
+                try:
+                    return max(
+                        abs(float(strike.get("ce_pct") or 0)),
+                        abs(float(strike.get("pe_pct") or 0)),
+                    ) >= threshold
+                except (TypeError, ValueError):
+                    return False
+            if strikes and not any(crosses_threshold(strike) for strike in strikes):
+                continue
+            alert_id = str(doc.pop("_id", ""))
+            doc["alert_id"] = alert_id
+            if not alert_id:
+                continue
+            doc["type"] = "oi_change"
+            doc["seen"] = alert_id in seen_ids
+            if isinstance(doc.get("created_at"), str):
+                try:
+                    datetime.fromisoformat(doc["created_at"])
+                except ValueError:
+                    continue
+            filtered.append(doc)
+        shift_threshold = float(prefs["oi_shift_threshold_contracts"])
+        for event in shift_events:
+            try:
+                value = abs(float(event.get("value")))
+                datetime.fromisoformat(event["created_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if value < shift_threshold:
+                continue
+            alert_id = str(event.get("alert_id") or "")
+            if not alert_id:
+                continue
+            event["type"] = "oi_shift"
+            event["seen"] = alert_id in seen_ids
+            filtered.append(event)
+        filtered.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        docs = filtered[:limit]
+    else:
+        for doc in docs:
+            doc.pop("_id", None)
     return {"alerts": docs}
 
 
@@ -3412,6 +3863,19 @@ async def auth_logout(request: Request):
     tok = _extract_bearer(request, "x-admin-token")
     if tok:
         await db.admin_sessions.delete_one({"_id": tok})
+    member_token = (
+        _extract_bearer(request, "x-member-token")
+        or _extract_bearer(request, "x-guest-token")
+    )
+    if member_token and db is not None:
+        await db.member_sessions.update_one(
+            {"_id": {"$in": [_member_session_storage_id(member_token), member_token]},
+             "revoked_at": {"$exists": False}},
+            {"$set": {
+                "revoked_at": datetime.now(timezone.utc),
+                "revoked_reason": "logout",
+            }},
+        )
     # Also clear remember-me for this IP if present
     ip = _client_ip(request)
     if ip:
@@ -3438,6 +3902,8 @@ async def auth_guest_start(payload: GuestSessionIn, request: Request):
     """
     if await _get_maintenance_state():
         raise HTTPException(503, "Desk is preparing for a short update. Please try again soon.")
+    if not await _get_guest_login_enabled():
+        raise HTTPException(403, "Guest sign-in is disabled. Please sign in with Google.")
     open_, _ = await _get_public_access_state()
     if not open_:
         raise HTTPException(403, "Public access is not open. Please ask the admin to give access.")
@@ -3489,6 +3955,8 @@ async def auth_guest_start(payload: GuestSessionIn, request: Request):
 @api_router.get("/auth/access-request/{request_id}")
 async def auth_access_request_status(request_id: str, request: Request):
     """Guest polls this while waiting for admin approve/reject."""
+    if not await _get_guest_login_enabled():
+        raise HTTPException(403, "Guest sign-in is disabled. Please sign in with Google.")
     doc = await db.access_requests.find_one({"_id": request_id})
     if not doc:
         raise HTTPException(404, "Request not found")
@@ -3550,6 +4018,17 @@ async def auth_guest_logout(request: Request):
             )
         except Exception:
             pass
+        try:
+            await db.member_sessions.update_one(
+                {"_id": {"$in": [_member_session_storage_id(tok), tok]},
+                 "revoked_at": {"$exists": False}},
+                {"$set": {
+                    "revoked_at": datetime.now(timezone.utc),
+                    "revoked_reason": "logout",
+                }},
+            )
+        except Exception:
+            pass
     return {"ok": True}
 
 
@@ -3566,6 +4045,18 @@ async def auth_state(request: Request):
             "public_access_expires_at": None,
             "is_admin": _is_local_dev_admin_bypass_request(request),
             "is_guest": False,
+            "is_member": False,
+            "google_login_enabled": False,
+            "guest_login_enabled": False,
+            "local_dev_member_login_enabled": bool(
+                LOCAL_DEV_MEMBER_USERS and _is_local_dev_request(request)
+            ),
+            "local_dev_member_accounts": (
+                _local_dev_member_account_emails()
+                if _is_local_dev_request(request)
+                else []
+            ),
+            "membership_signup_enabled": False,
             "guest_name": None,
             "needs_guest_name": False,
             "auth_unavailable": True,
@@ -3577,6 +4068,14 @@ async def auth_state(request: Request):
     open_, expires_at_iso = await _get_public_access_state()
     platform_doc = await _load_platform_config()
     public_landing_enabled = bool((platform_doc or {}).get("public_landing_enabled", False))
+    google_settings = (platform_doc or {}).get("google") or {}
+    google_login_enabled = bool(
+        google_settings.get("enabled")
+        and google_settings.get("client_id_enc")
+        and google_settings.get("client_secret_enc")
+    )
+    guest_login_enabled = (platform_doc or {}).get("guest_login_enabled") is True
+    member_config = _platform_membership(platform_doc)
     maintenance_mode = await _get_maintenance_state()
     sitewalkthrough_enabled = await _get_sitewalkthrough_enabled()
     if maintenance_mode:
@@ -3587,8 +4086,9 @@ async def auth_state(request: Request):
     is_guest = guest_sess is not None
     admin_name = ADMIN_USERNAME if is_admin else None
     guest_name = guest_sess.get("name") if is_guest else None
-    needs_guest_name = open_ and not is_admin and not is_guest
-    requires_login = (not open_) and (not is_admin)
+    needs_guest_name = open_ and guest_login_enabled and not is_admin and not is_guest
+    is_member = bool(guest_sess and guest_sess.get("is_member"))
+    requires_login = (not open_) and (not is_admin) and not is_member
     admin_session_expires_at = None
     if is_admin and admin_sess:
         try:
@@ -3607,7 +4107,7 @@ async def auth_state(request: Request):
     auto_guest_expires_in = None
     auto_guest_expires_at = None
     guest_expires_at = None
-    if is_guest and guest_sess:
+    if is_guest and guest_sess and not is_member:
         guest_expires_at = guest_sess.get("expires_at")
         if not guest_expires_at:
             try:
@@ -3615,6 +4115,45 @@ async def auth_state(request: Request):
                 guest_expires_at = _guest_expiry_from_start(started).isoformat()
             except Exception:
                 guest_expires_at = _next_6am_ist_utc().isoformat()
+    member_summary = None
+    if is_member and guest_sess:
+        plan = _effective_member_plan(guest_sess.get("member") or {})
+        from membership import normalize_member_preferences, plan_features
+        member_record = guest_sess.get("member") or {}
+        feature_config = member_config
+        if member_record.get("local_dev_test_account") and _is_local_dev_request(request):
+            # Keep auth-state entitlements consistent with local-only member API gates.
+            feature_config = {**member_config, "experience_enabled": True}
+        plan_config = feature_config["plans"].get(plan)
+        subscription = member_record.get("subscription") or {}
+        paid_plans_ready = bool(
+            feature_config["experience_enabled"]
+            and feature_config["paid_subscriptions_enabled"]
+            and _billing_readiness(platform_doc or {}, feature_config)["ready"]
+        )
+        member_summary = {
+            "plan": plan,
+            "enabled": bool(
+                feature_config["experience_enabled"]
+                and plan_config
+                and plan_config["enabled"]
+            ),
+            "available_paid_plans": [
+                plan_id
+                for plan_id in ("premium", "pro")
+                if paid_plans_ready and feature_config["plans"][plan_id]["enabled"]
+            ],
+            "features": sorted(plan_features(feature_config, plan)),
+            "email": member_record.get("email"),
+            "subscription": {
+                "status": subscription.get("status"),
+                "current_end": subscription.get("current_end"),
+            },
+            "preferences": normalize_member_preferences(
+                member_record.get("preferences"),
+                member_config.get("preference_defaults"),
+            ),
+        }
     ip = _client_ip(request)
     pending_access_count = 0
     if is_admin:
@@ -3629,6 +4168,21 @@ async def auth_state(request: Request):
         "is_admin": is_admin,
         "local_dev_admin_bypass": _is_local_dev_admin_bypass_request(request),
         "is_guest": is_guest,
+        "is_member": is_member,
+        "membership": member_summary,
+        "google_login_enabled": google_login_enabled,
+        "guest_login_enabled": guest_login_enabled,
+        "local_dev_member_login_enabled": bool(
+            LOCAL_DEV_MEMBER_USERS and _is_local_dev_request(request)
+        ),
+        "local_dev_member_accounts": (
+            _local_dev_member_account_emails()
+            if _is_local_dev_request(request)
+            else []
+        ),
+        "membership_signup_enabled": bool(
+            member_config["experience_enabled"] and member_config["signup_enabled"]
+        ),
         "guest_name": guest_name,
         "needs_guest_name": needs_guest_name,
         "suggested_guest_name": suggested_guest_name,
@@ -4460,6 +5014,11 @@ class UserKiteSessionIn(BaseModel):
     request_token: str
 
 
+class UserKiteCredentialsIn(BaseModel):
+    api_key: str
+    api_secret: str
+
+
 @api_router.get("/kite/user/status")
 async def kite_user_status(request: Request, role: str = Depends(require_desk_user)):
     from user_kite import public_status
@@ -4474,8 +5033,24 @@ async def kite_user_status(request: Request, role: str = Depends(require_desk_us
             "publisher": True,
         }
     guest = await _guest_from_request(request)
+    if guest and guest.get("member_id"):
+        await _member_context(request, "positions")
     doc = await _load_user_kite_doc(guest)
     st = public_status(doc)
+    if guest and guest.get("member_id"):
+        api_key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+        api_secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+        return {
+            "role": "member",
+            "publisher": False,
+            "linked_kite_user_id": (guest.get("member") or {}).get("linked_kite_user_id"),
+            "credentials_configured": bool(api_key and api_secret),
+            "api_key_hint": f"••••{api_key[-4:]}" if api_key else None,
+            "credentials_updated_at": doc.get("credentials_updated_at") if doc else None,
+            "member_name": guest.get("name"),
+            "member_email": guest.get("email"),
+            **st,
+        }
     key, secret = await _publisher_api_key_secret()
     return {
         "role": "guest",
@@ -4485,35 +5060,160 @@ async def kite_user_status(request: Request, role: str = Depends(require_desk_us
     }
 
 
+@api_router.put("/kite/user/credentials")
+async def save_user_kite_credentials(
+    payload: UserKiteCredentialsIn,
+    request: Request,
+    role: str = Depends(require_desk_user),
+):
+    if role != "guest":
+        raise HTTPException(400, "Admin credentials are managed in the admin credentials screen.")
+    guest = await _guest_from_request(request)
+    if not guest:
+        raise HTTPException(401, "Sign in required")
+    member_id = guest.get("member_id")
+    if not member_id:
+        raise HTTPException(403, "Personal broker app credentials are available to Pro members.")
+    await _member_context(request, "positions")
+    api_key = str(payload.api_key or "").strip()
+    api_secret = str(payload.api_secret or "").strip()
+    if not api_key or not api_secret:
+        raise HTTPException(422, "Enter both your broker API key and API secret.")
+    if len(api_key) > 256 or len(api_secret) > 1024:
+        raise HTTPException(422, "Broker credentials exceed the supported length.")
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+
+    now = datetime.now(timezone.utc).isoformat()
+    previous = await db.user_kite.find_one(
+        {"member_id": member_id},
+        {"_id": 1, "api_key_enc": 1, "api_secret_enc": 1, "kite_user_id": 1},
+    )
+    if previous and previous.get("kite_user_id"):
+        await _bind_member_kite_identity(member_id, previous["kite_user_id"])
+    await db.user_kite.update_one(
+        {"member_id": member_id},
+        {
+            "$set": {
+                "_id": f"member:{member_id}",
+                "member_id": member_id,
+                "api_key_enc": _fernet().encrypt(api_key.encode()).decode(),
+                "api_secret_enc": _fernet().encrypt(api_secret.encode()).decode(),
+                "credentials_updated_at": now,
+                "updated_at": now,
+            },
+            # A token signed by a different app key must never be reused.
+            "$unset": {
+                "access_token_enc": "",
+                "kite_user_id": "",
+                "valid_until": "",
+            },
+        },
+        upsert=True,
+    )
+    await _record_member_audit(
+        member_id,
+        "broker_credentials_saved",
+        "member",
+        {"replaced": bool(previous and previous.get("api_key_enc") and previous.get("api_secret_enc"))},
+    )
+    return {"ok": True, "credentials_configured": True, "connected": False}
+
+
+@api_router.get("/membership/broker-credentials")
+async def membership_broker_credentials_status(request: Request):
+    session = await _member_session_from_request(request)
+    if not session:
+        raise HTTPException(401, "Member sign-in required")
+    member_id = session["member_id"]
+    doc = await db.user_kite.find_one(
+        {"member_id": member_id},
+        {"api_key_enc": 1, "api_secret_enc": 1, "access_token_enc": 1,
+         "kite_user_id": 1, "valid_until": 1, "credentials_updated_at": 1},
+    ) if db is not None else None
+    member = await db.members.find_one(
+        {"_id": member_id},
+        {"linked_kite_user_id": 1},
+    ) if db is not None else None
+    from user_kite import public_status
+    api_key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+    api_secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+    return {
+        "credentials_configured": bool(api_key and api_secret),
+        "api_key_hint": f"••••{api_key[-4:]}" if api_key else None,
+        "credentials_updated_at": doc.get("credentials_updated_at") if doc else None,
+        "linked_kite_user_id": (member or {}).get("linked_kite_user_id"),
+        **public_status(doc),
+    }
+
+
+@api_router.delete("/membership/broker-credentials")
+async def delete_user_kite_credentials(request: Request):
+    session = await _member_session_from_request(request)
+    if not session:
+        raise HTTPException(401, "Member sign-in required")
+    member_id = session["member_id"]
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    previous = await db.user_kite.find_one(
+        {"member_id": member_id},
+        {"kite_user_id": 1},
+    )
+    if previous and previous.get("kite_user_id"):
+        await _bind_member_kite_identity(member_id, previous["kite_user_id"])
+    result = await db.user_kite.delete_one({"member_id": member_id})
+    if result.deleted_count:
+        await _record_member_audit(member_id, "broker_credentials_deleted", "member")
+    return {"ok": True, "credentials_configured": False, "connected": False}
+
+
 @api_router.get("/kite/user/callback")
 async def kite_user_callback(
     request: Request,
     request_token: Optional[str] = None,
     status: Optional[str] = None,
 ):
-    """Kite Connect redirect helper — bounce to the SPA with the one-time token."""
+    """Bridge Kite's registered server callback to the SPA token exchange page."""
     from fastapi.responses import RedirectResponse
     from kite_callback_origin import kite_spa_origin
     origin = kite_spa_origin(request)
-    qs = []
-    if request_token:
-        qs.append(f"request_token={request_token}")
-    if status:
-        qs.append(f"status={status}")
+    from urllib.parse import urlencode
+
+    qs = urlencode({
+        key: value
+        for key, value in {
+            "request_token": request_token,
+            "status": status,
+        }.items()
+        if value
+    })
     dest = f"{origin}/kite-callback"
     if qs:
-        dest = dest + "?" + "&".join(qs)
+        dest = f"{dest}?{qs}"
     return RedirectResponse(dest, status_code=302)
 
 
 @api_router.get("/kite/user/login-url")
-async def kite_user_login_url(_role: str = Depends(require_desk_user)):
-    key, secret = await _publisher_api_key_secret()
+async def kite_user_login_url(request: Request, _role: str = Depends(require_desk_user)):
+    sess = await _member_session_from_request(request)
+    if sess:
+        await _member_context(request, "positions")
+        doc = await _load_user_kite_doc(sess)
+        key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+        secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+        if not key or not secret:
+            raise HTTPException(400, "Save your broker API key and API secret before generating a login link.")
+    else:
+        key, secret = await _publisher_api_key_secret()
     if not key or not secret:
         raise HTTPException(400, "Publisher Kite app is not configured (API key + secret).")
+    from kite_callback_origin import kite_spa_origin
+    from urllib.parse import urlencode
+    redirect_uri = f"{kite_spa_origin(request)}/api/kite/user/callback"
     return {
-        "login_url": f"https://kite.zerodha.com/connect/login?v=3&api_key={key}",
-        "hint": "Set the Kite Connect redirect URL to https://striklenz.com/kite-callback (not aaisnamkeen.com).",
+        "login_url": "https://kite.zerodha.com/connect/login?" + urlencode({"v": "3", "api_key": key}),
+        "redirect_uri": redirect_uri,
+        "hint": f"Set your broker app redirect URL to exactly {redirect_uri}.",
     }
 
 
@@ -4525,10 +5225,19 @@ async def kite_user_session(payload: UserKiteSessionIn, request: Request, role: 
     guest = await _guest_from_request(request)
     if not guest:
         raise HTTPException(401, "Guest session required")
+    if guest.get("member_id"):
+        await _member_context(request, "positions")
     req = str(payload.request_token or "").strip()
     if not req:
         raise HTTPException(400, "request_token required")
-    key, secret = await _publisher_api_key_secret()
+    if guest.get("member_id"):
+        doc = await _load_user_kite_doc(guest)
+        key = _decrypt_safe(doc.get("api_key_enc")) if doc else None
+        secret = _decrypt_safe(doc.get("api_secret_enc")) if doc else None
+        if not key or not secret:
+            raise HTTPException(400, "Save your broker API key and API secret before connecting.")
+    else:
+        key, secret = await _publisher_api_key_secret()
     if not key or not secret:
         raise HTTPException(400, "Publisher Kite app is not configured.")
     try:
@@ -4541,8 +5250,15 @@ async def kite_user_session(payload: UserKiteSessionIn, request: Request, role: 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(400, _friendly_kite_connect_error(e))
+        detail = (
+            "Broker login was not accepted. Check the request token and saved credentials, then try again."
+            if guest.get("member_id")
+            else _friendly_kite_connect_error(e)
+        )
+        raise HTTPException(400, detail)
     uid = data.get("user_id")
+    if guest.get("member_id"):
+        await _bind_member_kite_identity(guest["member_id"], uid)
     saved = await _save_user_kite(guest, access_token=access_token, kite_user_id=uid)
     return {
         "ok": True,
@@ -4559,15 +5275,26 @@ async def kite_user_disconnect(request: Request, role: str = Depends(require_des
     guest = await _guest_from_request(request)
     if not guest:
         raise HTTPException(401, "Guest session required")
-    await db.guest_sessions.update_one(
-        {"_id": guest["_id"]},
-        {"$unset": {"kite_access_token_enc": "", "kite_user_id": "", "kite_valid_until": ""}},
-    )
-    tok = guest["_id"]
-    await db.user_kite.update_many(
-        {"guest_token": tok},
-        {"$unset": {"access_token_enc": "", "valid_until": ""}},
-    )
+    if guest.get("member_id"):
+        # Daily sign-out must not force Pro members to re-enter long-lived app keys.
+        await db.user_kite.update_one(
+            {"member_id": guest["member_id"]},
+            {"$unset": {
+                "access_token_enc": "",
+                "kite_user_id": "",
+                "valid_until": "",
+            }},
+        )
+        await _record_member_audit(guest["member_id"], "broker_session_disconnected", "member")
+    else:
+        await db.guest_sessions.update_one(
+            {"_id": guest["_id"]},
+            {"$unset": {"kite_access_token_enc": "", "kite_user_id": "", "kite_valid_until": ""}},
+        )
+        await db.user_kite.update_many(
+            {"guest_token": guest["_id"]},
+            {"$unset": {"access_token_enc": "", "valid_until": ""}},
+        )
     return {"ok": True, "connected": False}
 
 
@@ -4583,6 +5310,17 @@ async def get_positions(
     Guests use their own access_token — never the publisher desk token.
     """
     kite = None
+    member_session = await _member_session_from_request(request)
+    member_journal_enabled = False
+    if member_session:
+        _, member_config, member_plan = await _member_context(request, "positions")
+        from membership import plan_features
+        if (
+            member_session["member"].get("local_dev_test_account")
+            and _is_local_dev_request(request)
+        ):
+            member_config = {**member_config, "experience_enabled": True}
+        member_journal_enabled = "trade_journal" in plan_features(member_config, member_plan)
 
     async def _note_token_gap():
         try:
@@ -4597,15 +5335,33 @@ async def get_positions(
         if not kite:
             expired = bool(st.get("expired"))
             await _note_token_gap()
+            if guest and guest.get("member_id"):
+                if expired:
+                    connect_message = (
+                        "Today's broker session is stale. Your saved app credentials are still secure; "
+                        "add today's request token to refresh your Positions."
+                    )
+                elif st.get("credentials_configured"):
+                    connect_message = (
+                        "Your broker app credentials are saved securely. Add today's request token "
+                        "to connect and load your Positions."
+                    )
+                else:
+                    connect_message = (
+                        "Save your broker API key and secret once, then add a fresh request token "
+                        "each trading day to load your Positions."
+                    )
+            else:
+                connect_message = (
+                    "Your Kite login expired around 06:00 IST. Reconnect to load today's book."
+                    if expired
+                    else "Connect your Zerodha account to load your positions."
+                )
             return {
                 "mode": "user",
                 "positions": [],
                 "funds": None,
-                "error": (
-                    "Your Kite login expired around 06:00 IST. Reconnect to load today's book."
-                    if expired
-                    else "Connect your Zerodha account to load your positions."
-                ),
+                "error": connect_message,
                 "kite_connected": False,
                 "connect_required": True,
                 "user_kite": st,
@@ -4678,13 +5434,30 @@ async def get_positions(
             tracker.last_error = msg
         if tokenish and role == "guest":
             await _note_token_gap()
+            member_book = bool(guest and guest.get("member_id"))
+            if member_book:
+                await db.user_kite.update_one(
+                    {"member_id": guest["member_id"]},
+                    {"$unset": {
+                        "access_token_enc": "",
+                        "kite_user_id": "",
+                        "valid_until": "",
+                    }},
+                )
+                st = {**st, "connected": False, "expired": True}
             return {
                 "mode": "user",
                 "positions": [],
                 "funds": None,
-                "error": "Your Kite login expired or was rejected. Reconnect Zerodha for today's book.",
+                "error": (
+                    "Today's broker session is stale or was rejected. Add a fresh request token "
+                    "to refresh your Positions."
+                    if member_book
+                    else "Your Kite login expired or was rejected. Reconnect Zerodha for today's book."
+                ),
                 "kite_connected": False,
                 "connect_required": True,
+                **({"user_kite": st} if role == "guest" else {}),
                 "transient": False,
                 "token_issue": True,
             }
@@ -4713,6 +5486,7 @@ async def get_positions(
             "funds": None,
             "error": err_out,
             "kite_connected": True,
+            **({"user_kite": st} if role == "guest" else {}),
             "transient": not tokenish,
             "token_issue": tokenish,
             "maintenance": bool(maint and maint.get("active")),
@@ -5083,6 +5857,7 @@ async def get_positions(
         "transient": False,
         "token_issue": False,
         "maintenance": False,
+        **({"user_kite": st} if role == "guest" else {}),
     }
     if not out:
         try:
@@ -5116,6 +5891,16 @@ async def get_positions(
             asyncio.create_task(_snapshot_trade_journal(result))
     except Exception:
         pass
+    if (
+        role == "guest"
+        and member_session
+        and member_journal_enabled
+        and not result.get("error")
+        and not result.get("token_issue")
+    ):
+        asyncio.create_task(
+            _snapshot_member_trade_journal(member_session["member_id"], result)
+        )
     try:
         owner_id = await _ledger_owner(request, role)
         if not result.get("error") and not result.get("token_issue"):
@@ -5150,6 +5935,8 @@ async def _ledger_owner(request: Optional[Request], role: str) -> str:
     guest = await _guest_from_request(request)
     if not guest:
         return "guest:unknown"
+    if guest.get("member_id"):
+        return f"member:{guest['member_id']}"
     try:
         doc = await _load_user_kite_doc(guest)
     except Exception:
@@ -5173,9 +5960,14 @@ async def _persist_trade_ledger(
     feed_ok: bool = True,
 ) -> None:
     """Upsert trade cycles from the live book. No-ops on Mongo errors."""
-    # The Journal preference suppresses only the admin's cycle history; guest books remain owner-scoped and unaffected.
+    # Member cycle capture is a separate opt-in; guest history stays unchanged and owner-scoped.
     if owner_id == "admin" and not _live_settings().get("trade_cycle_saving_enabled", True):
         return
+    if owner_id.startswith("member:"):
+        member_id = owner_id.split(":", 1)[1]
+        member = await _find_one_capped(db.members if db is not None else None, {"_id": member_id})
+        if not (member or {}).get("preferences", {}).get("trade_cycle_persistence_enabled", False):
+            return
     if db is None or not owner_id:
         return
     now = now_ist()
@@ -5452,6 +6244,49 @@ async def _snapshot_trade_journal(
             )
         except Exception:
             pass
+
+
+async def _snapshot_member_trade_journal(member_id: str, payload: Dict[str, Any]) -> None:
+    """Store a member-owned P&L summary without persisting broker position legs."""
+    if db is None or not member_id:
+        return
+    now = now_ist()
+    day = journal.journal_session_ymd(now)
+    if not journal.iso_is_trading_day(day):
+        return
+    if payload.get("error") or payload.get("token_issue"):
+        return
+    try:
+        snap = journal.snapshot_from_positions(payload, date=day)
+        existing = await db.member_journal.find_one({"user_id": member_id, "date": day})
+        fields = journal.apply_snapshot(existing, snap, now=now)
+        if not fields:
+            return
+        # Member journals retain only day-level aggregates; detailed fills and
+        # position legs remain governed by the separate admin-controlled cycle opt-in.
+        aggregate_keys = {
+            "date", "trading_date", "pnl_total", "pnl_open", "pnl_exited",
+            "booked_pnl", "exited_only_pnl", "open_count", "exited_count",
+            "partial_count", "trade_count", "win_trades", "loss_trades",
+            "index_pnl", "booked_index_pnl", "snapshot_at", "eod_locked",
+            "eod_locked_at", "frozen_pnl", "funds_base", "funds_total",
+            "funds_close", "inferred_cashflow",
+        }
+        summary = {key: value for key, value in fields.items() if key in aggregate_keys}
+        if not summary:
+            return
+        await db.member_journal.update_one(
+            {"user_id": member_id, "date": day},
+            {"$set": summary, "$setOnInsert": {
+                "user_id": member_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+    except Exception:
+        logging.getLogger("server").exception(
+            "member trade journal snapshot failed for %s", day,
+        )
 
 
 async def _journal_eod_lock_loop() -> None:
@@ -6254,9 +7089,20 @@ async def _persist_cas_auto_log() -> None:
             logger.debug("cas auto log persist skipped", exc_info=True)
 
 
+async def require_cas_desk_user(request: Request):
+    """Allow admin/guest CAS use while keeping this protected desk out of member plans."""
+    if await _is_admin_request(request):
+        return "admin"
+    if await _member_session_from_request(request):
+        raise HTTPException(403, "CAS is not available to member accounts")
+    if await _guest_from_request(request):
+        return "guest"
+    raise HTTPException(401, "Sign in required")
+
+
 @api_router.get("/cas/status")
-async def cas_status(role: str = Depends(require_desk_user)):
-    """CAS desk status — admin + guest (read-only for guests)."""
+async def cas_status(role: str = Depends(require_cas_desk_user)):
+    """CAS desk status — admin + guest (read-only for guests); never member accounts."""
     import cas_bridge
 
     try:
@@ -6401,8 +7247,8 @@ async def cas_auto_trade_inject(
 
 
 @api_router.post("/cas/backtest")
-async def cas_backtest(payload: CasBacktestIn, role: str = Depends(require_desk_user)):
-    """Run CAS expiry-day backtest (no live orders)."""
+async def cas_backtest(payload: CasBacktestIn, role: str = Depends(require_cas_desk_user)):
+    """Run CAS expiry-day backtest for admins/guests, never member accounts."""
     import cas_bridge
 
     try:
@@ -6638,8 +7484,14 @@ class DeskAiToggleIn(BaseModel):
 
 
 @api_router.post("/desk-ai")
-async def update_desk_ai(payload: DeskAiToggleIn, role: str = Depends(require_desk_user)):
+async def update_desk_ai(
+    payload: DeskAiToggleIn,
+    request: Request,
+    role: str = Depends(require_desk_user),
+):
     """Desk-wide on/off plus per-surface ticks. Radar stays admin-only."""
+    if await _member_session_from_request(request):
+        await _member_context(request, "desk_ai")
     dump = payload.model_dump()
     patch = {}
     if dump.get("desk_ai_show") is not None:
@@ -6662,15 +7514,20 @@ async def update_desk_ai(payload: DeskAiToggleIn, role: str = Depends(require_de
 @api_router.get("/desk-outside")
 async def get_desk_outside(
     index: Optional[str] = Query(None),
+    request: Request = None,
     role: str = Depends(require_desk_user),
 ):
     """Heavyweight cash movers + news. MCX tape only when that name is selected."""
+    if request and await _member_session_from_request(request):
+        await _member_context(request, "desk_ai")
     return await desk_outside_svc.snapshot(db, tracker, index=index)
 
 
 @api_router.get("/desk-guide")
-async def get_desk_guide(role: str = Depends(require_desk_user)):
+async def get_desk_guide(request: Request, role: str = Depends(require_desk_user)):
     """LLM availability for the carry-brief copilot. No Kite secrets."""
+    if await _member_session_from_request(request):
+        await _member_context(request, "desk_ai")
     return desk_guide_svc.status()
 
 
@@ -6681,6 +7538,11 @@ async def post_desk_guide(
     role: str = Depends(require_desk_user),
 ):
     """Coach over outside tape (movers/news) plus clipped book. Optional GPT."""
+    if await _member_session_from_request(request):
+        await _member_context(request, "desk_ai")
+    # This response includes explicit trade actions; non-admin surfaces use market data only.
+    if role != "admin":
+        raise HTTPException(403, "Trade guidance is available to Admin only")
     payload = body.model_dump()
     flags = resolve_desk_ai(tracker.settings if tracker else {})
     surface = str(payload.get("surface") or "").lower()
@@ -6745,11 +7607,21 @@ async def desk_memory(
 
 # ------------------- Lifecycle -------------------
 import market_intel_api
-market_intel_api.mount(api_router, require_admin=require_admin, require_desk_user=require_desk_user)
+market_intel_api.mount(
+    api_router,
+    require_admin=require_admin,
+    require_desk_user=require_desk_user,
+    require_member_feature=require_member_feature,
+)
 import adr_api
 adr_api.mount(api_router, require_admin=require_admin, require_desk_user=require_desk_user)
 import global_markets_api
-global_markets_api.mount(api_router, require_desk_user=require_desk_user, require_admin=require_admin)
+global_markets_api.mount(
+    api_router,
+    require_desk_user=require_desk_user,
+    require_admin=require_admin,
+    require_member_feature=require_member_feature,
+)
 import market_memory_api
 market_memory_api.mount(api_router, require_desk_user=require_desk_user)
 # ---------------------------------------------------------------------------
@@ -6758,6 +7630,9 @@ market_memory_api.mount(api_router, require_desk_user=require_desk_user)
 # All secrets are encrypted at rest and NEVER returned to the client.
 # ---------------------------------------------------------------------------
 PLATFORM_CONFIG_ID = "striklenz_platform"
+PUBLIC_ENTRY_AUTH_TIMEOUT_DEFAULT_SECONDS = 10
+PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS = 5
+PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS = 60
 
 DEFAULT_BROKERS = [
     {"id": "zerodha", "name": "Zerodha", "enabled": True, "auth_type": "oauth",
@@ -6786,6 +7661,279 @@ DEFAULT_BROKERS = [
      "capabilities": ["positions", "holdings", "orders", "pnl", "fno"], "note": "Coming soon"},
 ]
 
+LANDING_PAGE_SECTIONS = {
+    "navigation": True,
+    "hero": True,
+    "ticker": True,
+    "features": True,
+    "product_demo": True,
+    "pro_showcase": True,
+    "broker_connect": False,
+    "pricing": True,
+    "faq": True,
+    "bottom_cta": True,
+    "footer": True,
+}
+LANDING_PAGE_FEATURE_CARDS = (
+    "option_chain",
+    "strike_pressure",
+    "global_markets",
+    "straddle",
+    "market_events",
+    "desk_ai",
+)
+
+# Keep public landing copy on a known-key allowlist so Admin settings cannot
+# leak arbitrary config fields into the anonymous site-config response.
+LANDING_PAGE_COPY_KEYS = {
+    "nav_product", "nav_features", "nav_premium", "nav_pricing", "nav_faq",
+    "nav_demo", "nav_login", "nav_start",
+    "hero_eyebrow", "hero_title", "hero_description", "hero_start",
+    "hero_demo", "hero_compare", "hero_no_broker",
+    "features_title", "features_description",
+    "product_eyebrow", "product_title", "product_description",
+    "pro_eyebrow", "pro_title", "pro_description", "pro_oi_label", "pro_oi_description",
+    "pro_market_intel_label", "pro_journal_label", "pro_positions_label",
+    "broker_eyebrow", "broker_title", "broker_description",
+    "pricing_title", "pricing_description", "pricing_indicative",
+    "plan_normal_title", "plan_normal_description",
+    "plan_normal_intro", "plan_normal_note",
+    "plan_premium_title", "plan_premium_description",
+    "plan_premium_intro", "plan_premium_note",
+    "plan_pro_title", "plan_pro_description", "pricing_footer",
+    "plan_pro_intro", "plan_pro_note",
+    "faq_title", "cta_title", "cta_description", "cta_button",
+    "footer_disclaimer",
+    *(f"card_{card}_{suffix}" for card in LANDING_PAGE_FEATURE_CARDS for suffix in ("title", "description")),
+    *(f"faq_{index}_{field}" for index in range(3) for field in ("question", "answer")),
+    "faq_data_question", "faq_data_answer",
+    "faq_signin_question", "faq_signin_answer",
+}
+
+_LANDING_PLAN_IDS = ("normal", "premium", "pro")
+_LANDING_PLAN_SCREENSHOT_LIMIT = 3
+_LANDING_PLAN_SCREENSHOT_MAX_BYTES = 600 * 1024
+
+
+def _normalize_landing_plan_screenshots(raw: object = None, *, strict: bool = False) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    result = {plan_id: [] for plan_id in _LANDING_PLAN_IDS}
+    for plan_id in _LANDING_PLAN_IDS:
+        entries = raw.get(plan_id, [])
+        if not isinstance(entries, list):
+            if strict:
+                raise ValueError("Plan screenshots must be provided as a list")
+            continue
+        if len(entries) > _LANDING_PLAN_SCREENSHOT_LIMIT:
+            if strict:
+                raise ValueError(f"Upload no more than {_LANDING_PLAN_SCREENSHOT_LIMIT} screenshots per plan")
+            entries = entries[:_LANDING_PLAN_SCREENSHOT_LIMIT]
+        for entry in entries:
+            try:
+                if not isinstance(entry, dict):
+                    raise ValueError("Screenshot must be an image")
+                image_data = entry.get("data_url")
+                match = re.fullmatch(
+                    r"data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})",
+                    image_data if isinstance(image_data, str) else "",
+                )
+                if not match:
+                    raise ValueError("Use a PNG, JPEG, or WebP image")
+                if len(match.group(2)) > ((_LANDING_PLAN_SCREENSHOT_MAX_BYTES + 2) // 3) * 4:
+                    raise ValueError("Each screenshot must be 600 KB or smaller")
+                image_bytes = base64.b64decode(match.group(2), validate=True)
+                if len(image_bytes) > _LANDING_PLAN_SCREENSHOT_MAX_BYTES:
+                    raise ValueError("Each screenshot must be 600 KB or smaller")
+                mime_type = f"image/{match.group(1)}"
+                valid_signature = (
+                    (mime_type == "image/png" and image_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+                    or (mime_type == "image/jpeg" and image_bytes.startswith(b"\xff\xd8\xff"))
+                    or (
+                        mime_type == "image/webp"
+                        and len(image_bytes) >= 12
+                        and image_bytes[:4] == b"RIFF"
+                        and image_bytes[8:12] == b"WEBP"
+                    )
+                )
+                if not valid_signature:
+                    raise ValueError("Image content does not match its file type")
+                screenshot_id = entry.get("id")
+                if not isinstance(screenshot_id, str) or not screenshot_id.strip():
+                    raise ValueError("Screenshot is missing its identifier")
+                title = entry.get("title")
+                result[plan_id].append({
+                    "id": screenshot_id.strip()[:80],
+                    "title": title.strip()[:120] if isinstance(title, str) and title.strip() else "Plan screenshot",
+                    "mime_type": mime_type,
+                    "data_url": image_data,
+                })
+            except (ValueError, binascii.Error) as exc:
+                if strict:
+                    raise ValueError(str(exc)) from exc
+    return result
+
+
+_LANDING_PLAN_FEATURE_ID = re.compile(r"^[a-z0-9_]{1,80}$")
+_LANDING_PREVIEW_PRIVATE_KEYS = {
+    "access_token",
+    "api_key",
+    "api_secret",
+    "credentials",
+    "journal",
+    "member_id",
+    "password",
+    "positions",
+    "request_token",
+    "trade_cycles",
+    "trade_journal",
+    "trades",
+    "user_id",
+}
+_LANDING_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
+
+
+def _contains_landing_preview_private_data(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            str(key).lower() in _LANDING_PREVIEW_PRIVATE_KEYS
+            or _contains_landing_preview_private_data(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_landing_preview_private_data(child) for child in value)
+    return False
+
+
+def _normalize_landing_plan_preview_snapshot(raw: object) -> Optional[dict]:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("Plan preview capture must be an object")
+    if _contains_landing_preview_private_data(raw):
+        raise ValueError("Plan preview captures cannot contain member positions, journal, trades, or credentials")
+    if set(raw) - {"captured_at", "indices", "market_intel", "global_markets", "desk_market", "activity", "holidays"}:
+        raise ValueError("Plan preview capture contains an unsupported data section")
+    captured_at = raw.get("captured_at")
+    if not isinstance(captured_at, str) or len(captured_at) > 40:
+        raise ValueError("Plan preview capture requires a valid capture timestamp")
+    try:
+        datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("Plan preview capture requires a valid capture timestamp") from exc
+    snapshot = dict(raw)
+    encoded_size = len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if encoded_size > _LANDING_PREVIEW_MAX_BYTES:
+        raise ValueError("Plan preview capture is larger than 3 MB")
+    return snapshot
+
+
+def _normalize_landing_page_config(
+    raw: object = None,
+    *,
+    include_screenshot_data: bool = True,
+    include_plan_preview_data: bool = True,
+) -> dict:
+    """Keep marketing visibility independent from broker access and member entitlements."""
+    raw = raw if isinstance(raw, dict) else {}
+    raw_sections = raw.get("sections")
+    raw_sections = raw_sections if isinstance(raw_sections, dict) else {}
+    sections = {
+        key: raw_sections.get(key, default) is True
+        for key, default in LANDING_PAGE_SECTIONS.items()
+    }
+
+    raw_cards = raw.get("feature_cards")
+    if isinstance(raw_cards, list):
+        cards = {
+            "global_markets" if value == "market_structure" else value
+            for value in raw_cards
+            if isinstance(value, str)
+        }
+        if "oi_distribution" in cards:
+            cards.remove("oi_distribution")
+            cards.update(("straddle", "market_events"))
+    else:
+        cards = set(LANDING_PAGE_FEATURE_CARDS)
+    raw_brokers = raw.get("broker_ids")
+    known_brokers = {broker["id"] for broker in DEFAULT_BROKERS}
+    broker_ids = (
+        {value for value in raw_brokers if isinstance(value, str)}
+        if isinstance(raw_brokers, list)
+        else known_brokers
+    )
+    screenshots = _normalize_landing_plan_screenshots(raw.get("plan_screenshots"))
+    if not include_screenshot_data:
+        screenshots = {
+            plan_id: [
+                {key: shot[key] for key in ("id", "title", "mime_type")}
+                for shot in entries
+            ]
+            for plan_id, entries in screenshots.items()
+        }
+    raw_walkthrough_features = raw.get("plan_walkthrough_features")
+    walkthrough_features = {}
+    if isinstance(raw_walkthrough_features, dict):
+        for plan_id in _LANDING_PLAN_IDS:
+            values = raw_walkthrough_features.get(plan_id)
+            if not isinstance(values, list):
+                continue
+            seen = set()
+            walkthrough_features[plan_id] = [
+                value for value in values
+                if isinstance(value, str)
+                and _LANDING_PLAN_FEATURE_ID.fullmatch(value)
+                and not (value in seen or seen.add(value))
+            ]
+    raw_walkthrough_copy = raw.get("plan_walkthrough_copy")
+    walkthrough_copy = {}
+    if isinstance(raw_walkthrough_copy, dict):
+        for feature_id, copy in raw_walkthrough_copy.items():
+            if not (
+                isinstance(feature_id, str)
+                and _LANDING_PLAN_FEATURE_ID.fullmatch(feature_id)
+                and isinstance(copy, dict)
+            ):
+                continue
+            normalized_copy = {
+                key: value.strip()[:600]
+                for key, value in copy.items()
+                if key in {"description", "edge"}
+                and isinstance(value, str)
+                and value.strip()
+            }
+            if normalized_copy:
+                walkthrough_copy[feature_id] = normalized_copy
+    raw_copy = raw.get("copy")
+    landing_copy = {
+        key: value.strip()[:800]
+        for key, value in raw_copy.items()
+        if key in LANDING_PAGE_COPY_KEYS
+        and isinstance(value, str)
+        and value.strip()
+    } if isinstance(raw_copy, dict) else {}
+    config = {
+        "sections": sections,
+        "plan_more_info_enabled": raw.get("plan_more_info_enabled", True) is True,
+        "feature_cards": [
+            feature_id for feature_id in LANDING_PAGE_FEATURE_CARDS
+            if feature_id in cards
+        ],
+        "broker_ids": [
+            broker["id"] for broker in DEFAULT_BROKERS
+            if broker["id"] in broker_ids
+        ],
+        "plan_screenshots": screenshots,
+        "plan_walkthrough_features": walkthrough_features,
+        "plan_walkthrough_copy": walkthrough_copy,
+        "copy": landing_copy,
+    }
+    if include_plan_preview_data:
+        config["plan_demo_snapshot"] = _normalize_landing_plan_preview_snapshot(
+            raw.get("plan_demo_snapshot")
+        )
+    return config
+
+
 DEFAULT_PRICING = {
     "currency": "INR",
     "free": {"price": 0, "label": "Free"},
@@ -6795,8 +7943,26 @@ DEFAULT_PRICING = {
         "yearly": 7999,
         "label": "Premium",
         "billing_default": "monthly",
+        "offer_prices": {"monthly": "", "quarterly": "", "yearly": ""},
+        "razorpay_plan_ids": {"monthly": "", "quarterly": "", "yearly": ""},
+        "razorpay_offer_ids": {"monthly": "", "quarterly": "", "yearly": ""},
+    },
+    "pro": {
+        "monthly": 0,
+        "quarterly": 0,
+        "yearly": 0,
+        "label": "Pro",
+        "billing_default": "monthly",
+        "offer_prices": {"monthly": "", "quarterly": "", "yearly": ""},
+        "razorpay_plan_ids": {"monthly": "", "quarterly": "", "yearly": ""},
+        "razorpay_offer_ids": {"monthly": "", "quarterly": "", "yearly": ""},
     },
 }
+
+
+def _platform_membership(doc: dict) -> dict:
+    from membership import normalize_membership
+    return normalize_membership((doc or {}).get("membership"))
 
 
 def _mask_secret(val: Optional[str]) -> Optional[str]:
@@ -6826,6 +7992,123 @@ def _platform_pricing(doc: dict) -> dict:
                 merged[k] = v
         pricing = merged
     return pricing
+
+
+def _configured_offer_price(plan: dict, cadence: str) -> Optional[float]:
+    raw = (plan.get("offer_prices") or {}).get(cadence)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if isinstance(raw, bool):
+        raise ValueError("Offer prices must be positive amounts below the regular price")
+    try:
+        amount = float(raw)
+        regular_amount = float(plan.get(cadence) or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Offer prices must be valid amounts below the regular price") from exc
+    if (
+        not math.isfinite(amount)
+        or not math.isfinite(regular_amount)
+        or amount <= 0
+        or amount >= regular_amount
+        or abs(amount * 100 - round(amount * 100)) > 1e-7
+    ):
+        raise ValueError("Offer prices must be positive amounts below the regular price")
+    return round(amount, 2)
+
+
+def _normalize_pricing_offer_prices(pricing: dict) -> dict:
+    normalized = dict(pricing)
+    for plan_name in ("premium", "pro"):
+        source = pricing.get(plan_name)
+        if not isinstance(source, dict) or "offer_prices" not in source:
+            continue
+        plan = dict(source)
+        raw_prices = source.get("offer_prices")
+        if not isinstance(raw_prices, dict):
+            raise HTTPException(400, "Offer prices must be configured by billing cadence")
+        offer_prices = {}
+        for cadence in ("monthly", "quarterly", "yearly"):
+            try:
+                offer_price = _configured_offer_price(
+                    {**plan, "offer_prices": raw_prices},
+                    cadence,
+                )
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            offer_prices[cadence] = "" if offer_price is None else offer_price
+        plan["offer_prices"] = offer_prices
+        normalized[plan_name] = plan
+    return normalized
+
+
+def _public_pricing(doc: dict) -> dict:
+    pricing = _platform_pricing(doc)
+    public = {"currency": pricing.get("currency") or "INR"}
+    for name in ("free", "premium", "pro"):
+        plan = pricing.get(name) or {}
+        public[name] = {
+            key: plan.get(key)
+            for key in ("price", "monthly", "quarterly", "yearly", "label", "billing_default")
+            if key in plan
+        }
+        if name in ("premium", "pro"):
+            offer_prices = {}
+            for cadence in ("monthly", "quarterly", "yearly"):
+                try:
+                    offer_price = _configured_offer_price(plan, cadence)
+                except ValueError:
+                    continue
+                if offer_price is not None:
+                    offer_prices[cadence] = offer_price
+            public[name]["offer_prices"] = offer_prices
+    return public
+
+
+def _billing_readiness(doc: dict, membership: dict) -> dict:
+    razorpay = (doc or {}).get("razorpay") or {}
+    credentials_ready = bool(
+        razorpay.get("enabled")
+        and razorpay.get("key_id_enc")
+        and razorpay.get("key_secret_enc")
+        and razorpay.get("webhook_secret_enc")
+    )
+    pricing = _platform_pricing(doc)
+    plans_ready = True
+    offers_ready = True
+    cadence_names = ("monthly", "quarterly", "yearly")
+    early = membership.get("early_access") or {}
+    discount_enabled = bool(early.get("enabled") and int(early.get("discount_percent") or 0) > 0)
+    for plan_name in ("premium", "pro"):
+        if not membership["plans"][plan_name]["enabled"]:
+            continue
+        plan = pricing.get(plan_name) or {}
+        ids = plan.get("razorpay_plan_ids") or {}
+        for cadence in cadence_names:
+            try:
+                amount = float(plan.get(cadence) or 0)
+            except (TypeError, ValueError):
+                amount = 0
+            if amount <= 0 or not str(ids.get(cadence) or "").strip():
+                plans_ready = False
+            raw_offer_price = (plan.get("offer_prices") or {}).get(cadence)
+            try:
+                offer_price = _configured_offer_price(plan, cadence)
+            except ValueError:
+                offers_ready = False
+                offer_price = None
+            if (
+                (discount_enabled or offer_price is not None or bool(str(raw_offer_price or "").strip()))
+                and not str(
+                (plan.get("razorpay_offer_ids") or {}).get(cadence) or ""
+                ).strip()
+            ):
+                offers_ready = False
+    return {
+        "credentials_ready": credentials_ready,
+        "plan_ids_and_prices_ready": plans_ready,
+        "offer_ids_ready": offers_ready,
+        "ready": credentials_ready and plans_ready and offers_ready,
+    }
 
 
 def _broker_overrides(doc: dict) -> dict:
@@ -6873,23 +8156,125 @@ def _decrypt_safe(enc: Optional[str]) -> Optional[str]:
         return None
 
 
+def _public_entry_auth_timeout_seconds(doc: Optional[dict]) -> int:
+    value = (doc or {}).get("public_entry_auth_timeout_seconds")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return PUBLIC_ENTRY_AUTH_TIMEOUT_DEFAULT_SECONDS
+    return min(
+        PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS,
+        max(PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS, value),
+    )
+
+
+@api_router.get("/public/boot-config")
+async def public_boot_config():
+    """Expose the single non-sensitive preference needed to time the public auth request."""
+    doc = await _load_platform_config()
+    return {
+        "public_entry_auth_timeout_seconds": _public_entry_auth_timeout_seconds(doc),
+    }
+
+
 @api_router.get("/public/site-config")
 async def public_site_config():
     """Public marketing config — pricing, feature flags, broker registry. No secrets."""
     doc = await _load_platform_config()
     google = (doc or {}).get("google") or {}
-    razorpay = (doc or {}).get("razorpay") or {}
-    google_enabled = bool(google.get("enabled") and google.get("client_id_enc"))
-    razorpay_enabled = bool(razorpay.get("enabled") and razorpay.get("key_id_enc"))
+    membership = _platform_membership(doc)
+    google_enabled = bool(
+        google.get("enabled")
+        and google.get("client_id_enc")
+        and google.get("client_secret_enc")
+    )
+    billing = _billing_readiness(doc, membership)
+    public_membership = {
+        "experience_enabled": membership["experience_enabled"],
+        "signup_enabled": membership["signup_enabled"],
+        "paid_subscriptions_enabled": bool(
+            membership["paid_subscriptions_enabled"] and billing["ready"]
+        ),
+        "plans": membership["plans"],
+        "early_access": membership["early_access"],
+    }
     return {
         "app_name": APP_NAME,
-        "pricing": _platform_pricing(doc),
+        "pricing": _public_pricing(doc),
+        "membership": public_membership,
         "features": {
             "google_login_enabled": google_enabled,
-            "razorpay_enabled": razorpay_enabled,
+            "razorpay_enabled": billing["ready"],
         },
         "brokers": _platform_brokers(doc),
+        "landing_page": _normalize_landing_page_config(
+            (doc or {}).get("landing_page"),
+            include_screenshot_data=False,
+            include_plan_preview_data=False,
+        ),
     }
+
+
+@api_router.get("/public/landing-plan-screenshots/{plan_id}")
+async def public_landing_plan_screenshots(plan_id: str):
+    if plan_id not in _LANDING_PLAN_IDS:
+        raise HTTPException(404, "Unknown plan")
+    doc = await _load_platform_config()
+    landing = _normalize_landing_page_config(
+        (doc or {}).get("landing_page"),
+        include_plan_preview_data=False,
+    )
+    if not landing["plan_more_info_enabled"]:
+        raise HTTPException(404, "Plan details are unavailable")
+    # Image payloads are fetched only when a visitor opens one plan's details.
+    return {"plan": plan_id, "screenshots": landing["plan_screenshots"][plan_id]}
+
+
+@api_router.get("/public/landing-plan-preview/{plan_id}")
+async def public_landing_plan_preview(plan_id: str):
+    if plan_id not in _LANDING_PLAN_IDS:
+        raise HTTPException(404, "Unknown plan")
+    doc = await _load_platform_config()
+    membership = _platform_membership(doc)
+    landing = _normalize_landing_page_config(
+        (doc or {}).get("landing_page"),
+        include_screenshot_data=False,
+    )
+    if not landing["plan_more_info_enabled"]:
+        raise HTTPException(404, "Plan details are unavailable")
+    entitlement_features = membership["plans"][plan_id]["features"]
+    configured_features = landing["plan_walkthrough_features"]
+    selected_features = configured_features.get(plan_id, entitlement_features)
+    features = [feature_id for feature_id in selected_features if feature_id in entitlement_features]
+    return {
+        "plan": plan_id,
+        "features": features,
+        "copy": {
+            feature_id: landing["plan_walkthrough_copy"][feature_id]
+            for feature_id in features
+            if feature_id in landing["plan_walkthrough_copy"]
+        },
+        "snapshot": landing["plan_demo_snapshot"],
+    }
+
+
+@api_router.post("/admin/platform/landing-plan-preview")
+async def admin_landing_plan_preview_set(
+    payload: dict,
+    _admin: bool = Depends(require_admin),
+):
+    if db is None:
+        raise HTTPException(503, "DB unavailable")
+    try:
+        snapshot = _normalize_landing_plan_preview_snapshot(payload.get("snapshot"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if snapshot is None:
+        raise HTTPException(400, "Plan preview capture is required")
+    await db.settings.update_one(
+        {"_id": PLATFORM_CONFIG_ID},
+        {"$set": {"landing_page.plan_demo_snapshot": snapshot}},
+        upsert=True,
+    )
+    return {"snapshot": snapshot}
 
 
 @api_router.get("/admin/platform/config")
@@ -6899,7 +8284,13 @@ async def admin_platform_config_get(_admin: bool = Depends(require_admin)):
     razorpay = (doc or {}).get("razorpay") or {}
     return {
         "pricing": _platform_pricing(doc),
+        "membership": _platform_membership(doc),
+        "sitewalkthrough_enabled": await _get_sitewalkthrough_enabled(),
+        "billing_readiness": _billing_readiness(doc, _platform_membership(doc)),
         "public_landing_enabled": bool((doc or {}).get("public_landing_enabled", False)),
+        "guest_login_enabled": (doc or {}).get("guest_login_enabled") is True,
+        "public_entry_auth_timeout_seconds": _public_entry_auth_timeout_seconds(doc),
+        "landing_page": _normalize_landing_page_config((doc or {}).get("landing_page")),
         "brokers": _admin_brokers(doc),
         "google": {
             "enabled": bool(google.get("enabled")),
@@ -6911,6 +8302,7 @@ async def admin_platform_config_get(_admin: bool = Depends(require_admin)):
             "enabled": bool(razorpay.get("enabled")),
             "key_id": _decrypt_safe(razorpay.get("key_id_enc")),
             "key_secret": _mask_secret(razorpay.get("key_secret_enc")),
+            "webhook_secret": _mask_secret(razorpay.get("webhook_secret_enc")),
         },
     }
 
@@ -6923,9 +8315,55 @@ async def admin_platform_config_set(payload: dict, _admin: bool = Depends(requir
     update: dict = {}
 
     if isinstance(payload.get("pricing"), dict):
-        update["pricing"] = payload["pricing"]
+        update["pricing"] = _normalize_pricing_offer_prices(payload["pricing"])
+    if isinstance(payload.get("membership"), dict):
+        from membership import normalize_membership
+        update["membership"] = normalize_membership(payload["membership"])
     if "public_landing_enabled" in payload:
         update["public_landing_enabled"] = bool(payload["public_landing_enabled"])
+    if "guest_login_enabled" in payload:
+        update["guest_login_enabled"] = payload["guest_login_enabled"] is True
+    if "public_entry_auth_timeout_seconds" in payload:
+        timeout_seconds = payload["public_entry_auth_timeout_seconds"]
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS
+            <= timeout_seconds
+            <= PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS
+        ):
+            raise HTTPException(
+                400,
+                "Public entry timeout must be an integer from 5 to 60 seconds",
+            )
+        update["public_entry_auth_timeout_seconds"] = timeout_seconds
+    if isinstance(payload.get("landing_page"), dict):
+        landing_config = dict(payload["landing_page"])
+        stored_landing = (doc or {}).get("landing_page") or {}
+        for key in (
+            "plan_screenshots",
+            "plan_walkthrough_features",
+            "plan_walkthrough_copy",
+            "plan_demo_snapshot",
+            "copy",
+            "plan_more_info_enabled",
+        ):
+            if key not in landing_config:
+                landing_config[key] = stored_landing.get(
+                    key,
+                    True if key == "plan_more_info_enabled" else None,
+                )
+        try:
+            _normalize_landing_plan_screenshots(
+                landing_config.get("plan_screenshots"),
+                strict=True,
+            )
+            _normalize_landing_plan_preview_snapshot(
+                landing_config.get("plan_demo_snapshot")
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        update["landing_page"] = _normalize_landing_page_config(landing_config)
 
     if isinstance(payload.get("brokers"), list):
         bstore = dict(_broker_overrides(doc))
@@ -6967,6 +8405,8 @@ async def admin_platform_config_set(payload: dict, _admin: bool = Depends(requir
             rcfg["key_id_enc"] = _fernet().encrypt(str(r["key_id"]).encode()).decode()
         if r.get("key_secret") and r.get("key_secret") != "set":
             rcfg["key_secret_enc"] = _fernet().encrypt(str(r["key_secret"]).encode()).decode()
+        if r.get("webhook_secret") and r.get("webhook_secret") != "set":
+            rcfg["webhook_secret_enc"] = _fernet().encrypt(str(r["webhook_secret"]).encode()).decode()
         update["razorpay"] = rcfg
 
     if update:
@@ -7003,9 +8443,83 @@ async def google_login_url(redirect_uri: str = Query(""), state: str = Query("")
     }
 
 
+@api_router.post("/auth/local-test-login")
+async def local_dev_member_login(payload: dict, request: Request):
+    """Issue local member sessions only for configured loopback development users."""
+    if not _is_local_dev_request(request) or not LOCAL_DEV_MEMBER_USERS:
+        raise HTTPException(404, "Local test login is unavailable")
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    email = str((payload or {}).get("email") or "").strip().lower()
+    password = (payload or {}).get("password")
+    configured = LOCAL_DEV_MEMBER_USERS.get(email)
+    if not configured or not local_test_password_matches(
+        password, configured["password"]
+    ):
+        raise HTTPException(401, "Invalid local test credentials")
+
+    member_id = "local-dev:" + hashlib.sha256(email.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    from membership import normalize_member_preferences
+    membership_config = _platform_membership(await _load_platform_config())
+    try:
+        await db.members.update_one(
+            {"_id": member_id},
+            {
+                "$set": {
+                    "email": email,
+                    "name": email.partition("@")[0],
+                    "provider": "local_test",
+                    "local_dev_test_account": True,
+                    "plan": configured["plan"],
+                    "admin_plan_override": configured["plan"] != "normal",
+                    "disabled_at": None,
+                    "last_login_at": now_iso,
+                },
+                "$setOnInsert": {
+                    "created_at": now_iso,
+                    "preferences": normalize_member_preferences(
+                        None, membership_config.get("preference_defaults")
+                    ),
+                },
+            },
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Local test member persistence failed (%s)", type(exc).__name__)
+        raise HTTPException(503, "Could not prepare local test account")
+
+    token = secrets.token_urlsafe(40)
+    expiry = now + timedelta(seconds=MEMBER_SESSION_TTL_SECONDS)
+    try:
+        await db.member_sessions.insert_one({
+            "_id": _member_session_storage_id(token),
+            "user_id": member_id,
+            "created_at": now,
+            "last_seen_at": now,
+            "expires_at": expiry,
+            "ip": _client_ip(request),
+            "user_agent": (request.headers.get("user-agent") or "")[:200],
+            "local_dev_test_session": True,
+        })
+    except Exception as exc:
+        logger.warning("Local test member session failed (%s)", type(exc).__name__)
+        raise HTTPException(503, "Could not create local test session")
+    return {
+        "token": token,
+        "member_token": token,
+        "name": email.partition("@")[0],
+        "email": email,
+        "expires_in_seconds": MEMBER_SESSION_TTL_SECONDS,
+        "expires_at": expiry.isoformat(),
+        "is_member": True,
+    }
+
+
 @api_router.post("/auth/google/exchange")
 async def google_exchange(payload: dict, request: Request):
-    """Exchange a Google auth code for a Striklenz member session."""
+    """Exchange a verified Google identity for a durable, subject-keyed session."""
     doc = await _load_platform_config()
     google = (doc or {}).get("google") or {}
     client_id = _decrypt_safe(google.get("client_id_enc"))
@@ -7016,6 +8530,9 @@ async def google_exchange(payload: dict, request: Request):
     redirect_uri = (payload or {}).get("redirect_uri") or (google.get("redirect_uri") or "")
     if not code or not redirect_uri:
         raise HTTPException(400, "Missing code/redirect_uri")
+    configured_redirect = (google.get("redirect_uri") or "").strip()
+    if configured_redirect and redirect_uri != configured_redirect:
+        raise HTTPException(400, "Google redirect URI does not match Admin settings")
     import httpx
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -7031,7 +8548,7 @@ async def google_exchange(payload: dict, request: Request):
             if not access:
                 raise HTTPException(400, "Google token exchange failed")
             info = await client.get(
-                "https://www.googleapis.com/oauth2/v2/userinfo",
+                "https://openidconnect.googleapis.com/v1/userinfo",
                 headers={"Authorization": f"Bearer {access}"},
             )
             info.raise_for_status()
@@ -7039,44 +8556,1147 @@ async def google_exchange(payload: dict, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("google_exchange failed: %s", e)
+        logger.warning("Google OAuth exchange failed (%s)", type(e).__name__)
         raise HTTPException(400, "Google sign-in failed. Please try again.")
 
     email = (profile.get("email") or "").lower().strip()
-    name = profile.get("name") or (email.split("@")[0] if email else "Member")
-    if not email:
-        raise HTTPException(400, "Google account has no email")
+    subject = str(profile.get("sub") or "").strip()
+    verified = profile.get("email_verified") is True or str(profile.get("email_verified")).lower() == "true"
+    if not (subject and email and verified):
+        raise HTTPException(400, "Google must provide a stable subject and verified email")
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    config = _platform_membership(doc)
+    member = await _find_one_capped(db.members, {"_id": subject})
+    if not member:
+        member = await _find_one_capped(db.members, {"google_subject": subject})
+    legacy_member = None
+    if not member:
+        legacy_member = await _find_one_capped(
+            db.members, {"email": email, "provider": "google"}
+        )
+    if not member and not legacy_member and not (
+        config["experience_enabled"] and config["signup_enabled"]
+    ):
+        raise HTTPException(403, "New member sign-up is currently disabled")
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    member_id = (
+        member.get("_id") if member
+        else legacy_member.get("_id") if legacy_member
+        else subject
+    )
+    from membership import normalize_member_preferences
+    default_preferences = normalize_member_preferences(config.get("preference_defaults"))
+    member_update = {"$set": {
+        "email": email,
+        "name": str(profile.get("name") or email.partition("@")[0])[:120],
+        "picture": str(profile.get("picture") or "")[:2048] or None,
+        "last_login_at": now_iso,
+        "provider": "google",
+        "google_subject": subject,
+    }}
+    if not member and not legacy_member:
+        member_update["$setOnInsert"] = {
+            "created_at": now_iso,
+            "plan": "normal",
+            "preferences": default_preferences,
+        }
     try:
         await db.members.update_one(
-            {"_id": email},
-            {"$set": {"email": email, "name": name, "picture": profile.get("picture"),
-                      "last_login_at": now_iso, "provider": "google"},
-             "$setOnInsert": {"created_at": now_iso, "is_premium": False}},
-            upsert=True,
+            {"_id": member_id},
+            member_update,
+            upsert=not member and not legacy_member,
         )
     except Exception as e:
-        logger.warning("member upsert failed: %s", e)
+        logger.warning("Google member account persistence failed (%s)", type(e).__name__)
+        raise HTTPException(503, "Could not persist member account")
 
-    ip = _client_ip(request)
-    ua = request.headers.get("user-agent", "")
-    guest = await _admit_guest_immediate(name, ip, ua, reason="google_login")
+    token = secrets.token_urlsafe(40)
+    expiry = now + timedelta(seconds=MEMBER_SESSION_TTL_SECONDS)
     try:
-        await db.guest_sessions.update_one(
-            {"_id": guest["token"]},
-            {"$set": {"is_member": True, "member_email": email, "name": name}},
-        )
-    except Exception:
-        pass
+        await db.member_sessions.insert_one({
+            "_id": _member_session_storage_id(token),
+            "user_id": member_id,
+            "created_at": now,
+            "last_seen_at": now,
+            "expires_at": expiry,
+            "ip": _client_ip(request),
+            "user_agent": (request.headers.get("user-agent") or "")[:200],
+        })
+    except Exception as e:
+        logger.warning("Google member session persistence failed (%s)", type(e).__name__)
+        raise HTTPException(503, "Could not create member session")
     return {
-        "token": guest["token"],
-        "name": name,
+        # `token` preserves the existing browser header flow; new clients may
+        # send the same value explicitly as X-Member-Token.
+        "token": token,
+        "member_token": token,
+        "name": str(profile.get("name") or email.partition("@")[0])[:120],
         "email": email,
-        "expires_in_seconds": guest.get("expires_in_seconds"),
-        "expires_at": guest.get("expires_at"),
+        "expires_in_seconds": MEMBER_SESSION_TTL_SECONDS,
+        "expires_at": expiry.isoformat(),
+        "is_member": True,
     }
 
+
+@api_router.get("/membership/me")
+async def membership_me(request: Request):
+    sess, config, plan = await _member_context(request)
+    from membership import normalize_member_preferences, plan_features
+    member = sess["member"]
+    defaults = config.get("preference_defaults") or {}
+    prefs = normalize_member_preferences(member.get("preferences"), defaults)
+    sub = member.get("subscription") or {}
+    history_rows = await db.member_audit.find(
+        {
+            "member_id": sess["member_id"],
+            "event_type": {
+                "$in": [
+                    "subscription_checkout_created",
+                    "subscription_renewal_cancelled",
+                    "subscription_status_changed",
+                ]
+            },
+        },
+        {"_id": 0, "event_type": 1, "details": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(length=25)
+    # The member ID filter and strict field allowlist keep this history private and redacted.
+    return {
+        "member": {
+            "id": member["_id"],
+            "email": member.get("email"),
+            "name": member.get("name"),
+            "picture": member.get("picture"),
+            "created_at": member.get("created_at"),
+        },
+        "is_local_test_account": bool(member.get("local_dev_test_account")),
+        "plan": plan,
+        "features": sorted(plan_features(config, plan)),
+        "subscription": {
+            "id": sub.get("id"),
+            "plan": sub.get("plan"),
+            "cadence": sub.get("cadence"),
+            "status": sub.get("status"),
+            "current_end": sub.get("current_end"),
+            "checkout_url": (
+                sub.get("checkout_url")
+                if sub.get("status") in ("created", "authenticated")
+                else None
+            ),
+        },
+        "subscription_history": [
+            {
+                "event_type": row.get("event_type"),
+                "details": {
+                    key: value for key, value in (row.get("details") or {}).items()
+                    if key in {"plan", "cadence", "status", "access_ends_immediately"}
+                },
+                "created_at": row.get("created_at"),
+            }
+            for row in history_rows
+        ],
+        "preferences": prefs,
+    }
+
+
+@api_router.get("/membership/preferences")
+async def membership_preferences_get(request: Request):
+    sess, config, _plan = await _member_context(request)
+    from membership import normalize_member_preferences
+    return {
+        "preferences": normalize_member_preferences(
+            sess["member"].get("preferences"),
+            config.get("preference_defaults"),
+        )
+    }
+
+
+@api_router.put("/membership/preferences")
+async def membership_preferences_save(payload: dict, request: Request):
+    sess, config, _plan = await _member_context(request)
+    from membership import normalize_member_preferences
+    stored_preferences = sess["member"].get("preferences") or {}
+    prefs = normalize_member_preferences(
+        payload or {},
+        config.get("preference_defaults"),
+    )
+    # Trade-cycle retention is an administrator-controlled privacy opt-in.
+    prefs["trade_cycle_persistence_enabled"] = bool(
+        stored_preferences.get("trade_cycle_persistence_enabled", False)
+    )
+    await db.members.update_one(
+        {"_id": sess["member_id"]},
+        {"$set": {"preferences": prefs, "preferences_updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "preferences": prefs}
+
+
+@api_router.get("/membership/journal/{day}")
+async def member_journal_get(day: str, request: Request):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "Use YYYY-MM-DD")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid journal date")
+    record = await db.member_journal.find_one(
+        {"user_id": sess["member_id"], "date": day},
+        {"_id": 0, "user_id": 0},
+    )
+    if not record:
+        return {"date": day, "empty": True, "tags": journal.DEFAULT_TAGS}
+    result = journal.public_day(record, include_images=True)
+    result["empty"] = False
+    result["tags_catalog"] = journal.DEFAULT_TAGS
+    return result
+
+
+@api_router.get("/membership/journal")
+async def member_journal_month(
+    year: int,
+    request: Request,
+    month: Optional[int] = None,
+    view: Optional[str] = None,
+):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if year < 2020 or year > 2100:
+        raise HTTPException(400, "Invalid year/month")
+    if (view or "").lower() == "year":
+        start, end = f"{year:04d}-01-01", f"{year + 1:04d}-01-01"
+        try:
+            docs = await db.member_journal.find(
+                {"user_id": sess["member_id"], "date": {"$gte": start, "$lt": end}},
+                {"_id": 0, "user_id": 0, "screenshots": 0},
+            ).to_list(length=400)
+        except Exception as exc:
+            logger.exception("member journal year query failed")
+            raise HTTPException(503, "Could not load your journal year") from exc
+        days = [journal.public_day(doc, include_images=False) for doc in docs]
+        days = [day for day in days if day and journal.include_on_journal_calendar(day)]
+        return {
+            "year": year,
+            "today": journal.ist_ymd(),
+            "stats": journal.month_stats(days),
+            "heatmap": journal.year_heatmap(days, year),
+            "tags": journal.DEFAULT_TAGS,
+        }
+    month = int(month or now_ist().month)
+    if month < 1 or month > 12:
+        raise HTTPException(400, "Invalid year/month")
+    start, end = journal.month_bounds(year, month)
+    try:
+        # The authenticated member ID is the ownership boundary; never accept it from the query.
+        days = await db.member_journal.find(
+            {"user_id": sess["member_id"], "date": {"$gte": start, "$lt": end}},
+            {"_id": 0, "user_id": 0, "screenshots.data": 0},
+        ).to_list(length=40)
+    except Exception as exc:
+        logger.exception("member journal month query failed")
+        raise HTTPException(503, "Could not load your journal calendar") from exc
+    days = [journal.public_day(day, include_images=False) for day in days]
+    days = [day for day in days if day and journal.include_on_journal_calendar(day)]
+    days.sort(key=lambda record: record.get("date") or "")
+    return {
+        "year": year,
+        "month": month,
+        "today": journal.ist_ymd(),
+        "days": days,
+        "stats": journal.month_stats(days),
+        "tags": journal.DEFAULT_TAGS,
+    }
+
+
+@api_router.get("/membership/journal-period")
+async def member_journal_period(
+    request: Request,
+    start: str = Query(..., alias="from"),
+    end: str = Query(..., alias="to"),
+):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+        raise HTTPException(400, "Use YYYY-MM-DD for from and to")
+    if start > end:
+        raise HTTPException(400, "from must be on or before to")
+    try:
+        first = datetime.strptime(start, "%Y-%m-%d")
+        last = datetime.strptime(end, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid from/to date") from exc
+    if (last - first).days > 400:
+        raise HTTPException(400, "Range too long (max 400 days)")
+    try:
+        docs = await db.member_journal.find(
+            {"user_id": sess["member_id"], "date": {"$gte": start, "$lte": end}},
+            {"_id": 0, "user_id": 0, "screenshots": 0},
+        ).to_list(length=420)
+    except Exception as exc:
+        logger.exception("member journal period query failed")
+        raise HTTPException(503, "Could not load your journal period") from exc
+    days = [journal.public_day(doc, include_images=False) for doc in docs]
+    days = [day for day in days if day]
+    return {
+        "from": start,
+        "to": end,
+        "index": "ALL",
+        "today": journal.ist_ymd(),
+        "stats": journal.period_stats(days, start=start, end=end),
+        "indices": list(journal.HEATMAP_INDICES),
+    }
+
+
+@api_router.put("/membership/journal/{day}")
+async def member_journal_save(day: str, payload: JournalIn, request: Request):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "Use YYYY-MM-DD")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid journal date")
+    fields = journal.sanitize_journal_fields(payload.model_dump(exclude_unset=True))
+    now = datetime.now(timezone.utc).isoformat()
+    await db.member_journal.update_one(
+        {"user_id": sess["member_id"], "date": day},
+        {"$set": {**fields, "updated_at": now}, "$setOnInsert": {
+            "user_id": sess["member_id"],
+            "date": day,
+            "created_at": now,
+        }},
+        upsert=True,
+    )
+    record = await db.member_journal.find_one(
+        {"user_id": sess["member_id"], "date": day},
+        {"_id": 0, "user_id": 0},
+    )
+    return {
+        "ok": True,
+        "journal": journal.public_day(record, include_images=False),
+    }
+
+
+@api_router.post("/membership/journal/{day}/screenshot")
+async def member_journal_add_shot(day: str, payload: JournalShotIn, request: Request):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "Use YYYY-MM-DD")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid journal date") from exc
+    try:
+        shot = journal.decode_screenshot(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    owner_day = {"user_id": sess["member_id"], "date": day}
+    doc = await db.member_journal.find_one(owner_day, {"screenshots": 1})
+    existing = (doc or {}).get("screenshots") or []
+    if len(existing) >= journal.MAX_SCREENSHOTS:
+        raise HTTPException(400, f"Max {journal.MAX_SCREENSHOTS} screenshots per day")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.member_journal.update_one(
+        owner_day,
+        {"$set": {"date": day, "updated_at": now}, "$push": {"screenshots": shot},
+         "$setOnInsert": {"user_id": sess["member_id"], "created_at": now}},
+        upsert=True,
+    )
+    return {"id": shot["id"], "name": shot["name"], "mime": shot["mime"]}
+
+
+@api_router.delete("/membership/journal/{day}/screenshot/{shot_id}")
+async def member_journal_del_shot(day: str, shot_id: str, request: Request):
+    sess, _config, _plan = await _member_context(request, "trade_journal")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise HTTPException(400, "Use YYYY-MM-DD")
+    await db.member_journal.update_one(
+        {"user_id": sess["member_id"], "date": day},
+        {"$pull": {"screenshots": {"id": shot_id}}},
+    )
+    return {"deleted": shot_id}
+
+
+@api_router.get("/membership/alerts")
+async def member_alerts_get(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100),
+):
+    return await get_alerts(request, limit)
+
+
+@api_router.post("/membership/alerts/oi-shift")
+async def member_oi_shift_alert_save(payload: dict, request: Request):
+    sess, membership_config, _plan = await _member_context(request, "alerts")
+    await _member_context(request, "oi_shift_alerts")
+    if db is None:
+        raise HTTPException(503, "Alert inbox storage unavailable")
+
+    from membership import normalize_member_preferences, next_member_alert_purge
+
+    prefs = normalize_member_preferences(
+        sess["member"].get("preferences"),
+        membership_config.get("preference_defaults"),
+    )
+    if not prefs["alert_types"].get("oi_shift", True):
+        raise HTTPException(403, "OI shift alerts are disabled in your preferences")
+
+    index = payload.get("index")
+    if (
+        not isinstance(index, str)
+        or index not in {"NIFTY", "SENSEX", "BANKNIFTY"}
+        or index not in prefs["alert_indices"]
+    ):
+        raise HTTPException(400, "This index is not enabled for your alerts")
+    event_key = payload.get("id")
+    if not isinstance(event_key, str) or not event_key.strip() or len(event_key) > 160:
+        raise HTTPException(400, "Invalid alert event identifier")
+    side = payload.get("side")
+    if not isinstance(side, str) or side not in {"CE", "PE"}:
+        raise HTTPException(400, "Invalid OI shift side")
+    try:
+        raw_window = payload.get("window")
+        window = int(raw_window)
+        value = float(payload.get("value"))
+        atm = float(payload.get("atm"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Invalid OI shift values")
+    if (
+        isinstance(raw_window, bool)
+        or (isinstance(raw_window, float) and raw_window != window)
+        or window < 1 or window > 60
+        or isinstance(payload.get("value"), bool)
+        or not math.isfinite(value)
+        or isinstance(payload.get("atm"), bool)
+        or not math.isfinite(atm)
+        or atm <= 0
+    ):
+        raise HTTPException(400, "Invalid OI shift values")
+    if abs(value) < float(prefs["oi_shift_threshold_contracts"]):
+        raise HTTPException(400, "OI shift is below your configured alert threshold")
+
+    price = payload.get("price")
+    if price is not None:
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Invalid OI shift price")
+        if isinstance(payload.get("price"), bool) or not math.isfinite(price) or price <= 0:
+            raise HTTPException(400, "Invalid OI shift price")
+
+    strikes = []
+    contributing = payload.get("contributing")
+    if isinstance(contributing, list):
+        for strike in contributing[:3]:
+            if not isinstance(strike, dict):
+                raise HTTPException(400, "Invalid OI shift strike details")
+            try:
+                strike_value = float(strike.get("strike"))
+                ce_delta = float(strike.get("ce_delta"))
+                pe_delta = float(strike.get("pe_delta"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Invalid OI shift strike details")
+            if all(math.isfinite(item) for item in (strike_value, ce_delta, pe_delta)):
+                strikes.append({
+                    "strike": strike_value,
+                    "ce_delta": ce_delta,
+                    "pe_delta": pe_delta,
+                })
+            else:
+                raise HTTPException(400, "Invalid OI shift strike details")
+
+    member_id = str(sess["member_id"])
+    now = datetime.now(timezone.utc)
+    # Scope deduplication to the authenticated member while keeping retries idempotent.
+    event_digest = hashlib.sha256(f"{member_id}:{event_key.strip()}".encode()).hexdigest()
+    alert_id = f"oi-shift-{event_digest}"
+    direction = "build" if value > 0 else "unwind"
+    event = {
+        "_id": event_digest,
+        "alert_id": alert_id,
+        "user_id": member_id,
+        "type": "oi_shift",
+        "index": index,
+        "created_at": now.isoformat(),
+        "expire_at": next_member_alert_purge(now),
+        "price": price,
+        "atm": atm,
+        "direction": direction,
+        "severity": "HIGH",
+        "side": side,
+        "window": window,
+        "value": value,
+        "strikes": strikes,
+        "message": f"{side} OI {direction} of {abs(value):,.0f} contracts in {window} min near ATM ±1",
+    }
+    await db.member_alert_events.update_one(
+        {"_id": event_digest},
+        {"$setOnInsert": event},
+        upsert=True,
+    )
+    stored = await db.member_alert_events.find_one(
+        {"_id": event_digest},
+        {"_id": 0, "user_id": 0, "expire_at": 0},
+    )
+    if not stored:
+        raise HTTPException(503, "Could not save OI shift alert")
+    return {"alert": {**stored, "seen": False}}
+
+
+@api_router.post("/membership/alerts/{alert_id}/ack")
+async def member_alert_ack(alert_id: str, request: Request):
+    sess, _config, _plan = await _member_context(request, "alerts")
+    result = await db.member_alerts.update_one(
+        {"user_id": sess["member_id"], "source_alert_id": alert_id},
+        {"$set": {"seen": True, "seen_at": datetime.now(timezone.utc)},
+         "$setOnInsert": {
+             "user_id": sess["member_id"],
+             "source_alert_id": alert_id,
+             "created_at": datetime.now(timezone.utc),
+         }},
+        upsert=True,
+    )
+    return {"ok": True, "updated": bool(result.modified_count or result.upserted_id)}
+
+
+@api_router.get("/admin/members")
+async def admin_members_list(
+    member_id: Optional[str] = None,
+    _admin: bool = Depends(require_admin),
+):
+    member_query = {"_id": member_id} if member_id else {}
+    rows = await db.members.find(
+        member_query,
+        {"_id": 1, "email": 1, "name": 1, "plan": 1, "created_at": 1,
+         "last_login_at": 1, "disabled_at": 1, "admin_plan_override": 1,
+         "linked_kite_user_id": 1,
+         "subscription.status": 1, "subscription.current_end": 1,
+         "preferences.trade_cycle_persistence_enabled": 1},
+    ).sort("created_at", -1).to_list(length=1 if member_id else 500)
+    member_ids = [row.get("_id") for row in rows if row.get("_id")]
+    kite_rows = await db.user_kite.find(
+        {"member_id": {"$in": member_ids}},
+        {"_id": 0, "member_id": 1, "kite_user_id": 1, "valid_until": 1},
+    ).to_list(length=len(member_ids))
+    kite_by_member = {row["member_id"]: row for row in kite_rows if row.get("member_id")}
+    return {
+        "members": [{
+            "id": row.get("_id"),
+            "email": row.get("email"),
+            "name": row.get("name"),
+            "plan": _effective_member_plan(row),
+            "created_at": row.get("created_at"),
+            "last_login_at": row.get("last_login_at"),
+            "disabled": bool(row.get("disabled_at")),
+            "admin_plan_override": bool(row.get("admin_plan_override")),
+            "linked_kite_user_id": row.get("linked_kite_user_id"),
+            "subscription": row.get("subscription"),
+            "trade_cycle_persistence_enabled": (
+                (row.get("preferences") or {}).get("trade_cycle_persistence_enabled", False)
+            ),
+            "kite_account": kite_by_member.get(row.get("_id")),
+        } for row in rows]
+    }
+
+
+@api_router.get("/admin/subscription-health")
+async def admin_subscription_health(_admin: bool = Depends(require_admin)):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+
+    platform_doc = await _load_platform_config()
+    membership = _platform_membership(platform_doc or {})
+    member_rows = await db.members.find(
+        {},
+        {
+            "_id": 1, "name": 1, "email": 1, "plan": 1, "disabled_at": 1,
+            "admin_plan_override": 1, "subscription": 1,
+        },
+    ).to_list(length=None)
+    active_members = {"normal": 0, "premium": 0, "pro": 0}
+    blocked_basic_members = 0
+    blocked_basic_rows = []
+    payment_attention_rows = []
+    basic_enabled = bool(membership["plans"]["normal"]["enabled"])
+    experience_enabled = bool(membership["experience_enabled"])
+    now = datetime.now(timezone.utc)
+    payment_attention_statuses = {"past_due", "halted", "paused", "refunded", "expired"}
+
+    for member in member_rows:
+        is_disabled = bool(member.get("disabled_at"))
+        plan = _effective_member_plan(member)
+        subscription = member.get("subscription") or {}
+        status = str(subscription.get("status") or "").lower()
+        if not is_disabled and not basic_enabled and plan == "normal":
+            blocked_basic_members += 1
+            blocked_basic_rows.append({
+                "id": member.get("_id"),
+                "name": member.get("name"),
+                "email": member.get("email"),
+                "payment_status": status or None,
+            })
+        if not is_disabled and experience_enabled and membership["plans"][plan]["enabled"]:
+            active_members[plan] += 1
+        updated_at = subscription.get("updated_at") or subscription.get("created_at")
+        pending_is_stale = False
+        if status in {"created", "authenticated"} and updated_at:
+            try:
+                pending_at = (
+                    datetime.fromtimestamp(updated_at, timezone.utc)
+                    if isinstance(updated_at, (int, float))
+                    else datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+                )
+                if pending_at.tzinfo is None:
+                    pending_at = pending_at.replace(tzinfo=timezone.utc)
+                pending_is_stale = (now - pending_at).total_seconds() >= 30 * 60
+            except (TypeError, ValueError, OverflowError):
+                pending_is_stale = False
+        attention_status = status
+        if status == "active" and subscription.get("current_end") is not None:
+            try:
+                active_end = subscription["current_end"]
+                active_end = (
+                    datetime.fromtimestamp(active_end, timezone.utc)
+                    if isinstance(active_end, (int, float))
+                    else datetime.fromisoformat(str(active_end).replace("Z", "+00:00"))
+                )
+                if active_end.tzinfo is None:
+                    active_end = active_end.replace(tzinfo=timezone.utc)
+                if active_end <= now:
+                    attention_status = "expired"
+            except (TypeError, ValueError, OverflowError):
+                attention_status = status
+        # Surface abandoned hosted checkouts after a short window without treating fresh ones as failures.
+        if attention_status in payment_attention_statuses or pending_is_stale:
+            payment_attention_rows.append({
+                "id": member.get("_id"),
+                "name": member.get("name"),
+                "email": member.get("email"),
+                "plan": subscription.get("plan") or plan,
+                "payment_status": attention_status,
+                "updated_at": updated_at,
+            })
+
+    billing_events = db.billing_events
+    return {
+        "active_members_by_plan": active_members,
+        "all_time": {
+            "renewals": await billing_events.count_documents({"event_type": "subscription.charged"}),
+            "cancellations": await billing_events.count_documents({"event_type": "subscription.cancelled"}),
+            "failed_payments": await billing_events.count_documents({"event_type": "payment.failed"}),
+        },
+        "blocked_basic_members": blocked_basic_members,
+        "blocked_basic_member_list": blocked_basic_rows[:50],
+        "blocked_basic_members_truncated": max(0, blocked_basic_members - 50),
+        "payment_attention_members": payment_attention_rows[:50],
+        "payment_attention_members_count": len(payment_attention_rows),
+        "payment_attention_members_truncated": max(0, len(payment_attention_rows) - 50),
+        "basic_plan_enabled": basic_enabled,
+        "membership_experience_enabled": experience_enabled,
+    }
+
+
+@api_router.get("/admin/members/{member_id}/audit")
+async def admin_member_audit(member_id: str, _admin: bool = Depends(require_admin)):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    if not await db.members.find_one({"_id": member_id}, {"_id": 1}):
+        raise HTTPException(404, "Member not found")
+    events = await db.member_audit.find(
+        {"member_id": member_id},
+        {"_id": 0, "member_id": 0},
+    ).sort("created_at", -1).to_list(length=50)
+    return {"events": events}
+
+
+@api_router.patch("/admin/members/{member_id}")
+async def admin_member_update(member_id: str, payload: dict, _admin: bool = Depends(require_admin)):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    member = await db.members.find_one({"_id": member_id})
+    if not member:
+        raise HTTPException(404, "Member not found")
+    update = {}
+    if "plan" in payload:
+        plan = str(payload.get("plan") or "").lower()
+        if plan not in ("normal", "premium", "pro"):
+            raise HTTPException(400, "Unknown membership plan")
+        update["plan"] = plan
+        update["admin_plan_override"] = bool(payload.get("admin_plan_override", plan != "normal"))
+    if "disabled" in payload:
+        update["disabled_at"] = (
+            datetime.now(timezone.utc).isoformat() if payload["disabled"] else None
+        )
+    if "preferences" in payload and isinstance(payload["preferences"], dict):
+        from membership import normalize_member_preferences
+        cfg = _platform_membership(await _load_platform_config())
+        merged_preferences = {
+            **(member.get("preferences") or {}),
+            **payload["preferences"],
+        }
+        update["preferences"] = normalize_member_preferences(
+            merged_preferences,
+            cfg.get("preference_defaults"),
+        )
+    audit_details = {}
+    if "plan" in update:
+        audit_details["plan"] = {
+            "from": _effective_member_plan(member),
+            "to": update["plan"],
+            "override": update["admin_plan_override"],
+        }
+    if "disabled_at" in update:
+        audit_details["suspended"] = bool(update["disabled_at"])
+    if "preferences" in update:
+        old_cycle_storage = bool(
+            (member.get("preferences") or {}).get("trade_cycle_persistence_enabled", False)
+        )
+        new_cycle_storage = bool(
+            update["preferences"].get("trade_cycle_persistence_enabled", False)
+        )
+        if old_cycle_storage != new_cycle_storage:
+            audit_details["trade_cycle_storage_enabled"] = new_cycle_storage
+    if update:
+        update["admin_updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.members.update_one({"_id": member_id}, {"$set": update})
+        if audit_details:
+            await _record_member_audit(member_id, "admin_member_updated", "admin", audit_details)
+    saved = await db.members.find_one({"_id": member_id})
+    return {
+        "ok": True,
+        "member": {
+            "id": saved.get("_id"),
+            "plan": _effective_member_plan(saved),
+            "disabled": bool(saved.get("disabled_at")),
+            "admin_plan_override": bool(saved.get("admin_plan_override")),
+            "preferences": saved.get("preferences") or {},
+        },
+    }
+
+
+@api_router.post("/billing/checkout")
+async def membership_checkout(payload: dict, request: Request):
+    sess, config, _member_plan = await _member_context(request)
+    if not config["paid_subscriptions_enabled"]:
+        raise HTTPException(503, "Paid subscriptions are disabled")
+    doc = await _load_platform_config()
+    readiness = _billing_readiness(doc, config)
+    if not readiness["ready"]:
+        raise HTTPException(503, "Billing is not fully configured")
+    requested_plan = str((payload or {}).get("plan") or "").lower()
+    cadence = str((payload or {}).get("cadence") or "").lower()
+    if requested_plan not in ("premium", "pro") or cadence not in ("monthly", "quarterly", "yearly"):
+        raise HTTPException(400, "Choose a paid plan and monthly, quarterly, or yearly billing")
+    plan_config = config["plans"].get(requested_plan) or {}
+    if not plan_config.get("enabled"):
+        raise HTTPException(400, "That plan is not available")
+    pricing = _platform_pricing(doc)
+    plan_price = pricing.get(requested_plan) or {}
+    try:
+        amount_paise = int(round(float(plan_price.get(cadence) or 0) * 100))
+    except (TypeError, ValueError):
+        amount_paise = 0
+    plan_id = str((plan_price.get("razorpay_plan_ids") or {}).get(cadence) or "").strip()
+    if amount_paise <= 0 or not plan_id:
+        raise HTTPException(503, "The selected Razorpay plan is not configured")
+    rp = (doc or {}).get("razorpay") or {}
+    key_id = _decrypt_safe(rp.get("key_id_enc"))
+    key_secret = _decrypt_safe(rp.get("key_secret_enc"))
+    if not key_id or not key_secret:
+        raise HTTPException(503, "Billing credentials are unavailable")
+    member_id = sess["member_id"]
+    member_subscription = (sess["member"].get("subscription") or {})
+    current_end = member_subscription.get("current_end")
+    if isinstance(current_end, (int, float)):
+        current_end = datetime.fromtimestamp(current_end, timezone.utc)
+    elif isinstance(current_end, str):
+        try:
+            current_end = datetime.fromisoformat(current_end)
+        except ValueError:
+            current_end = None
+    if (
+        _effective_member_plan(sess["member"]) in ("premium", "pro")
+        and member_subscription.get("status") == "active"
+        and isinstance(current_end, datetime)
+        and (current_end.replace(tzinfo=timezone.utc) if current_end.tzinfo is None else current_end)
+            > datetime.now(timezone.utc)
+    ):
+        raise HTTPException(409, "Your current paid access must end before starting another subscription")
+    active = await db.member_subscriptions.find_one({
+        "user_id": member_id,
+        "status": {"$in": ["created", "authenticated", "active"]},
+    })
+    if active:
+        active_end = active.get("current_end")
+        if isinstance(active_end, (int, float)):
+            active_end = datetime.fromtimestamp(active_end, timezone.utc)
+        elif isinstance(active_end, str):
+            try:
+                active_end = datetime.fromisoformat(active_end)
+            except ValueError:
+                active_end = None
+        if isinstance(active_end, datetime) and active_end.tzinfo is None:
+            active_end = active_end.replace(tzinfo=timezone.utc)
+        created_at = active.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except ValueError:
+                created_at = None
+        if isinstance(created_at, datetime) and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        active_period_remains = (
+            active.get("status") == "active"
+            and (active_end is None or active_end > datetime.now(timezone.utc))
+        )
+        pending_checkout_is_fresh = (
+            active.get("status") in ("created", "authenticated")
+            and isinstance(created_at, datetime)
+            and created_at > datetime.now(timezone.utc) - timedelta(minutes=20)
+        )
+        if active_period_remains or pending_checkout_is_fresh:
+            raise HTTPException(409, "An active or pending subscription already exists")
+
+    request_body = {
+        "plan_id": plan_id,
+        "total_count": 120,
+        "quantity": 1,
+        "customer_notify": 1,
+        "notes": {
+            "member_id": member_id,
+            "plan": requested_plan,
+            "cadence": cadence,
+        },
+    }
+    early = config.get("early_access") or {}
+    try:
+        first_period_offer_price = _configured_offer_price(plan_price, cadence)
+    except ValueError as exc:
+        raise HTTPException(503, "The selected first-period offer price is invalid") from exc
+    discount = (
+        int(early.get("discount_percent") or 0)
+        if early.get("enabled") and first_period_offer_price is None
+        else 0
+    )
+    offer_id = str((plan_price.get("razorpay_offer_ids") or {}).get(cadence) or "").strip()
+    if discount or first_period_offer_price is not None:
+        if not offer_id:
+            raise HTTPException(
+                503,
+                "The first-period price requires a matching Razorpay offer ID for this billing cadence",
+            )
+        request_body["offer_id"] = offer_id
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15, auth=(key_id, key_secret)) as client:
+            provider_plan = await client.get(f"https://api.razorpay.com/v1/plans/{plan_id}")
+            provider_plan.raise_for_status()
+            provider_plan = provider_plan.json()
+            item = provider_plan.get("item") or {}
+            if (
+                int(item.get("amount") or 0) != amount_paise
+                or str(item.get("currency") or "").upper() != str(pricing.get("currency") or "INR").upper()
+            ):
+                raise HTTPException(503, "Razorpay plan amount or currency does not match Admin pricing")
+            response = await client.post(
+                "https://api.razorpay.com/v1/subscriptions",
+                json=request_body,
+            )
+            response.raise_for_status()
+            subscription = response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Razorpay checkout failed (%s)", type(e).__name__)
+        raise HTTPException(502, "Razorpay checkout is temporarily unavailable")
+    subscription_id = str(subscription.get("id") or "")
+    short_url = str(subscription.get("short_url") or "")
+    if not subscription_id or not short_url:
+        raise HTTPException(502, "Razorpay did not return a valid subscription checkout")
+    now = datetime.now(timezone.utc)
+    await db.member_subscriptions.update_one(
+        {"_id": subscription_id},
+        {"$set": {
+            "user_id": member_id,
+            "plan": requested_plan,
+            "cadence": cadence,
+            "plan_id": plan_id,
+            "status": "created",
+            "checkout_url": short_url,
+            "current_end": subscription.get("current_end"),
+            "discount_percent": discount,
+            "offer_id": offer_id or None,
+            "first_period_price": first_period_offer_price,
+            "created_at": now,
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+    await db.members.update_one(
+        {"_id": member_id},
+        {"$set": {
+            "subscription.id": subscription_id,
+            "subscription.plan": requested_plan,
+            "subscription.cadence": cadence,
+            "subscription.status": "created",
+            "subscription.checkout_url": short_url,
+            "subscription.updated_at": now.isoformat(),
+        }},
+    )
+    if subscription.get("current_end") is not None:
+        await db.members.update_one(
+            {"_id": member_id},
+            {"$set": {"subscription.current_end": subscription["current_end"]}},
+        )
+    await _record_member_audit(
+        member_id,
+        "subscription_checkout_created",
+        "member",
+        {"plan": requested_plan, "cadence": cadence},
+    )
+    return {
+        "subscription_id": subscription_id,
+        "short_url": short_url,
+        "key_id": key_id,
+        "plan": requested_plan,
+        "cadence": cadence,
+        "price": plan_price[cadence],
+        "regular_price": plan_price[cadence],
+        "first_period_price": first_period_offer_price or plan_price[cadence],
+        "currency": pricing.get("currency") or "INR",
+        "discount_percent": discount,
+    }
+
+
+@api_router.post("/billing/cancel")
+async def membership_cancel(request: Request):
+    sess, _config, _plan = await _member_context(request)
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    sub_id = str((sess["member"].get("subscription") or {}).get("id") or "")
+    if not sub_id:
+        raise HTTPException(404, "No provider subscription is linked to this account")
+    stored = await db.member_subscriptions.find_one({
+        "_id": sub_id,
+        "user_id": sess["member_id"],
+        "status": {"$in": ["created", "authenticated", "active"]},
+    })
+    if not stored:
+        raise HTTPException(409, "No cancellable subscription was found")
+    doc = await _load_platform_config()
+    rp = (doc or {}).get("razorpay") or {}
+    key_id = _decrypt_safe(rp.get("key_id_enc"))
+    key_secret = _decrypt_safe(rp.get("key_secret_enc"))
+    if not (rp.get("enabled") and key_id and key_secret):
+        raise HTTPException(503, "Billing credentials are unavailable")
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15, auth=(key_id, key_secret)) as client:
+            response = await client.post(
+                f"https://api.razorpay.com/v1/subscriptions/{sub_id}/cancel",
+                json={"cancel_at_cycle_end": 0},
+            )
+            response.raise_for_status()
+            provider_sub = response.json()
+    except Exception as exc:
+        logger.warning("Razorpay cancellation failed (%s)", type(exc).__name__)
+        raise HTTPException(502, "Could not cancel the subscription. Please retry.")
+    now = datetime.now(timezone.utc)
+    current_end = (
+        provider_sub.get("current_end")
+        or stored.get("current_end")
+        or (sess["member"].get("subscription") or {}).get("current_end")
+    )
+    await db.member_subscriptions.update_one(
+        {"_id": sub_id, "user_id": sess["member_id"]},
+        {"$set": {
+            "status": "cancelled",
+            "current_end": current_end,
+            "updated_at": now,
+        }},
+    )
+    member_update = {
+        "plan": "normal",
+        "admin_plan_override": False,
+        "subscription.status": "cancelled",
+        "subscription.updated_at": now.isoformat(),
+    }
+    if current_end is not None:
+        member_update["subscription.current_end"] = current_end
+    await db.members.update_one({"_id": sess["member_id"]}, {"$set": member_update})
+    await _record_member_audit(
+        sess["member_id"],
+        "subscription_renewal_cancelled",
+        "member",
+        {"current_end": current_end, "access_ends_immediately": True},
+    )
+    return {"ok": True, "status": "cancelled", "plan": "normal", "current_end": current_end}
+
+
+@api_router.post("/billing/razorpay/webhook")
+async def razorpay_webhook(request: Request):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    doc = await _load_platform_config()
+    rp = (doc or {}).get("razorpay") or {}
+    secret = _decrypt_safe(rp.get("webhook_secret_enc"))
+    if not (rp.get("enabled") and secret):
+        raise HTTPException(503, "Razorpay webhook is not configured")
+    body = await request.body()
+    if not body or len(body) > 1024 * 1024:
+        raise HTTPException(413, "Invalid webhook payload")
+    signature = request.headers.get("x-razorpay-signature") or ""
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
+        raise HTTPException(401, "Invalid Razorpay webhook signature")
+    try:
+        event = json.loads(body)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid webhook JSON")
+    event_type = str(event.get("event") or "")
+    event_id = (
+        request.headers.get("x-razorpay-event-id")
+        or str(event.get("id") or "")
+        or hashlib.sha256(body).hexdigest()
+    )
+    delivered = await db.billing_events.find_one({"_id": event_id}, {"_id": 1})
+    if delivered:
+        return {"ok": True, "duplicate": True}
+    payload_data = event.get("payload") or {}
+    subscription = ((payload_data.get("subscription") or {}).get("entity") or {})
+    subscription_id = str(subscription.get("id") or "")
+    payment = {}
+    if not subscription_id and event_type in ("payment.failed", "payment.refunded"):
+        payment = ((payload_data.get("payment") or {}).get("entity") or {})
+        subscription_id = str(payment.get("subscription_id") or "")
+    elif event_type in ("payment.failed", "payment.refunded"):
+        payment = ((payload_data.get("payment") or {}).get("entity") or {})
+    stored = await db.member_subscriptions.find_one({"_id": subscription_id}) if subscription_id else None
+    if not stored:
+        return {"ok": True, "ignored": True}
+    event_created_at = event.get("created_at")
+    try:
+        event_created_at = int(event_created_at) if event_created_at is not None else None
+    except (TypeError, ValueError):
+        event_created_at = None
+    last_event_created_at = stored.get("last_event_created_at")
+    if (
+        event_created_at is not None
+        and isinstance(last_event_created_at, (int, float))
+        and event_created_at < last_event_created_at
+    ):
+        await db.billing_events.update_one(
+            {"_id": event_id},
+            {"$setOnInsert": {
+                "event_type": event_type,
+                "subscription_id": subscription_id,
+                "received_at": datetime.now(timezone.utc),
+                "ignored_as_stale": True,
+            }},
+            upsert=True,
+        )
+        return {"ok": True, "ignored": True, "stale": True}
+    state_by_event = {
+        "subscription.activated": "active",
+        "subscription.charged": "active",
+        "subscription.resumed": "active",
+        "subscription.cancelled": "cancelled",
+        "subscription.completed": "completed",
+        "subscription.expired": "expired",
+        "subscription.halted": "halted",
+        "subscription.paused": "paused",
+        "payment.failed": "past_due",
+    }
+    status = state_by_event.get(event_type)
+    if event_type == "payment.refunded":
+        amount = int(payment.get("amount") or 0)
+        amount_refunded = int(payment.get("amount_refunded") or 0)
+        if amount > 0 and amount_refunded >= amount:
+            status = "refunded"
+    if not status:
+        return {"ok": True, "ignored": True}
+    current_end = subscription.get("current_end")
+    now = datetime.now(timezone.utc)
+    set_fields = {
+        "status": status,
+        "updated_at": now,
+        "last_event_id": event_id,
+        "last_event_type": event_type,
+    }
+    if event_created_at is not None:
+        set_fields["last_event_created_at"] = event_created_at
+    if current_end is not None:
+        set_fields["current_end"] = current_end
+    if payment.get("id"):
+        set_fields["last_payment_id"] = str(payment["id"])
+    await db.member_subscriptions.update_one({"_id": subscription_id}, {"$set": set_fields})
+    member_update = {
+        "subscription.id": subscription_id,
+        "subscription.plan": stored.get("plan"),
+        "subscription.cadence": stored.get("cadence"),
+        "subscription.status": status,
+        "subscription.updated_at": now.isoformat(),
+    }
+    if status not in ("created", "authenticated"):
+        member_update["subscription.checkout_url"] = None
+    if current_end is not None:
+        member_update["subscription.current_end"] = current_end
+    if stored.get("plan") in ("premium", "pro"):
+        member_update["plan"] = stored["plan"] if status == "active" else "normal"
+        member_update["admin_plan_override"] = False
+    await db.members.update_one({"_id": stored["user_id"]}, {"$set": member_update})
+    await db.billing_events.update_one(
+        {"_id": event_id},
+        {"$setOnInsert": {
+            "event_type": event_type,
+            "subscription_id": subscription_id,
+            "received_at": now,
+            "event_created_at": event_created_at,
+        }},
+        upsert=True,
+    )
+    await _record_member_audit(
+        stored["user_id"],
+        "subscription_status_changed",
+        "razorpay",
+        {
+            "plan": stored.get("plan"),
+            "status": status,
+            "event_type": event_type,
+        },
+    )
+    return {"ok": True}
+
+
+async def _purge_old_alert_history():
+    if db is None:
+        return
+    from membership import member_alert_purge_cutoff
+    cutoff = member_alert_purge_cutoff()
+    await db.member_alerts.delete_many({"created_at": {"$lt": cutoff}})
+    await db.alerts.delete_many({"created_at": {"$lt": cutoff.isoformat()}})
+
+
+async def _member_alert_cleanup_loop():
+    """Remove prior-day shared and member alert records at 09:00 IST, not via TTL lag."""
+    from membership import next_member_alert_purge, member_alert_purge_cutoff
+    try:
+        await _purge_old_alert_history()
+    except Exception:
+        logger.exception("Initial alert retention cleanup failed")
+    while True:
+        try:
+            target = next_member_alert_purge()
+            await asyncio.sleep(max(0.0, (target - datetime.now(timezone.utc)).total_seconds()))
+            cutoff = member_alert_purge_cutoff(target)
+            if db is not None:
+                await db.member_alerts.delete_many({"created_at": {"$lt": cutoff}})
+                await db.alerts.delete_many({"created_at": {"$lt": cutoff.isoformat()}})
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Member alert retention cleanup failed")
+            await asyncio.sleep(30)
 
 
 app.include_router(api_router)
@@ -7224,6 +9844,7 @@ logger.propagate = False
 straddle_sampler_task = None
 poll_watchdog_task = None
 journal_eod_task = None
+member_alert_cleanup_task = None
 market_intel_task = None
 market_intel_stop = None
 adr_task = None
@@ -7300,6 +9921,19 @@ async def _ensure_mongo_indexes():
         await db.oi_snapshots.create_index([("index", 1), ("created_at", 1)])
         await db.oi_snapshots.create_index("created_at")
         await db.alerts.create_index([("index", 1), ("created_at", -1)])
+        await db.member_alerts.create_index([("user_id", 1), ("source_alert_id", 1)])
+        await db.member_alerts.create_index("created_at")
+        await db.member_alert_events.create_index(
+            [("user_id", 1), ("created_at", -1)],
+            name="idx_member_alert_events_user_created",
+        )
+        await db.member_alert_events.create_index(
+            "expire_at",
+            expireAfterSeconds=0,
+            name="ttl_member_alert_events_expire",
+        )
+        await db.member_journal.create_index([("user_id", 1), ("date", 1)], unique=True)
+        await db.billing_events.create_index("event_type", name="idx_billing_events_event_type")
         await db.straddle_samples.create_index([("index", 1), ("trade_date", 1), ("expiry", 1)])
         await db.straddle_samples.create_index([("index", 1), ("ts", 1)])
         await db.straddle_samples.create_index("created_at")
@@ -7380,7 +10014,8 @@ async def _seed_last_snapshots():
 
 
 async def _boot_rest():
-    global straddle_sampler_task, poll_watchdog_task, journal_eod_task, market_intel_task, market_intel_stop, adr_task, adr_stop
+    global straddle_sampler_task, poll_watchdog_task, journal_eod_task, member_alert_cleanup_task
+    global market_intel_task, market_intel_stop, adr_task, adr_stop
     await _ensure_mongo_indexes()
     try:
         await asyncio.wait_for(tracker.load_credentials(), timeout=20)
@@ -7408,6 +10043,7 @@ async def _boot_rest():
     straddle_sampler_task = asyncio.create_task(_straddle_sampler())
     poll_watchdog_task = asyncio.create_task(_market_day_poll_watchdog())
     journal_eod_task = asyncio.create_task(_journal_eod_lock_loop())
+    member_alert_cleanup_task = asyncio.create_task(_member_alert_cleanup_loop())
     try:
         import market_intel as _mi
         market_intel_stop = asyncio.Event()
@@ -7452,7 +10088,10 @@ async def _shutdown():
         await fii_dii.stop()
     except Exception:
         pass
-    for task_name in ("straddle_sampler_task", "poll_watchdog_task", "journal_eod_task", "market_intel_task", "adr_task"):
+    for task_name in (
+        "straddle_sampler_task", "poll_watchdog_task", "journal_eod_task",
+        "member_alert_cleanup_task", "market_intel_task", "adr_task",
+    ):
         if task_name == "market_intel_task" and market_intel_stop:
             market_intel_stop.set()
         if task_name == "adr_task" and adr_stop:

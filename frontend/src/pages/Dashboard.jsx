@@ -23,7 +23,6 @@ import BuildupTable from "@/components/BuildupTable";
 import GuestHolidayCalendarBanner from "@/components/GuestHolidayCalendarBanner";
 import AdminUploadAdvisor from "@/components/AdminUploadAdvisor";
 import OvernightGapBrief from "@/components/OvernightGapBrief";
-import CasIepPopup from "@/components/CasIepPopup";
 import DeskAiMobileSheet from "@/components/DeskAiMobileSheet";
 import MarketIntelPage from "@/components/MarketIntelPage";
 import GlobalMarketsPage from "@/components/GlobalMarketsPage";
@@ -73,13 +72,14 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { fetchOIChange, fetchAlerts, clearAlerts, fetchStatus, fetchVRP, fetchTickers, fetchConfig, invalidateConfigCache, api, completeUserKiteSession, userKiteLoginUrl, prefetchStraddleHistory } from "@/lib/api";
+import { fetchOIChange, fetchAlerts, clearAlerts, fetchStatus, fetchVRP, fetchTickers, fetchConfig, invalidateConfigCache, api, completeUserKiteSession, userKiteLoginUrl, userKiteStatus, prefetchStraddleHistory } from "@/lib/api";
 import { friendlyKiteConnectError } from "@/lib/kiteConnectError";
 import { safeHttpUrl } from "@/lib/safeUrl";
+import MemberBrokerConnectModal from "@/components/MemberBrokerConnectModal";
 import { applyMarketHoursFromStatus, getMarketOpenMinute, getMarketCloseMinute, nseCashSessionLive, isMarketQuiescent, EVENT_WARNING_MINUTE, istMinutesOfDay } from "@/lib/marketTimes";
 import { setPositionsBookPollMs, refreshPositionsBook, notifyKiteConnected } from "@/lib/positionsBook";
 import { connectSpotWS } from "@/lib/spotWs";
-import { casIepPopupActive, mergeIndicativeClose, readCasIepPopupPref, writeCasIepPopupPref, indicativeChangePct, roundAtm } from "@/lib/casIepPopup";
+import { casIepPopupActive, mergeIndicativeClose, indicativeChangePct, roundAtm } from "@/lib/casIepPopup";
 import { downloadOICsv } from "@/lib/csv";
 import { toast } from "sonner";
 import { useNotify } from "@/hooks/useNotify";
@@ -116,6 +116,38 @@ const DASHBOARD_PAGES = [
   { v: "market-intel", l: "Mkt Intel" },
   { v: "adrs", l: "Global Markets" },
 ];
+const DASHBOARD_HIDDEN_PAGES_LS = "oiDeskHiddenDashboardPages";
+const DASHBOARD_PAGE_IDS = new Set(DASHBOARD_PAGES.map((page) => page.v));
+
+function normalizeHiddenDashboardPages(value) {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((id) => typeof id === "string" && DASHBOARD_PAGE_IDS.has(id)))]
+    : [];
+}
+
+function loadHiddenDashboardPages() {
+  try {
+    return normalizeHiddenDashboardPages(JSON.parse(localStorage.getItem(DASHBOARD_HIDDEN_PAGES_LS) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+const MEMBER_PAGE_FEATURES = {
+  "oi-change": "oi_change",
+  "open-interest": "open_interest",
+  "strike-table": "strike_table",
+  "sell-candidates": "sell_candidates",
+  buildup: "buildup",
+  positions: "positions",
+  alerts: "alerts",
+  activity: "activity",
+  holidays: "events",
+  straddle: "straddle",
+  "index-events": "index_risk",
+  "market-intel": "market_intel",
+  adrs: "global_markets",
+};
 
 // Threshold on aggregate |PE - CE| change relative to base OI that triggers a
 // frontend-side alert on each data-pull for the currently viewed timeframe.
@@ -262,6 +294,40 @@ export default function Dashboard({ demoMode = false }) {
     } catch (_) { /* noop */ }
     return { is_admin: false, is_guest: false, guest_name: null, admin_display_name: null };
   });
+  const [hiddenDashboardPages, setHiddenDashboardPages] = useState(loadHiddenDashboardPages);
+  const [savingHiddenPages, setSavingHiddenPages] = useState(false);
+  const memberPreferences = useMemo(
+    () => authState.is_member ? authState.membership?.preferences || {} : {},
+    [authState.is_member, authState.membership?.preferences],
+  );
+  const memberFeatures = authState.membership?.features || [];
+  const memberCanUseAlertSounds = !!authState.is_admin
+    || (authState.is_member && memberFeatures.includes("alert_sounds"));
+  const playEntitledAlertSound = useCallback((kind) => {
+    if (memberCanUseAlertSounds) playForAlert(kind);
+  }, [memberCanUseAlertSounds]);
+  const memberAlertIndexEnabled = !authState.is_member
+    || (memberPreferences.alert_indices || []).includes(activeIndex);
+  const memberCanReceiveOiChange = !authState.is_member
+    || (memberFeatures.includes("oi_change_alerts")
+      && memberPreferences.alert_types?.oi_change !== false);
+  const memberCanReceiveOiShift = !authState.is_member
+    || (memberFeatures.includes("oi_shift_alerts")
+      && memberPreferences.alert_types?.oi_shift !== false);
+  const memberCanReceiveMarketIntel = !authState.is_member
+    || (memberFeatures.includes("market_intel")
+      && memberPreferences.alert_types?.market_intel !== false);
+  const memberCanSeeOvernightRisk = !authState.is_member
+    || (memberFeatures.includes("overnight_position_risk")
+      && memberPreferences.overnight_position_risk_enabled !== false);
+  const canReadPersonalPositions = !!authState.is_admin
+    || (authState.is_member && memberFeatures.includes("positions"));
+
+  useEffect(() => {
+    setHiddenDashboardPages(authState.is_member
+      ? normalizeHiddenDashboardPages(memberPreferences.hidden_dashboard_pages)
+      : loadHiddenDashboardPages());
+  }, [authState.is_member, memberPreferences.hidden_dashboard_pages]);
   const [alerts, setAlerts] = useState([]);
   const [dataStatus, setDataStatus] = useState(null);
   const [strikesAround, setStrikesAround] = useState(loadStrikesAround);
@@ -269,6 +335,7 @@ export default function Dashboard({ demoMode = false }) {
   /** ±N chips keep ATM centered as spot moves. Manual min/max turns this off until a chip is picked again. */
   const [followAtm, setFollowAtm] = useState(true);
   const [credsOpen, setCredsOpen] = useState(false);
+  const [memberBrokerOpen, setMemberBrokerOpen] = useState(false);
   const [deskAiKeysOpen, setDeskAiKeysOpen] = useState(false);
   const [miSettingsOpen, setMiSettingsOpen] = useState(false);
   const [adrAdminOpen, setAdrAdminOpen] = useState(false);
@@ -426,11 +493,12 @@ export default function Dashboard({ demoMode = false }) {
     return true;
   });
   const [headerRail, setHeaderRail] = useState(() => {
+    if (demoMode) return true;
     try {
       const stored = localStorage.getItem("oiHeaderRail");
       if (stored === "1" || stored === "0") return stored === "1";
     } catch { /* noop */ }
-    // Default normal (tall colorful tiles) — slim is hard to read; toggle in View.
+    // The walkthrough starts compact; normal desk users retain their existing default.
     return false;
   });
   const infoTilesAutoOpenRef = useRef(null);
@@ -483,14 +551,13 @@ export default function Dashboard({ demoMode = false }) {
   const activeIndexRef = useRef(activeIndex);
   const [liveSpotPrices, setLiveSpotPrices] = useState({});
   const [tickerQuotes, setTickerQuotes] = useState({});
-  const [casIepPopup, setCasIepPopup] = useState(() => readCasIepPopupPref());
   const [casIepCfg, setCasIepCfg] = useState({
     enabled: true,
     force: false,
     startIst: "15:20",
     endIst: "15:30",
   });
-  const [popupOpacity, setPopupOpacity] = useState({ overnight: 92, marketIntel: 92, indicative: 92 });
+  const [popupOpacity, setPopupOpacity] = useState({ overnight: 92, marketIntel: 92 });
   const [iepClockMin, setIepClockMin] = useState(() => istMinutesOfDay());
   const iepKeepRef = useRef(false);
   // Warm cache for ALL enabled indices so switching NIFTY ↔ SENSEX is instant.
@@ -599,8 +666,9 @@ export default function Dashboard({ demoMode = false }) {
     try { localStorage.setItem("oiInfoTilesOpen", infoTilesOpen ? "1" : "0"); } catch (_) { /* noop */ }
   }, [infoTilesOpen]);
   useEffect(() => {
+    if (demoMode) return;
     try { localStorage.setItem("oiHeaderRail", headerRail ? "1" : "0"); } catch (_) { /* noop */ }
-  }, [headerRail]);
+  }, [demoMode, headerRail]);
 
   useEffect(() => {
     const unlock = () => { unlockSounds(); };
@@ -618,11 +686,11 @@ export default function Dashboard({ demoMode = false }) {
     const onVis = () => {
       if (document.hidden) return;
       unlockSounds();
-      flushHiddenAlerts({ toast, playSound: playForAlert });
+      flushHiddenAlerts({ toast, playSound: playEntitledAlertSound });
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
+  }, [playEntitledAlertSound]);
 
   // Weekday 15:15 IST — force-open holiday/FII/event tiles so next-day risk is visible.
   useEffect(() => {
@@ -689,13 +757,19 @@ export default function Dashboard({ demoMode = false }) {
     || !!status?.kite_ok;
   const startUserKite = async () => {
     if (demoMode) return;
+    if (authState.is_member) {
+      setMemberBrokerOpen(true);
+      return;
+    }
     try {
       const data = await userKiteLoginUrl();
       const href = safeHttpUrl(data?.login_url);
       if (href) window.location.assign(href);
-      else toast.error("Kite login URL unavailable");
+      else toast.error(authState.is_member ? "Broker login link unavailable" : "Kite login URL unavailable");
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not start Kite login");
+      const detail = e?.response?.data?.detail;
+      const message = detail || (authState.is_member ? "Could not start broker connection" : "Could not start Kite login");
+      toast.error(authState.is_member ? String(message).replace(/\b(?:zerodha|kite)\b/gi, "broker") : message);
     }
   };
   const openKiteCreds = authState.is_admin ? () => setCredsOpen(true) : startUserKite;
@@ -794,22 +868,37 @@ export default function Dashboard({ demoMode = false }) {
   }, [status, demoMode]);
 
   const tabOn = useCallback(
-    (id) => id !== "adrs" && pageAllowed(id, {
-      isAdmin: !!authState.is_admin,
+    (id) => {
+      const requiredFeature = MEMBER_PAGE_FEATURES[id];
+      const memberHasFeature = !authState.is_member
+        || (!!requiredFeature && (authState.membership?.features || []).includes(requiredFeature));
+      // Candidate-style trade surfaces remain available to Admin regardless of guest/member page ticks.
+      const adminOnlyPage = id === "sell-candidates";
+      // Member pages fail closed unless the plan explicitly grants that page.
+      const pageIsVisible = pageAllowed(id, {
+        isAdmin: !!authState.is_admin,
+        visiblePages,
+        adminPages: adminVisiblePages,
+        pagesReady,
+      });
+      return (!adminOnlyPage || !!authState.is_admin)
+        && memberHasFeature
+        && pageIsVisible
+        && (id !== "adrs" || globalMarketsEnabled === true);
+    },
+    [
+      authState.is_admin,
+      authState.is_member,
+      authState.membership?.features,
       visiblePages,
-      adminPages: adminVisiblePages,
+      adminVisiblePages,
       pagesReady,
-    }) || (id === "adrs" && globalMarketsEnabled === true && pageAllowed(id, {
-      isAdmin: !!authState.is_admin,
-      visiblePages,
-      adminPages: adminVisiblePages,
-      pagesReady,
-    })),
-    [authState.is_admin, visiblePages, adminVisiblePages, pagesReady, globalMarketsEnabled],
+      globalMarketsEnabled,
+    ],
   );
 
   const notifyMarketNews = useCallback((article, additionalCount = 0) => {
-    if (demoMode || !article?.title) return;
+    if (demoMode || !article?.title || !memberCanReceiveMarketIntel) return;
     const band = article.impact_band || "HIGH";
     const headline = `${article.title}${additionalCount ? ` (+${additionalCount} more)` : ""}`;
     toast.warning(`Market news · ${band}`, {
@@ -823,28 +912,90 @@ export default function Dashboard({ demoMode = false }) {
       },
     });
     push(`Market news · ${band}`, headline);
-  }, [demoMode, push, tabOn]);
+  }, [demoMode, memberCanReceiveMarketIntel, push, tabOn]);
 
   useEffect(() => {
     const allowedTabs = orderPages(DASHBOARD_PAGES, tabOrder)
       .filter((page) => {
         if (page.adminOnly && !authState.is_admin) return false;
-        return tabOn(page.v);
+        return tabOn(page.v) && !hiddenDashboardPages.includes(page.v);
       })
       .map((page) => page.v);
     if (allowedTabs.length === 0) return;
     if (!allowedTabs.includes(activeTab)) {
       setActiveTab(allowedTabs.includes(HOME_PAGE) ? HOME_PAGE : allowedTabs[0]);
     }
-  }, [authState.is_admin, activeTab, visiblePages, adminVisiblePages, tabOrder, tabOn]);
+  }, [authState.is_admin, activeTab, visiblePages, adminVisiblePages, tabOrder, tabOn, hiddenDashboardPages]);
 
   const dashboardTabs = useMemo(
     () =>
       orderPages(DASHBOARD_PAGES, tabOrder).filter(
-        (t) => (!t.adminOnly || authState.is_admin) && tabOn(t.v),
+        (t) => (!t.adminOnly || authState.is_admin)
+          && tabOn(t.v)
+          && !hiddenDashboardPages.includes(t.v),
       ),
-    [tabOrder, authState.is_admin, tabOn],
+    [tabOrder, authState.is_admin, tabOn, hiddenDashboardPages],
   );
+  const hiddenDashboardTabOptions = useMemo(
+    () => orderPages(DASHBOARD_PAGES, tabOrder).filter(
+      (t) => (!t.adminOnly || authState.is_admin)
+        && tabOn(t.v)
+        && hiddenDashboardPages.includes(t.v),
+    ),
+    [tabOrder, authState.is_admin, tabOn, hiddenDashboardPages],
+  );
+  const dashboardPageIds = useMemo(
+    () => dashboardTabs.map((page) => page.v),
+    [dashboardTabs],
+  );
+
+  const updateHiddenDashboardPage = useCallback(async (pageId, hide) => {
+    if (!DASHBOARD_PAGE_IDS.has(pageId) || !tabOn(pageId)) return;
+    const previous = hiddenDashboardPages;
+    const next = normalizeHiddenDashboardPages(
+      hide ? [...previous, pageId] : previous.filter((id) => id !== pageId),
+    );
+    const eligiblePageIds = DASHBOARD_PAGES
+      .filter((page) => (!page.adminOnly || authState.is_admin) && tabOn(page.v))
+      .map((page) => page.v);
+    if (hide && eligiblePageIds.every((id) => next.includes(id))) {
+      toast.error("Keep at least one dashboard page visible");
+      return;
+    }
+
+    setHiddenDashboardPages(next);
+    if (!authState.is_member) {
+      try {
+        localStorage.setItem(DASHBOARD_HIDDEN_PAGES_LS, JSON.stringify(next));
+      } catch {
+        setHiddenDashboardPages(previous);
+        toast.error("Could not save your dashboard page choices");
+      }
+      return;
+    }
+
+    setSavingHiddenPages(true);
+    try {
+      const { data } = await api.put("/membership/preferences", {
+        ...memberPreferences,
+        hidden_dashboard_pages: next,
+      });
+      const saved = normalizeHiddenDashboardPages(data?.preferences?.hidden_dashboard_pages);
+      setHiddenDashboardPages(saved);
+      setAuthState((current) => ({
+        ...current,
+        membership: {
+          ...current.membership,
+          preferences: data.preferences,
+        },
+      }));
+    } catch (error) {
+      setHiddenDashboardPages(previous);
+      toast.error(error?.response?.data?.detail || "Could not save your dashboard page choices");
+    } finally {
+      setSavingHiddenPages(false);
+    }
+  }, [authState.is_admin, authState.is_member, hiddenDashboardPages, memberPreferences, tabOn]);
 
   const handleReorderTabs = useCallback(
     (dragId, dropId) => {
@@ -961,6 +1112,25 @@ export default function Dashboard({ demoMode = false }) {
     // Auth state is owned by AuthGate / Header — do not re-fetch on every OI poll.
   }, []);
 
+  const refreshMemberBrokerStatus = useCallback(async () => {
+    if (!authState.is_member) return null;
+    try {
+      const brokerStatus = await userKiteStatus();
+      setAuthState((current) => ({ ...current, user_kite: brokerStatus }));
+      return brokerStatus;
+    } catch (error) {
+      console.error("Could not refresh member broker status", error);
+      return null;
+    }
+  }, [authState.is_member]);
+
+  useEffect(() => {
+    if (!authState.is_member) return undefined;
+    refreshMemberBrokerStatus();
+    const id = window.setInterval(refreshMemberBrokerStatus, 60_000);
+    return () => window.clearInterval(id);
+  }, [authState.is_member, refreshMemberBrokerStatus]);
+
   useEffect(() => {
     if (demoMode) return undefined;
     if (typeof window === "undefined") return undefined;
@@ -981,23 +1151,25 @@ export default function Dashboard({ demoMode = false }) {
         setActiveTab("positions");
         notifyKiteConnected();
         refreshPositionsBook().catch(() => {});
-        loadStatus();
+        await Promise.allSettled([loadStatus(), refreshMemberBrokerStatus()]);
       } catch (e) {
         if (!cancelled) toast.error(friendlyKiteConnectError(e?.response?.data?.detail || e.message || "Could not complete Kite login"));
       }
     })();
     return () => { cancelled = true; };
-  }, [authState.is_admin, authState.is_guest, loadStatus, demoMode]);
+  }, [authState.is_admin, authState.is_guest, loadStatus, refreshMemberBrokerStatus, demoMode]);
 
   useEffect(() => {
     if (demoMode) return undefined;
     if (typeof window === "undefined") return undefined;
     const qs = new URLSearchParams(window.location.search);
-    if (qs.get("kite") !== "connected") return undefined;
+    const kiteStatus = qs.get("kite");
+    if (kiteStatus !== "connected" && kiteStatus !== "connect") return undefined;
     qs.delete("kite");
     const next = qs.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
     setActiveTab("positions");
+    if (kiteStatus === "connect") return undefined;
     notifyKiteConnected();
     refreshPositionsBook().catch(() => {});
     loadStatus();
@@ -1038,6 +1210,19 @@ export default function Dashboard({ demoMode = false }) {
   const [deskAiPositions, setDeskAiPositions] = useState(false);
   const [deskAiRadar, setDeskAiRadar] = useState(false);
   const [deskAiMobileOpen, setDeskAiMobileOpen] = useState(false);
+  const memberProPreferences = authState.is_member && authState.membership?.plan === "pro"
+    ? authState.membership.preferences || {}
+    : {};
+  const effectiveWriterDefense = !!authState.is_admin
+    && (memberProPreferences.show_writer_defense ?? showWriterDefense);
+  const effectiveSuggestion = !!authState.is_admin
+    && (memberProPreferences.show_suggestion ?? showSuggestion);
+  const effectiveChartSignals = !!authState.is_admin
+    && (memberProPreferences.show_chart_signals ?? showChartSignals);
+  const effectiveDeskAiShow = deskAiShow && (
+    !authState.is_member
+    || (authState.membership?.features || []).includes("desk_ai")
+  );
   const openDeskAiPanel = useCallback(() => {
     setRightPanelView("desk-ai");
     setRightPanelOpen(true);
@@ -1435,7 +1620,7 @@ export default function Dashboard({ demoMode = false }) {
           duration: 8000,
           // Sample alerts stay inside the app and cannot masquerade as live push or sound alerts.
           soundKind: isDemoSample ? undefined : "reversal",
-          playSound: isDemoSample ? undefined : playForAlert,
+          playSound: isDemoSample ? undefined : playEntitledAlertSound,
           pushFn: isDemoSample ? undefined : push,
           pushTitle: `OI Reversal · ${a.index}`,
           pushBody: a.direction || a.message || "OI alert",
@@ -1448,7 +1633,7 @@ export default function Dashboard({ demoMode = false }) {
     } catch (e) {
       console.error("loadAlerts failed", e);
     }
-  }, [push, nseLive, status, demoMode]);
+  }, [push, nseLive, status, demoMode, playEntitledAlertSound]);
 
   const loadTickers = useCallback(async () => {
     try {
@@ -1575,7 +1760,6 @@ export default function Dashboard({ demoMode = false }) {
     setPopupOpacity({
       overnight: Math.max(60, Math.min(100, Number(d.overnight_popup_opacity) || 92)),
       marketIntel: Math.max(60, Math.min(100, Number(d.market_intel_popup_opacity) || 92)),
-      indicative: Math.max(60, Math.min(100, Number(d.indicative_popup_opacity) || 92)),
     });
     if ("cas_iep_enabled" in d || "cas_iep_force" in d || "cas_iep_start_ist" in d || "cas_iep_end_ist" in d) {
       setCasIepCfg((prev) => ({
@@ -2077,11 +2261,13 @@ export default function Dashboard({ demoMode = false }) {
     setLastPullChange({ ce: changeSummary.ce, pe: changeSummary.pe, at: lastPulledAt, timeframeLabel });
     // Fire local alert ONLY while NSE cash/F&O is open — last-session OI must not toast.
     if (!nseCashSessionLive(status) || isMarketQuiescent(status)) return;
+    if (!memberCanReceiveOiChange || !memberAlertIndexEnabled) return;
     // Admin Alert Settings: only alert for selected indices (OI may still load others).
     if (!indexInAlertFocus(activeIndex)) return;
     // Fire local alert if intensity crosses threshold and cooldown has elapsed.
     const now = Date.now();
     if (
+      !authState.is_member &&
       changeSummary.intensity >= ALERT_INTENSITY &&
       now - lastLocalAlertRef.current > ALERT_COOLDOWN_MS
     ) {
@@ -2100,7 +2286,7 @@ export default function Dashboard({ demoMode = false }) {
         description: desc,
         duration: 6000,
         soundKind: "reversal",
-        playSound: playForAlert,
+        playSound: playEntitledAlertSound,
         pushFn: push,
         pushTitle: `OI Change · ${activeIndex}`,
         pushBody: msg,
@@ -2127,8 +2313,12 @@ export default function Dashboard({ demoMode = false }) {
     const pePctAbs = Math.abs(changeSummary.pePct || 0);
     const worstPct = Math.max(cePctAbs, pePctAbs);
     if (
-      worstPct >= changeAlertPct &&
-      now - lastPctAlertRef.current > ALERT_COOLDOWN_MS &&
+      worstPct >= (authState.is_member
+        ? Number(memberPreferences.oi_change_threshold_pct || 15)
+        : changeAlertPct) &&
+      now - lastPctAlertRef.current > (authState.is_member
+        ? Number(memberPreferences.alert_cooldown_seconds || 300) * 1000
+        : ALERT_COOLDOWN_MS) &&
       previous // fire once we have a compare baseline (even while warming toward full window)
     ) {
       lastPctAlertRef.current = now;
@@ -2150,7 +2340,7 @@ export default function Dashboard({ demoMode = false }) {
         description: desc,
         duration: 7000,
         soundKind: "reversal",
-        playSound: playForAlert,
+        playSound: playEntitledAlertSound,
         pushFn: push,
         pushTitle: `OI Change Alert · ${activeIndex}`,
         pushBody: title,
@@ -2169,7 +2359,12 @@ export default function Dashboard({ demoMode = false }) {
       setFlash(true);
       setTimeout(() => setFlash(false), 1800);
     }
-  }, [changeSummary, lastPulledAt, activeIndex, timeframeLabel, push, changeAlertPct, previous, status, pushActivity, indexInAlertFocus]);
+  }, [
+    changeSummary, lastPulledAt, activeIndex, timeframeLabel, push, changeAlertPct,
+    previous, status, pushActivity, indexInAlertFocus, authState.is_member,
+    memberPreferences.oi_change_threshold_pct, memberPreferences.alert_cooldown_seconds,
+    memberCanReceiveOiChange, memberAlertIndexEnabled, playEntitledAlertSound,
+  ]);
 
   // -------- Huge OI shift monitor (ATM ± 1 across 1/3/5 min windows) --------
   const emitHugeShiftNotify = useCallback((shift) => {
@@ -2186,7 +2381,7 @@ export default function Dashboard({ demoMode = false }) {
       description: copy.description,
       duration: 8000,
       soundKind: "huge_shift",
-      playSound: playForAlert,
+      playSound: playEntitledAlertSound,
       pushFn: push,
       pushTitle: copy.title,
       pushBody: copy.description,
@@ -2206,13 +2401,38 @@ export default function Dashboard({ demoMode = false }) {
         contributing: shift.contributing || [],
       }).catch(() => { /* silent — user already sees the modal */ });
     } catch (_) { /* noop */ }
-  }, [push]);
+  }, [push, playEntitledAlertSound]);
+
+  const saveMemberShiftAlert = useCallback((shift) => {
+    if (!authState.is_member) return;
+    api.post("/membership/alerts/oi-shift", {
+      id: shift.id,
+      index: shift.index,
+      window: shift.window,
+      side: shift.side,
+      value: shift.value,
+      atm: shift.atm,
+      price: shift.price,
+      contributing: shift.contributing || [],
+    }).then(({ data }) => {
+      if (!data?.alert) return;
+      setAlerts((previous) => [
+        data.alert,
+        ...previous.filter((alert) => alert.alert_id !== data.alert.alert_id),
+      ].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at))).slice(0, 100));
+    }).catch(() => {
+      toast.error("OI shift alert appeared, but could not be saved to your Alerts inbox");
+    });
+  }, [authState.is_member]);
 
   const handleHugeShift = useCallback((shift) => {
     // Admin alert focus first — viewing SENSEX must not alert if only NIFTY is selected.
-    if (!indexInAlertFocus(shift.index)) return;
+    if ((!authState.is_member && !indexInAlertFocus(shift.index))
+      || (authState.is_member && !memberCanReceiveOiShift)
+      || (authState.is_member && !(memberPreferences.alert_indices || []).includes(shift.index))) return;
     // Silence shifts for indices other than the currently viewed one.
     if (shift.index !== activeIndex) return;
+    saveMemberShiftAlert(shift);
     // Bookmark the live snapshot time so Replay can jump here.
     const bookmarkTs = changeBundle?.current?.timestamp || current?.timestamp || shift.at || null;
     if (bookmarkTs) {
@@ -2256,7 +2476,11 @@ export default function Dashboard({ demoMode = false }) {
     }
     hugeShiftOpenRef.current = true;
     setHugeShift(nextShift);
-  }, [activeIndex, pushActivity, changeBundle, current?.timestamp, indexInAlertFocus, emitHugeShiftNotify]);
+  }, [
+    activeIndex, pushActivity, changeBundle, current?.timestamp, indexInAlertFocus,
+    emitHugeShiftNotify, saveMemberShiftAlert, authState.is_member, memberCanReceiveOiShift,
+    memberPreferences.alert_indices,
+  ]);
 
   const dismissHugeShift = useCallback(() => {
     hugeShiftOpenRef.current = false;
@@ -2267,10 +2491,10 @@ export default function Dashboard({ demoMode = false }) {
         try { toast.dismiss(); } catch { /* noop */ }
         hugeShiftOpenRef.current = true;
         setHugeShift(next);
-        try { playForAlert("huge_shift"); } catch (_) { /* noop */ }
+        try { playEntitledAlertSound("huge_shift"); } catch (_) { /* noop */ }
       }
     }, 250);
-  }, []);
+  }, [playEntitledAlertSound]);
 
   const dismissAllHugeShifts = useCallback(() => {
     hugeShiftQueueRef.current = [];
@@ -2291,13 +2515,17 @@ export default function Dashboard({ demoMode = false }) {
   useHugeShiftMonitor({
     index: activeIndex,
     windows: oiSettings.hugeShiftWindows,
-    thresholdAbs: oiSettings.hugeShiftAbs,
+    thresholdAbs: authState.is_member
+      ? Number(memberPreferences.oi_shift_threshold_contracts || 100000)
+      : oiSettings.hugeShiftAbs,
     cooldownMs: 120000,
     onShift: handleHugeShift,
     // Only evaluate while market is open and this index is in admin alert focus.
     enabled:
       !(status?.market && status.market.is_market_open === false)
-      && indexInAlertFocus(activeIndex),
+      && (authState.is_member
+        ? memberCanReceiveOiShift && memberAlertIndexEnabled
+        : indexInAlertFocus(activeIndex)),
     // Fed from the main loadOI batch (`also=` windows) — no extra API calls.
     changeBundle,
   });
@@ -2498,7 +2726,7 @@ export default function Dashboard({ demoMode = false }) {
           <span>StrikLenz dashboard · fictional sample data · changes are temporary and reset on refresh</span>
         </div>
       )}
-      {authState.is_guest && (
+      {authState.is_guest && !authState.is_member && (
         <GuestBanner
           guestName={authState.guest_name}
           adminName={authState.admin_display_name}
@@ -2531,27 +2759,26 @@ export default function Dashboard({ demoMode = false }) {
           onOpenUpload={() => setUploadOpen(true)}
         />
       )}
-      {!demoMode && (
+      {/* This carry brief contains explicit trade guidance, so it remains Admin-only. */}
+      {!demoMode && authState.is_admin && memberCanSeeOvernightRisk && (
         <OvernightGapBrief
           isAdmin={!!authState.is_admin}
+          canReadPositions={canReadPersonalPositions}
           indices={enabledIndices.length ? enabledIndices : INDICES}
           vix={current?.vix || status?.vix}
           activeIndex={activeIndex}
           popupOpacity={popupOpacity.overnight}
         />
       )}
-      <CasIepPopup
-        enabled={!demoMode && !!casIepPopup && iepWindowOn}
-        quotes={tickerQuotes}
-        endLabel={casIepCfg.endIst}
-        popupOpacity={popupOpacity.indicative}
-      />
       <Header
         demoMode={demoMode}
         status={status}
         current={current}
         dataStatus={dataStatus}
         assumedAdmin={!!authState.is_admin}
+        memberBrokerStatus={authState.user_kite}
+        memberCanUseBroker={!!authState.is_member && memberFeatures.includes("positions")}
+        onOpenMemberBroker={() => setMemberBrokerOpen(true)}
         publicAccessOpen={!!authState.public_access_open}
         publicLandingEnabled={!!authState.public_landing_enabled}
         siteWalkthroughEnabled={siteWalkthroughEnabled}
@@ -2580,7 +2807,8 @@ export default function Dashboard({ demoMode = false }) {
         onOpenJournal={() => { if (authState.is_admin) setJournalOpen(true); }}
         onOpenErrorLog={() => { if (authState.is_admin) setErrorLogOpen(true); }}
         onOpenApiConfiguration={() => { if (authState.is_admin) setApiConfigurationOpen(true); }}
-        onOpenSounds={() => setSoundsOpen(true)}
+        onOpenSounds={() => { if (memberCanUseAlertSounds) setSoundsOpen(true); }}
+        showAlertSounds={memberCanUseAlertSounds}
         onOpenUpload={() => { if (authState.is_admin) setUploadOpen(true); }}
         onDownloadCsv={() => downloadOICsv(current, previous, activeIndex)}
         notifEnabled={notifEnabled}
@@ -2602,7 +2830,8 @@ export default function Dashboard({ demoMode = false }) {
         slimStatusRail
         positionsPollMs={positionsPollMs}
         positionsPublic={tabOn("positions")}
-        showDeskAi={deskAiShow}
+        showDeskAi={effectiveDeskAiShow}
+        deskAiAvailable={!authState.is_member || memberFeatures.includes("desk_ai")}
         onOpenDeskAiPanel={() => {
           if (!deskAiShow) patchDeskAi({ desk_ai_show: true });
           openDeskAiPanel();
@@ -2610,11 +2839,6 @@ export default function Dashboard({ demoMode = false }) {
         onOpenDeskAiMobile={openDeskAiMobile}
         onDeskAiChange={(next) => {
           if (typeof next?.show === "boolean") patchDeskAi({ desk_ai_show: next.show });
-        }}
-        casIepPopup={casIepPopup}
-        onToggleCasIepPopup={(on) => {
-          setCasIepPopup(!!on);
-          writeCasIepPopupPref(!!on);
         }}
         spotPrices={liveSpotPrices}
         onFreshPullDone={() => {
@@ -2657,6 +2881,8 @@ export default function Dashboard({ demoMode = false }) {
                 marketOpen={!(status?.market && status.market.is_market_open === false)}
                 indicativeClose={tickerQuotes?.[activeIndex]?.indicative_close_price}
                 indicativeChangePct={indicativeChangePct(tickerQuotes?.[activeIndex])}
+                indicativeQuotes={tickerQuotes}
+                indicativeWindowOn={!demoMode && iepWindowOn}
                 onCollapse={() => setCompact(true)}
                 layoutNonce={layoutNonce}
               />
@@ -2698,6 +2924,10 @@ export default function Dashboard({ demoMode = false }) {
               onReorder={handleReorderTabs}
               onFavorite={handleFavoriteTab}
               onMove={handleMoveTab}
+              onHideTab={(id) => updateHiddenDashboardPage(id, true)}
+              hiddenTabs={hiddenDashboardTabOptions}
+              onRestoreTab={(id) => updateHiddenDashboardPage(id, false)}
+              savingPagePreferences={savingHiddenPages}
               infoTilesOpen={infoTilesOpen}
               onToggleInfoTiles={setInfoTilesOpen}
               infoTiles={
@@ -2734,6 +2964,10 @@ export default function Dashboard({ demoMode = false }) {
                   onReorder={handleReorderTabs}
                   onFavorite={handleFavoriteTab}
                   onMove={handleMoveTab}
+                  onHideTab={(id) => updateHiddenDashboardPage(id, true)}
+                  hiddenTabs={hiddenDashboardTabOptions}
+                  onRestoreTab={(id) => updateHiddenDashboardPage(id, false)}
+                  savingPagePreferences={savingHiddenPages}
                 />
               </div>
 
@@ -2796,7 +3030,8 @@ export default function Dashboard({ demoMode = false }) {
                     setChromeSlim(e.currentTarget.scrollTop > 64);
                   }}
                 >
-                {(dayBiasSummary || changeSummary) && (
+                {/* Directional summaries are Admin-only; shared OI measurements remain available to members. */}
+                {authState.is_admin && (dayBiasSummary || changeSummary) && (
                   <div className={`sticky top-0 z-30 ${!showRightPanel ? "max-w-[min(72rem,100%)] mx-auto w-full" : ""}`}>
                   <SentimentBar
                     ceDelta={dayBiasSummary?.ce ?? changeSummary?.ce ?? 0}
@@ -2899,7 +3134,7 @@ export default function Dashboard({ demoMode = false }) {
                           />
                           <span>Show OI</span>
                         </label>
-                        <Popover>
+                        {authState.is_admin && <Popover>
                           <PopoverTrigger asChild>
                             <button
                               data-testid="btn-gex-levels-desktop"
@@ -2927,8 +3162,8 @@ export default function Dashboard({ demoMode = false }) {
                               {gexGuide}
                             </PopoverContent>
                           )}
-                        </Popover>
-                        {gexToday && (
+                        </Popover>}
+                        {authState.is_admin && gexToday && (
                           <button
                             type="button"
                             data-testid="btn-gex-levels"
@@ -2941,7 +3176,7 @@ export default function Dashboard({ demoMode = false }) {
                           </button>
                         )}
                         {/* A bottom sheet avoids the chart-overlapping, anchor-positioned phone popover. */}
-                        <Dialog open={gexGuideOpen} onOpenChange={setGexGuideOpen}>
+                        {authState.is_admin && <Dialog open={gexGuideOpen} onOpenChange={setGexGuideOpen}>
                           <DialogContent
                             overlayClassName="bg-black/25"
                             className="hidden max-md:flex max-md:fixed max-md:left-[6px] max-md:right-[6px] max-md:top-1/2 max-md:bottom-auto max-md:h-auto max-md:max-h-[min(70dvh,38rem)] max-md:w-auto max-md:max-w-none max-md:translate-x-0 max-md:translate-y-[-50%] max-md:flex-col max-md:gap-2 max-md:overflow-hidden max-md:rounded-xl max-md:p-3"
@@ -2956,7 +3191,7 @@ export default function Dashboard({ demoMode = false }) {
                               {gexGuide}
                             </div>
                           </DialogContent>
-                        </Dialog>
+                        </Dialog>}
                         <button
                           data-testid="btn-replay-change"
                           onClick={() => setReplayOpen((v) => !v)}
@@ -3057,13 +3292,13 @@ export default function Dashboard({ demoMode = false }) {
                       showOI={showOI}
                       currentTime={current?.timestamp}
                       prevTime={(replayFrame || previous)?.timestamp}
-                      signalsMap={showChartSignals ? perStrikeSignals : null}
+                      signalsMap={effectiveChartSignals ? perStrikeSignals : null}
                       keepPositionMarkGlowAfterClose={keepPositionMarkGlowAfterClose}
                       positionMarkGlowPct={positionMarkGlowPct}
                       loading={oiLoading}
                       updating={oiLoading && !!current?.strikes?.length}
                     />
-                    {marketIntel && (
+                    {marketIntel && (authState.is_admin ? (
                       <div
                         className="relative z-0 mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-[11px] font-mono-data"
                         data-testid="market-intel"
@@ -3110,7 +3345,18 @@ export default function Dashboard({ demoMode = false }) {
                           hint="Highest Call OI" tone="rose"
                           tip={resistanceGuide()} />
                       </div>
-                    )}
+                    ) : (
+                      <div className="relative z-0 mt-3 grid grid-cols-2 gap-2 text-[11px] font-mono-data" data-testid="market-intel-neutral">
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <span className="block text-[9px] uppercase tracking-widest text-slate-500">PCR</span>
+                          <span className="mt-1 block text-sm font-semibold text-slate-700">{marketIntel.pcr.toFixed(2)}</span>
+                        </div>
+                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                          <span className="block text-[9px] uppercase tracking-widest text-slate-500">Max Pain</span>
+                          <span className="mt-1 block text-sm font-semibold text-slate-700">{marketIntel.maxPain?.toLocaleString() || "—"}</span>
+                        </div>
+                      </div>
+                    ))}
                     <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
                       <div className="flex items-center justify-between text-xs font-mono-data text-slate-600">
                         <span data-testid="window-start-label">{windowStartLabel}</span>
@@ -3261,7 +3507,7 @@ export default function Dashboard({ demoMode = false }) {
                       lotSize={oiSettings.lotSize?.[activeIndex] || 1}
                       expiry={selectedExpiry}
                       vixNow={current?.vix || status?.vix}
-                      showSignals={showChartSignals}
+                      showSignals={effectiveChartSignals}
                     />
                     <div className="mt-3 pt-3 border-t border-slate-100">
                       <TimeframePills value={timeframe} onChange={setTimeframe} />
@@ -3302,7 +3548,7 @@ export default function Dashboard({ demoMode = false }) {
                     <TabsContent value="buildup" className="mt-0">
                     <PageBrandTitle
                       kicker={activeIndex}
-                      title="Long / Short Build-up"
+                      title={authState.is_admin ? "Long / Short Build-up" : "Build-up Measurements"}
                       className="mb-2"
                       testId="buildup-page-title"
                     />
@@ -3311,6 +3557,7 @@ export default function Dashboard({ demoMode = false }) {
                       previous={previous}
                       atm={current?.atm}
                       timeframeLabel={timeframeLabel}
+                      neutralOnly={!authState.is_admin}
                     />
                     <div className="mt-3 pt-3 border-t border-slate-100">
                       <TimeframePills value={timeframe} onChange={setTimeframe} />
@@ -3343,7 +3590,10 @@ export default function Dashboard({ demoMode = false }) {
                     </div>
                     <PositionsPanel
                       isKiteMode={authState.is_admin ? kiteLiveConnected : true}
+                      isAdmin={!!authState.is_admin}
                       isGuest={!!authState.is_guest}
+                      isMember={!!authState.is_member}
+                      memberBrokerStatus={authState.user_kite}
                       privacyMode={positionsPrivacyMode}
                       hasKiteCredentials={status ? !!status.has_kite_credentials : null}
                       current={filteredCurrent || current}
@@ -3359,6 +3609,9 @@ export default function Dashboard({ demoMode = false }) {
                       onPinNearestWeekly={handleChangeExpiry}
                       positionsPollMs={positionsPollMs}
                       onOpenKite={openKiteCreds}
+                      onOpenMemberJournal={memberFeatures.includes("trade_journal")
+                        ? () => window.location.assign("/account/journal")
+                        : undefined}
                       pollEnabled
                       deskAiShow={deskAiShow}
                       deskAiAsk
@@ -3370,7 +3623,7 @@ export default function Dashboard({ demoMode = false }) {
                       tickerByIndex={tickerQuotes}
                       onOpenTelegramPrefs={authState.is_admin ? () => setTelegramPrefsOpen(true) : undefined}
                       adrUserKey={authState.admin_username || authState.guest_name || (authState.is_admin ? "admin" : "guest")}
-                      onAdjustmentAlert={(payload) => {
+                      onAdjustmentAlert={authState.is_admin ? (payload) => {
                         pushActivity({
                           type: "adjust-watch",
                           index: activeIndex,
@@ -3379,7 +3632,7 @@ export default function Dashboard({ demoMode = false }) {
                           at: new Date().toISOString(),
                           message: `⚠️ ${payload.tradingsymbol}: spot ${payload.spot?.toFixed?.(2)} · ${payload.coveredPct}% band covered — consider adjustment`,
                         });
-                      }}
+                      } : undefined}
                     />
                   </TabsContent>
                   )}
@@ -3470,7 +3723,7 @@ export default function Dashboard({ demoMode = false }) {
 
                 {(activeTab === "oi-change" || activeTab === "open-interest") && (
                 <div className="mt-3 pt-3 border-t border-slate-200/80 text-xs text-slate-600 dark:text-slate-300 flex items-center justify-between gap-2 flex-wrap">
-                  {activeTab === "oi-change" && showMarketMemory ? <div className="w-full"><MarketMemoryCard index={activeIndex} marketOpen={status?.market?.is_market_open} /></div> : null}
+                  {activeTab === "oi-change" && showMarketMemory ? <div className="w-full"><MarketMemoryCard index={activeIndex} marketOpen={status?.market?.is_market_open} neutralOnly={!authState.is_admin} /></div> : null}
                   <div data-testid="footer-refresh">
                     OI last pulled —{" "}
                     <span className="font-mono-data text-slate-900">
@@ -3497,7 +3750,7 @@ export default function Dashboard({ demoMode = false }) {
                 )}
                 </div>
 
-                {activeTab === "open-interest" && showWriterDefense && (
+                {activeTab === "open-interest" && effectiveWriterDefense && (
                   <WriterDefenseMap
                     current={filteredCurrent}
                     sessionPrevious={changeBundle?.also_windows?.session?.previous}
@@ -3517,8 +3770,8 @@ export default function Dashboard({ demoMode = false }) {
                       onClose={() => setRightPanelOpen(false)}
                       isAdmin={!!authState.is_admin}
                       demoMode={demoMode}
-                      visiblePages={visiblePages}
-                      adminPages={adminVisiblePages}
+                      visiblePages={dashboardPageIds}
+                      adminPages={dashboardPageIds}
                       hideMarketIntel={!tabOn("market-intel")}
                       alerts={focusedAlerts}
                       onClearAlerts={handleClearAlerts}
@@ -3562,7 +3815,7 @@ export default function Dashboard({ demoMode = false }) {
                       onDeskAiRadar={(on) => patchDeskAi({ desk_ai_radar: !!on })}
                       onOpenTelegramPrefs={authState.is_admin ? () => setTelegramPrefsOpen(true) : undefined}
                       suggestion={
-                        showSuggestion ? (
+                        effectiveSuggestion ? (
                           <SuggestionBox
                             indexName={activeIndex}
                             marketIntel={marketIntel}
@@ -3601,8 +3854,8 @@ export default function Dashboard({ demoMode = false }) {
         <MobileBottomNav
           activeTab={activeTab}
           isAdmin={!!authState.is_admin}
-          visiblePages={visiblePages}
-          adminPages={adminVisiblePages}
+          visiblePages={dashboardPageIds}
+          adminPages={dashboardPageIds}
           deskOpen={!compact}
           onOpenDesk={() => setCompact((v) => !v)}
           onOpenAdminTools={() => window.dispatchEvent(new Event("oi-toggle-admin-tools"))}
@@ -3624,6 +3877,19 @@ export default function Dashboard({ demoMode = false }) {
               refreshPositionsBook(),
               fetchTickers(),
             ]);
+            notifyKiteConnected();
+          }}
+        />
+      )}
+      {authState.is_member && (
+        <MemberBrokerConnectModal
+          open={memberBrokerOpen}
+          onOpenChange={setMemberBrokerOpen}
+          onCredentialsSaved={async () => {
+            await Promise.allSettled([refreshMemberBrokerStatus(), refreshPositionsBook()]);
+          }}
+          onConnected={async () => {
+            await Promise.allSettled([refreshMemberBrokerStatus(), refreshPositionsBook()]);
             notifyKiteConnected();
           }}
         />
@@ -3677,7 +3943,8 @@ export default function Dashboard({ demoMode = false }) {
         activeIndex={activeIndex}
         isAdmin={!!authState.is_admin}
         demoMode={demoMode}
-        showDeskAi={deskAiShow}
+        showDeskAi={effectiveDeskAiShow}
+        deskAiAvailable={!authState.is_member || memberFeatures.includes("desk_ai")}
         onDeskAiChange={(next) => {
           if (typeof next?.show === "boolean") patchDeskAi({ desk_ai_show: next.show });
         }}

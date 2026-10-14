@@ -2,6 +2,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import MarketIntelPopup, { collectNewMarketIntelItems } from "./MarketIntelPopup";
 import { MI_POPUP_LEFT_KEY, MI_POPUP_MIN_KEY } from "@/lib/marketIntel";
+import { deskHeaderClearance, MI_POPUP_WIDTH_KEY } from "@/lib/carryDock";
 import { api } from "@/lib/api";
 
 jest.mock("@/lib/api", () => ({
@@ -14,8 +15,10 @@ jest.mock("@/lib/api", () => ({
 describe("MarketIntelPopup docking", () => {
   let container;
   let root;
+  let innerHeight;
 
   beforeEach(() => {
+    innerHeight = window.innerHeight;
     localStorage.clear();
     localStorage.setItem(MI_POPUP_MIN_KEY, JSON.stringify({ until: Date.now() + 60_000 }));
     container = document.createElement("div");
@@ -27,6 +30,7 @@ describe("MarketIntelPopup docking", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: innerHeight });
     jest.useRealTimers();
     jest.restoreAllMocks();
   });
@@ -41,13 +45,15 @@ describe("MarketIntelPopup docking", () => {
     });
 
     const popup = container.querySelector('[data-testid="market-intel-popup"]');
-    const width = Math.min(320, window.innerWidth - 16);
+    const width = Math.min(420, window.innerWidth - 16);
     expect(Number.parseInt(popup.style.left, 10)).toBe(window.innerWidth - width - 12);
 
     await act(async () => {
       container.querySelector('[aria-label="Snap market intelligence left"]').click();
     });
     expect(popup.style.left).toBe("12px");
+    expect(Number(localStorage.getItem("oiCarryBriefLeftPx"))).toBe(window.innerWidth - 560 - 12);
+    expect(localStorage.getItem("oiCarryBriefBottomPx")).toBe("12");
 
     await act(async () => {
       container.querySelector('[aria-label="Snap market intelligence to center"]').click();
@@ -59,6 +65,48 @@ describe("MarketIntelPopup docking", () => {
     });
     expect(Number.parseInt(popup.style.left, 10)).toBe(window.innerWidth - width - 12);
     expect(localStorage.getItem(MI_POPUP_LEFT_KEY)).toBe(String(window.innerWidth - width - 12));
+    expect(localStorage.getItem("oiCarryBriefLeftPx")).toBe("12");
+  });
+
+  it("limits expanded height to the available viewport after browser zoom", async () => {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 420 });
+    await act(async () => {
+      root.render(<MarketIntelPopup enabled />);
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="market-intel-popup-chip"]').click();
+    });
+
+    const popup = container.querySelector('[data-testid="market-intel-popup"]');
+    expect(Number.parseFloat(popup.style.height)).toBeLessThanOrEqual(420 - deskHeaderClearance() - 12 - 16);
+    expect(Number.parseFloat(popup.style.bottom)).toBeGreaterThanOrEqual(12);
+  });
+
+  it("exposes keyboard resizing and persists the adjusted popup dimensions", async () => {
+    await act(async () => {
+      root.render(<MarketIntelPopup enabled />);
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="market-intel-popup-chip"]').click();
+    });
+
+    const popup = container.querySelector('[data-testid="market-intel-popup"]');
+    const resizeHandle = container.querySelector('[data-testid="mi-popup-resize"]');
+    expect(Number.parseInt(popup.style.width, 10)).toBe(420);
+    expect(Number.parseInt(popup.style.height, 10)).toBe(480);
+    expect(resizeHandle.getAttribute("aria-label")).toBe("Resize Market Intelligence popup");
+
+    await act(async () => {
+      resizeHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    await act(async () => {
+      resizeHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+
+    expect(popup.style.width).toBe("444px");
+    expect(popup.style.height).toBe("504px");
+    expect(localStorage.getItem(MI_POPUP_WIDTH_KEY)).toBe("444");
   });
 
   it("keeps the minimized phone chip fixed to the bottom-right despite a saved desktop position", async () => {

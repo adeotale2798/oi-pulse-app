@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { X, Moon, AlertTriangle, Minimize2, Maximize2, GripHorizontal, AlignLeft, AlignCenter, AlignRight, Sparkles } from "lucide-react";
+import { X, Moon, AlertTriangle, Minimize2, Maximize2, Grip, GripHorizontal, AlignLeft, AlignCenter, AlignRight, Sparkles } from "lucide-react";
 import { api, fetchOIChange, fetchJournalPeriod, subscribeExtras } from "@/lib/api";
 import { Switch } from "@/components/ui/switch";
 import { isOiPolling } from "@/lib/marketTimes";
 import {
   CARRY_PANEL_WIDTH,
+  CARRY_PANEL_HEIGHT,
+  CARRY_PANEL_HEIGHT_KEY,
+  CARRY_PANEL_WIDTH_KEY,
   clampCarryLeft,
   clampDockBottom,
+  clampFloatingPanelSize,
   deskHeaderClearance,
+  FLOATING_DOCK_SIDE_EVENT,
+  moveOpposingDock,
   readCarryLeft,
   snapCarryLeft,
   snapDockFromClientX,
@@ -51,6 +57,19 @@ function readCarryBottom() {
 
 function writeCarryBottom(px) {
   try { localStorage.setItem("oiCarryBriefBottomPx", String(Math.round(px))); } catch { /* noop */ }
+}
+
+function readCarrySize(key, fallback) {
+  try {
+    const n = Number(localStorage.getItem(key));
+    return Number.isFinite(n) && n >= 160 && n <= 1200 ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCarrySize(key, value) {
+  try { localStorage.setItem(key, String(Math.round(value))); } catch { /* noop */ }
 }
 
 function readCarryIconOnly() {
@@ -121,6 +140,7 @@ function fmtDelta(v) {
  */
 export default function OvernightGapBrief({
   isAdmin = false,
+  canReadPositions = false,
   indices = DESK_IDS,
   vix = null,
   activeIndex = null,
@@ -138,6 +158,14 @@ export default function OvernightGapBrief({
   const [bottomPx, setBottomPx] = useState(() => readCarryBottom());
   const [iconOnly, setIconOnly] = useState(() => readCarryIconOnly());
   const [leftPx, setLeftPx] = useState(() => readCarryLeft());
+  const [panelWidth, setPanelWidth] = useState(() => readCarrySize(CARRY_PANEL_WIDTH_KEY, CARRY_PANEL_WIDTH));
+  const [panelHeight, setPanelHeight] = useState(() => readCarrySize(CARRY_PANEL_HEIGHT_KEY, CARRY_PANEL_HEIGHT));
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth : 1200
+  ));
+  const [viewportHeight, setViewportHeight] = useState(() => (
+    typeof window !== "undefined" ? window.innerHeight : 800
+  ));
   const [vixLive, setVixLive] = useState(null);
   const [book, setBook] = useState(null);
   const [guide, setGuide] = useState(null);
@@ -155,14 +183,59 @@ export default function OvernightGapBrief({
 
   const setLeft = (px) => {
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    const next = clampCarryLeft(px, w, isPhone() ? 280 : CARRY_PANEL_WIDTH);
+    const next = clampCarryLeft(px, w, isPhone() ? 280 : panelSize.width);
     setLeftPx(next);
     writeCarryLeft(next);
   };
 
   const snap = (mode) => {
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    setLeft(snapCarryLeft(mode, w, isPhone() ? 280 : CARRY_PANEL_WIDTH));
+    setLeft(snapCarryLeft(mode, w, isPhone() ? 280 : panelSize.width));
+    if (mode === "left" || mode === "right") moveOpposingDock("overnight", mode, w);
+  };
+
+  const panelSize = clampFloatingPanelSize(
+    panelWidth,
+    panelHeight,
+    viewportWidth,
+    viewportHeight,
+    {
+      minWidth: 360,
+      minHeight: 260,
+      maxWidth: 720,
+      maxHeight: 680,
+      headerClearance: deskHeaderClearance(),
+      bottomClearance: dockClearance(),
+      defaultWidth: CARRY_PANEL_WIDTH,
+      defaultHeight: CARRY_PANEL_HEIGHT,
+    },
+  );
+
+  const applyPanelSize = (width, height) => {
+    const next = clampFloatingPanelSize(width, height, window.innerWidth, window.innerHeight, {
+      minWidth: 360,
+      minHeight: 260,
+      maxWidth: 720,
+      maxHeight: 680,
+      headerClearance: deskHeaderClearance(),
+      bottomClearance: dockClearance(),
+      defaultWidth: CARRY_PANEL_WIDTH,
+      defaultHeight: CARRY_PANEL_HEIGHT,
+    });
+    setPanelWidth(next.width);
+    setPanelHeight(next.height);
+    writeCarrySize(CARRY_PANEL_WIDTH_KEY, next.width);
+    writeCarrySize(CARRY_PANEL_HEIGHT_KEY, next.height);
+    const nextLeft = clampCarryLeft(leftPx ?? 12, window.innerWidth, next.width);
+    setLeftPx(nextLeft);
+    writeCarryLeft(nextLeft);
+    const nextBottom = clampDockBottom(bottomPx ?? dockClearance(), window.innerHeight, {
+      minBottom: dockClearance(),
+      headerClearance: deskHeaderClearance(),
+      panelHeight: next.height,
+    });
+    setBottomPx(nextBottom);
+    writeCarryBottom(nextBottom);
   };
 
   const minimize = () => {
@@ -198,6 +271,14 @@ export default function OvernightGapBrief({
 
   useLayoutEffect(() => {
     const apply = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+      setLeftPx((prev) => {
+        if (prev == null) return prev;
+        const next = clampCarryLeft(prev, window.innerWidth, panelSize.width);
+        if (next !== prev) writeCarryLeft(next);
+        return next;
+      });
       setBottomPx((prev) => {
         const next = clampBottom(prev != null ? prev : dockClearance());
         if (next !== prev) writeCarryBottom(next);
@@ -207,7 +288,25 @@ export default function OvernightGapBrief({
     apply();
     window.addEventListener("resize", apply);
     return () => window.removeEventListener("resize", apply);
-  }, [clampBottom]);
+  }, [clampBottom, panelSize.height, panelSize.width]);
+
+  useEffect(() => {
+    const onOpposingDockMove = (event) => {
+      if (event.detail?.target !== "overnight") return;
+      const nextLeft = clampCarryLeft(
+        event.detail.left,
+        window.innerWidth,
+        isPhone() ? 280 : panelSize.width,
+      );
+      setLeftPx(nextLeft);
+      writeCarryLeft(nextLeft);
+      const nextBottom = clampBottom(event.detail.bottom);
+      setBottomPx(nextBottom);
+      writeCarryBottom(nextBottom);
+    };
+    window.addEventListener(FLOATING_DOCK_SIDE_EVENT, onOpposingDockMove);
+    return () => window.removeEventListener(FLOATING_DOCK_SIDE_EVENT, onOpposingDockMove);
+  }, [clampBottom, panelSize.width]);
 
   const onCarryPointerDown = (e, kind = "mobile") => {
     bringToFront();
@@ -218,7 +317,16 @@ export default function OvernightGapBrief({
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const startBottom = bottomPx != null ? bottomPx : dockClearance();
     const startLeft = leftPx != null ? leftPx : 12;
-    dragRef.current = { kind, startY: e.clientY, startX: e.clientX, startBottom, startLeft, moved: false };
+    dragRef.current = {
+      kind,
+      startY: e.clientY,
+      startX: e.clientX,
+      startBottom,
+      startLeft,
+      startWidth: boxRef.current?.getBoundingClientRect().width || panelSize.width,
+      startHeight: boxRef.current?.getBoundingClientRect().height || panelSize.height,
+      moved: false,
+    };
   };
 
   const onCarryPointerMove = (e) => {
@@ -227,9 +335,17 @@ export default function OvernightGapBrief({
       dragRef.current.moved = true;
     }
     const kind = dragRef.current.kind;
+    if (kind === "resize") {
+      dragRef.current.moved = true;
+      applyPanelSize(
+        dragRef.current.startWidth + (e.clientX - dragRef.current.startX),
+        dragRef.current.startHeight + (dragRef.current.startY - e.clientY),
+      );
+      return;
+    }
     if (kind === "move" || kind === "both") {
       const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-      const panel = minimized || isPhone() ? 72 : CARRY_PANEL_WIDTH;
+      const panel = minimized || isPhone() ? 72 : panelSize.width;
       setLeftPx(clampCarryLeft(dragRef.current.startLeft + (e.clientX - dragRef.current.startX), w, panel));
     }
     if (!minimized && isPhone() && kind !== "both") return;
@@ -243,9 +359,26 @@ export default function OvernightGapBrief({
     const kind = dragRef.current.kind;
     const moved = dragRef.current.moved;
     const startY = dragRef.current.startY;
+    const startX = dragRef.current.startX;
+    const startLeft = dragRef.current.startLeft;
     const shouldExpand = minimized && !moved;
     if (kind === "move" || kind === "both") {
-      if (moved && leftPx != null) writeCarryLeft(leftPx);
+      if (moved) {
+        const width = minimized ? 72 : panelSize.width;
+        const droppedLeft = clampCarryLeft(
+          startLeft + (e.clientX - startX),
+          window.innerWidth,
+          width,
+        );
+        setLeft(droppedLeft);
+        if (!isPhone()) {
+          moveOpposingDock(
+            "overnight",
+            snapDockFromClientX(droppedLeft + width / 2, window.innerWidth),
+            window.innerWidth,
+          );
+        }
+      }
     }
     if (!minimized && isPhone() && kind !== "both") {
       const swipeDown = e.clientY - startY;
@@ -267,6 +400,16 @@ export default function OvernightGapBrief({
     }
   };
 
+  const onResizeKeyDown = (e) => {
+    const step = e.shiftKey ? 48 : 24;
+    if (e.key === "ArrowLeft") applyPanelSize(panelWidth - step, panelHeight);
+    else if (e.key === "ArrowRight") applyPanelSize(panelWidth + step, panelHeight);
+    else if (e.key === "ArrowUp") applyPanelSize(panelWidth, panelHeight + step);
+    else if (e.key === "ArrowDown") applyPanelSize(panelWidth, panelHeight - step);
+    else return;
+    e.preventDefault();
+  };
+
   const carryPosStyle = (() => {
     const bottom = isPhone() && !minimized
       ? `${dockClearance()}px`
@@ -279,10 +422,10 @@ export default function OvernightGapBrief({
   useEffect(() => {
     if (leftPx != null) return;
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    const n = clampCarryLeft(12, w, CARRY_PANEL_WIDTH);
+    const n = clampCarryLeft(12, w, panelSize.width);
     setLeftPx(n);
     writeCarryLeft(n);
-  }, [leftPx]);
+  }, [leftPx, panelSize.width]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 15_000);
@@ -408,17 +551,19 @@ export default function OvernightGapBrief({
   const loadBook = useCallback(async () => {
     if (!active || minimized) return;
     try {
-      // The memory route is per-caller; keep guest reads separate from the admin-only journal/book fetches.
+      // Carry guidance is Admin-only, so only Admin book and journal data may enter this context.
       const [positionsRes, journalRes, memRes] = await Promise.all([
-        isAdmin ? api.get("/positions") : Promise.resolve({ data: null }),
+        isAdmin && canReadPositions ? api.get("/positions") : Promise.resolve({ data: null }),
         isAdmin ? fetchJournalPeriod(daysAgoIST(30, todayIST()), todayIST(), "ALL").catch(() => null) : Promise.resolve(null),
-        api.get("/desk-memory", { params: { days: 180 } }).catch(() => ({ data: { status: "unavailable" } })),
+        isAdmin
+          ? api.get("/desk-memory", { params: { days: 180 } }).catch(() => ({ data: { status: "unavailable" } }))
+          : Promise.resolve({ data: null }),
       ]);
-      if (isAdmin) setBook(summarizeBook(positionsRes.data?.positions || []));
-      const memory = compactTradeMemory(memRes?.data);
+      if (isAdmin && canReadPositions) setBook(summarizeBook(positionsRes.data?.positions || []));
+      const memory = isAdmin ? compactTradeMemory(memRes?.data) : null;
       setTradeMemory(memory);
       packedBookRef.current = {
-        ...(isAdmin ? compactBookFromPositions(positionsRes.data) : {}),
+        ...(isAdmin && canReadPositions ? compactBookFromPositions(positionsRes.data) : {}),
         ...(isAdmin ? { journal: compactJournalFromPeriod(journalRes) } : {}),
         sells: packedBookRef.current?.sells || [],
         memory,
@@ -426,7 +571,7 @@ export default function OvernightGapBrief({
     } catch {
       setBook(null);
     }
-  }, [isAdmin, active, minimized]);
+  }, [isAdmin, canReadPositions, active, minimized]);
 
   useEffect(() => {
     if (!active || minimized) return undefined;
@@ -646,17 +791,17 @@ export default function OvernightGapBrief({
       data-testid="overnight-gap-brief"
       ref={boxRef}
       data-dock={dockHint}
-        className={`oi-configurable-popup fixed ${zIndexClass} md:bottom-3 flex flex-col rounded-xl border-2 shadow-lg ${bandCls} ${
+      className={`oi-configurable-popup fixed ${zIndexClass} md:bottom-3 flex flex-col rounded-xl border-2 shadow-lg ${bandCls} ${
         phoneOpen ? "left-3 right-3" : ""
       } ${bottomPx == null ? "bottom-[3.25rem] md:bottom-3" : ""}`}
       style={{
         ...carryPosStyle,
         "--oi-popup-opacity": String(Math.max(60, Math.min(100, Number(popupOpacity) || 92)) / 100),
         ...(phoneOpen
-          ? {}
+          ? { maxHeight: "calc(100vh - 80px)" }
           : {
-              width: `min(${CARRY_PANEL_WIDTH}px, calc(100vw - 16px))`,
-              maxHeight: "min(28rem, calc(100vh - 20px))",
+              width: `${panelSize.width}px`,
+              height: `${panelSize.height}px`,
             }),
       }}
       role="dialog"
@@ -734,7 +879,9 @@ export default function OvernightGapBrief({
         </button>
       </div>
 
-      <div className="px-2.5 pb-2.5 pt-1.5 space-y-1.5 text-xs md:overflow-y-auto">
+      <div className={`px-3 pb-10 pt-2 space-y-2 text-sm leading-relaxed min-h-0 ${
+        phoneOpen ? "overflow-y-auto" : "flex-1 overflow-y-auto"
+      }`}>
         <div
           className="flex items-center justify-between gap-2 rounded-md bg-white/70 dark:bg-black/20 px-2 py-1"
           data-testid="overnight-gap-verdict"
@@ -939,6 +1086,20 @@ export default function OvernightGapBrief({
           )}
         </div>
       </div>
+      <button
+        type="button"
+        className="hidden md:flex absolute bottom-0 right-0 h-8 w-8 items-center justify-center cursor-nwse-resize touch-none rounded-tl-md bg-black/5 hover:bg-black/10"
+        aria-label="Resize overnight brief"
+        title="Drag to resize · use arrow keys for precise sizing"
+        data-testid="overnight-gap-brief-resize"
+        onPointerDown={(e) => onCarryPointerDown(e, "resize")}
+        onPointerMove={onCarryPointerMove}
+        onPointerUp={onCarryPointerUp}
+        onPointerCancel={onCarryPointerUp}
+        onKeyDown={onResizeKeyDown}
+      >
+        <Grip className="h-4 w-4 rotate-[-45deg] opacity-70" aria-hidden="true" />
+      </button>
     </div>
   );
 }

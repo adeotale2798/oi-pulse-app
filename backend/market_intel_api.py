@@ -62,7 +62,7 @@ class PrefsIn(BaseModel):
     min_india: Optional[int] = None
 
 
-def mount(api_router, *, require_admin, require_desk_user):
+def mount(api_router, *, require_admin, require_desk_user, require_member_feature=None):
     import desk_llm
     import market_intel as mi
     from desk_llm import encrypt_secret
@@ -78,6 +78,11 @@ def mount(api_router, *, require_admin, require_desk_user):
         if tr and isinstance(getattr(tr, "settings", None), dict):
             return tr.settings
         return {}
+
+    member_feature = (
+        Depends(require_member_feature("market_intel"))
+        if require_member_feature else True
+    )
 
     async def _prefs(user_id: str) -> Dict[str, Any]:
         db = _db()
@@ -237,13 +242,22 @@ def mount(api_router, *, require_admin, require_desk_user):
         }
 
     @api_router.get("/market-intel/prefs")
-    async def mi_prefs_get(request: Request, role: str = Depends(require_desk_user)):
+    async def mi_prefs_get(
+        request: Request,
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         from server import _ledger_owner
         uid = await _ledger_owner(request, role)
         return {"prefs": await _prefs(uid)}
 
     @api_router.post("/market-intel/prefs")
-    async def mi_prefs_save(payload: PrefsIn, request: Request, role: str = Depends(require_desk_user)):
+    async def mi_prefs_save(
+        payload: PrefsIn,
+        request: Request,
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         from server import _ledger_owner
         uid = await _ledger_owner(request, role)
         patch = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -265,6 +279,7 @@ def mount(api_router, *, require_admin, require_desk_user):
         role: str = Depends(require_desk_user),
         filt: str = Query("all", alias="filter"),
         feed_date: Optional[str] = Query(None, alias="date"),
+        _feature=member_feature,
     ):
         from server import _ledger_owner
         uid = await _ledger_owner(request, role)
@@ -297,7 +312,10 @@ def mount(api_router, *, require_admin, require_desk_user):
         return {"items": items, "date": (mi.parse_feed_date(feed_date) or mi.ist_today()).isoformat()}
 
     @api_router.get("/market-intel/performance")
-    async def mi_performance(role: str = Depends(require_desk_user)):
+    async def mi_performance(
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         del role
         db = _db()
         if db is None:
@@ -306,7 +324,11 @@ def mount(api_router, *, require_admin, require_desk_user):
         return await performance_summary(db)
 
     @api_router.get("/market-intel/popup")
-    async def mi_popup(request: Request, role: str = Depends(require_desk_user)):
+    async def mi_popup(
+        request: Request,
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         from server import _ledger_owner
         uid = await _ledger_owner(request, role)
         prefs = await _prefs(uid)
@@ -333,7 +355,12 @@ def mount(api_router, *, require_admin, require_desk_user):
         }
 
     @api_router.post("/market-intel/popup/ack")
-    async def mi_popup_ack(payload: AckIn, request: Request, role: str = Depends(require_desk_user)):
+    async def mi_popup_ack(
+        payload: AckIn,
+        request: Request,
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         from server import _ledger_owner
         uid = await _ledger_owner(request, role)
         cid = str(payload.event_cluster_id or "")
@@ -341,7 +368,11 @@ def mount(api_router, *, require_admin, require_desk_user):
             await mi.mark_popup_shown(_db(), uid, cid)
         return {"ok": True}
     @api_router.get("/market-intel/config")
-    async def mi_config_get(request: Request, role: str = Depends(require_desk_user)):
+    async def mi_config_get(
+        request: Request,
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         s = _settings()
         # Use market_intel_retention_days as max_days_back, fallback to 5
         max_days_back = s.get("market_intel_retention_days") or 5

@@ -22,9 +22,11 @@ export default function BrandMark({
       <OiPulseLogo className={logoClassName || (compact ? "w-6 h-6 overflow-hidden rounded-[0.4rem]" : "w-8 h-8 overflow-hidden rounded-lg")} />
       <div className="leading-tight min-w-0">
         <div
-          className={`${compact ? "text-sm" : "text-base"} font-semibold tracking-tight bg-gradient-to-r from-emerald-600 via-emerald-700 to-sky-600 bg-clip-text text-transparent`}
+          className={`${compact ? "text-sm" : "text-base"} font-semibold tracking-tight text-slate-950 dark:text-slate-100`}
         >
-          {APP_NAME}
+          {APP_NAME === "StrikLenz" ? (
+            <><span>Strik</span><span className="text-emerald-600 dark:text-emerald-400">Lenz</span></>
+          ) : APP_NAME}
         </div>
         {(showVersion || subtitle) && (
           <div className="text-[10px] font-semibold tabular-nums text-slate-500 dark:text-slate-400 truncate">

@@ -72,6 +72,160 @@ function optionTradingsymbol(index, expiry, strike, option) {
   return `${index}${expiryCode}${strike}${option}`;
 }
 
+// Stable fictional entries keep the public journal useful without reading or persisting account data.
+const DEMO_JOURNAL_TAGS = ["Discipline", "Expiry", "Review", "Risk"];
+const DEMO_JOURNAL_PNLS = [2450, -780, 1420, 3175, -460, 2180, 930];
+const DEMO_JOURNAL_INDICES = ["NIFTY", "SENSEX", "BANKNIFTY"];
+
+function demoJournalDay(date, sequence) {
+  const pnl = DEMO_JOURNAL_PNLS[sequence % DEMO_JOURNAL_PNLS.length];
+  const charges = 142 + (sequence % 3) * 18;
+  const bookedAfterCharges = pnl - charges;
+  const wins = pnl > 0 ? 2 : 1;
+  const losses = pnl > 0 ? 0 : 1;
+  const index = DEMO_JOURNAL_INDICES[sequence % DEMO_JOURNAL_INDICES.length];
+  const strike = 25_000 + sequence * 50;
+  return {
+    date,
+    booked_pnl: pnl,
+    pnl_exited: pnl,
+    pnl_open: 0,
+    pnl_total: pnl,
+    booked_after_charges: bookedAfterCharges,
+    booked_pct: Number((bookedAfterCharges / 1_000_000 * 100).toFixed(3)),
+    funds_base: 1_000_000,
+    funds_total: 1_000_000,
+    funds_close: 1_000_000 + pnl,
+    inferred_cashflow: 0,
+    brokerage: 40,
+    charges_total: charges,
+    trade_count: wins + losses,
+    exited_count: wins + losses,
+    partial_count: 0,
+    win_trades: wins,
+    loss_trades: losses,
+    rating: 3 + (sequence % 3),
+    followed_plan: sequence % 4 !== 1,
+    tags: [DEMO_JOURNAL_TAGS[sequence % DEMO_JOURNAL_TAGS.length], "Review"],
+    went_well: "The sample entry records session notes and a booked result.",
+    went_wrong: pnl < 0 ? "A fictional loss is included to show both sides of the calendar." : "",
+    notes: "Fictional walkthrough record. This sample is not a live account or trade suggestion.",
+    booked_index_pnl: { [index]: pnl },
+    legs: [{
+      index,
+      tradingsymbol: `${index} ${strike} CE`,
+      side: "CE",
+      strike,
+      quantity: 50,
+      entry_price: 92.5,
+      exit_price: Number((92.5 + pnl / 50).toFixed(2)),
+      realised: pnl,
+      pnl,
+      exited: true,
+      partial: false,
+    }],
+    screenshots: [],
+    eod_locked: true,
+    empty: false,
+  };
+}
+
+function demoJournalDays(year, month, today) {
+  const [todayYear, todayMonth, todayDay] = today.split("-").map(Number);
+  const maxDay = year === todayYear && month === todayMonth
+    ? todayDay
+    : (year > todayYear || (year === todayYear && month > todayMonth)
+      ? 0
+      : new Date(Date.UTC(year, month, 0)).getUTCDate());
+  const dates = [];
+  for (let day = maxDay; day >= 1 && dates.length < 7; day -= 1) {
+    const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (isTradingDayIST(iso)) dates.unshift(iso);
+  }
+  return dates.map((date, index) => demoJournalDay(date, Number(date.slice(-2)) + index));
+}
+
+function demoJournalStats(days) {
+  const traded = days.filter((day) => day.exited_count > 0 || day.booked_pnl !== 0);
+  const pnls = traded.map((day) => day.booked_pnl);
+  const green = pnls.filter((value) => value > 0);
+  const red = pnls.filter((value) => value < 0);
+  const tradeWins = traded.reduce((sum, day) => sum + day.win_trades, 0);
+  const tradeLosses = traded.reduce((sum, day) => sum + day.loss_trades, 0);
+  const totalWins = green.reduce((sum, value) => sum + value, 0);
+  const totalLosses = Math.abs(red.reduce((sum, value) => sum + value, 0));
+  const net = pnls.reduce((sum, value) => sum + value, 0);
+  const afterCharges = traded.reduce((sum, day) => sum + day.booked_after_charges, 0);
+  const byIndex = {};
+  traded.forEach((day) => {
+    Object.entries(day.booked_index_pnl).forEach(([index, pnl]) => {
+      byIndex[index] = (byIndex[index] || 0) + pnl;
+    });
+  });
+  return {
+    net_pnl: net,
+    booked_pnl: net,
+    booked_after_charges: afterCharges,
+    booked_pct: Number((afterCharges / 1_000_000 * 100).toFixed(3)),
+    charges_total: traded.reduce((sum, day) => sum + day.charges_total, 0),
+    by_index: byIndex,
+    trading_days: traded.length,
+    win_days: green.length,
+    lose_days: red.length,
+    win_rate: traded.length ? Number((green.length / traded.length * 100).toFixed(1)) : 0,
+    trade_wins: tradeWins,
+    trade_losses: tradeLosses,
+    trade_win_rate: tradeWins + tradeLosses
+      ? Number((tradeWins / (tradeWins + tradeLosses) * 100).toFixed(1))
+      : 0,
+    avg_win: green.length ? totalWins / green.length : 0,
+    avg_loss: red.length ? red.reduce((sum, value) => sum + value, 0) / red.length : 0,
+    avg_win_loss_ratio: totalLosses && green.length && red.length
+      ? Number((totalWins / green.length / (totalLosses / red.length)).toFixed(2))
+      : null,
+    profit_factor: totalLosses ? Number((totalWins / totalLosses).toFixed(2)) : (totalWins ? 3 : null),
+    desk_score: traded.length ? 72 : null,
+    funds_base: traded.length ? 1_000_000 : null,
+  };
+}
+
+function demoJournalYear(year, today) {
+  const allDays = Array.from({ length: 12 }, (_, index) => (
+    demoJournalDays(year, index + 1, today)
+  )).flat();
+  const monthNets = Array(12).fill(0);
+  const monthDays = Array(12).fill(0);
+  const byIndex = Object.fromEntries([
+    ...DEMO_JOURNAL_INDICES.map((index) => [index, Array(12).fill(0)]),
+    ["OTHER", Array(12).fill(0)],
+  ]);
+  allDays.forEach((day) => {
+    const monthIndex = Number(day.date.slice(5, 7)) - 1;
+    monthNets[monthIndex] += day.booked_pnl;
+    monthDays[monthIndex] += 1;
+    Object.entries(day.booked_index_pnl).forEach(([index, pnl]) => {
+      byIndex[index][monthIndex] += pnl;
+    });
+  });
+  const heatmap = {
+    year,
+    indices: DEMO_JOURNAL_INDICES,
+    by_index: Object.fromEntries(DEMO_JOURNAL_INDICES.map((index) => [index, byIndex[index]])),
+    other: byIndex.OTHER,
+    month_nets: monthNets,
+    months: monthNets.map((net, index) => ({
+      month: index + 1,
+      net_pnl: net,
+      trading_days: monthDays[index],
+      by_index: Object.fromEntries(DEMO_JOURNAL_INDICES.map((id) => [id, byIndex[id][index]])),
+      other: 0,
+      funds_base: monthDays[index] ? 1_000_000 : null,
+      booked_pct: monthDays[index] ? Number((net / 1_000_000 * 100).toFixed(3)) : null,
+    })),
+  };
+  return { year, today, days: allDays, stats: demoJournalStats(allDays), heatmap };
+}
+
 function marketSession(now) {
   const today = todayIST();
   const todayIsTradingDay = isTradingDayIST(today);
@@ -244,7 +398,7 @@ function sessionHistory(index, session, intervalMinutes = 5) {
 
 function demoConfig() {
   const visiblePages = [
-    "oi-change", "open-interest", "strike-table", "sell-candidates", "buildup",
+    "oi-change", "open-interest", "strike-table", "buildup",
     "positions", "alerts", "activity", "holidays", "straddle", "index-events",
     "market-intel", "adrs",
   ];
@@ -262,9 +416,9 @@ function demoConfig() {
     mcx_desk_on: false,
     global_markets_enabled: true,
     show_market_memory: true,
-    show_writer_defense: true,
-    show_suggestion: true,
-    show_chart_signals: true,
+    show_writer_defense: false,
+    show_suggestion: false,
+    show_chart_signals: false,
     desk_ai_show: true,
     market_open_ist: "09:15",
     market_close_ist: "15:30",
@@ -279,7 +433,40 @@ function demoConfig() {
 
 function fixture(path, now, config, params = {}) {
   if (path === "/config") return config;
+  if (path === "/settings") {
+    return {
+      ...config,
+      trade_cycle_saving_enabled: false,
+      ...(transientWrites.get(path)?.[0] || {}),
+    };
+  }
   const session = marketSession(now);
+  const today = todayIST();
+  const journalDay = path.match(/^\/journal\/(\d{4}-\d{2}-\d{2})$/);
+  if (journalDay) {
+    const [year, month] = journalDay[1].split("-").map(Number);
+    const sample = demoJournalDays(year, month, today).find((day) => day.date === journalDay[1]);
+    return sample || { date: journalDay[1], empty: true, tags: DEMO_JOURNAL_TAGS };
+  }
+  const journalYear = path.match(/^\/journal\/year\/(\d{4})$/);
+  if (journalYear) return demoJournalYear(Number(journalYear[1]), today);
+  if (path === "/journal/period") {
+    const { from = "", to = "", index = "ALL" } = params || {};
+    const monthDays = demoJournalDays(Number(today.slice(0, 4)), Number(today.slice(5, 7)), today);
+    const days = monthDays.filter((day) => (
+      day.date >= from
+      && day.date <= to
+      && (index === "ALL" || day.booked_index_pnl[index] != null)
+    ));
+    return { from, to, index, today, stats: demoJournalStats(days), indices: DEMO_JOURNAL_INDICES };
+  }
+  if (path === "/journal") {
+    const year = Number(params.year || today.slice(0, 4));
+    if (String(params.view || "").toLowerCase() === "year") return demoJournalYear(year, today);
+    const month = Number(params.month || today.slice(5, 7));
+    const days = demoJournalDays(year, month, today);
+    return { year, month, today, days, stats: demoJournalStats(days), tags: DEMO_JOURNAL_TAGS };
+  }
   if (path === "/status") {
     return {
       mode: "kite",
@@ -409,22 +596,7 @@ function fixture(path, now, config, params = {}) {
     return {
       source: "rules",
       sample: true,
-      guide: [
-        `Sample read: NIFTY is ${current.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })} with PCR ${current.pcr}; cash breadth and option positioning are illustrative, not live evidence.`,
-        "DO",
-        "Wait for price to hold near the sample ATM before considering a defined-risk setup.",
-        "Compare the next OI update with the sample heavyweight breadth; treat both as fictional.",
-        "BASE CASE",
-        "If NIFTY holds above the sample ATM and breadth stays positive, the tape remains cautiously constructive.",
-        "CONTRARY CASE",
-        "A failed hold near ATM with weakening bank breadth would make the sample bullish read less useful.",
-        "WATCH NEXT",
-        "Watch the next OI pull, ATM response, and whether HDFCBANK remains above VWAP.",
-        "REASSESS IF",
-        "Reassess if the sample spot crosses ATM while the OI and breadth signals diverge.",
-        "DON'T",
-        "Do not treat this walkthrough output as live advice, a forecast, or an order instruction.",
-      ].join("\n"),
+      guide: `Sample market context only: NIFTY ${current.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })} · PCR ${current.pcr}. All values are fictional; no trade direction or action is provided.`,
       evidence_quality: {
         sources: [
           { name: "Session OI", status: session.isOpen ? "fresh sample" : "last-session sample", timestamp: current.timestamp },

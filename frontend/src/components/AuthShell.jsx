@@ -149,7 +149,10 @@ export default function AuthShell({ mode = "admin", children }) {
             animate={{ opacity: 1, y: 0 }}
           >
             <OiPulseLogo className="h-11 w-11 shrink-0" />
-            <span><b>{APP_NAME}</b><small>Command the desk. Spot bias. Act on OI.</small></span>
+            <span>
+              <b>{APP_NAME === "StrikLenz" ? <><span className="text-white">Strik</span><span className="text-emerald-400">Lenz</span></> : APP_NAME}</b>
+              <small>Command the desk. Spot bias. Act on OI.</small>
+            </span>
           </motion.button>
 
           <div className="oi-auth-slogan oi-auth-slogan-left">

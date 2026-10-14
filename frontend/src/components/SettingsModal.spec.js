@@ -231,4 +231,31 @@ describe("SettingsModal mobile layout and independent saves", () => {
     expect(modal.querySelector('[data-testid="settings-health"]').textContent).toContain("Configuration loaded");
     expect(api.post).not.toHaveBeenCalled();
   });
+
+  it("keeps Sell Candidates unavailable publicly and removes legacy public visibility on save", async () => {
+    api.get.mockResolvedValueOnce({
+      data: { ...savedDesk, visible_pages: ["oi-change", "sell-candidates"] },
+    });
+    const modal = await renderAdminSettings();
+
+    await act(async () => {
+      modal.querySelector('[data-testid="settings-pane-pages"]').click();
+    });
+
+    const publicPageControl = modal.querySelector('[data-testid="visible-page-sell-candidates"]');
+    expect(publicPageControl.disabled).toBe(true);
+    expect(publicPageControl.getAttribute("aria-checked")).toBe("false");
+    expect(modal.textContent).toContain("Admin-only candidate analysis; unavailable to guests and members.");
+
+    await act(async () => {
+      modal.querySelector('[data-testid="visible-page-open-interest"]').click();
+    });
+    await act(async () => {
+      modal.querySelector('[data-testid="btn-save-desk-settings"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/settings", expect.objectContaining({
+      visible_pages: ["oi-change", "open-interest"],
+    }));
+  });
 });

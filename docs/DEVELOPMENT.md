@@ -7,6 +7,14 @@ Before making any change, use the canonical
 frontend/backend file locations, comment rules, tests, documentation, version
 updates, and shipping steps for every AI or human agent.
 
+### Dashboard tab visibility
+
+Dashboard tabs have no always-visible close control. On desktop, right-click a
+tab or focus it and press **Shift+F10** to open its page options; on touch
+screens, long-press the tab. Choose **Hide** to remove it from the current
+dashboard layout. The trailing **+** menu restores hidden pages. Keep this
+interaction available in both desktop and mobile tab bars.
+
 ### Public product walkthrough
 
 The `/sitewalkthrough` route is an anonymous preview of the actual Dashboard,
@@ -15,7 +23,9 @@ dashboard request on that pathname with fictional fixtures and in-memory
 write handling; unknown fixtures must never fall through to live data. The
 only permitted backend request is the public `/auth/state` check used to
 respect the administrator's walkthrough toggle. Keep CAS, admin controls, and
-the real trade journal hidden, and keep spot/straddle WebSockets disabled.
+live account data hidden, and keep spot/straddle WebSockets disabled. A local
+fictional journal fixture may be shown; its Admin trade-cycle setting must not
+be fetched, and edits must remain in memory.
 Label all values as fictional sample data. Edits must reset on refresh and
 must never reach MongoDB, account data, or broker services.
 The sample indices, OI, option premiums, and straddles share a deterministic
@@ -23,13 +33,48 @@ clock, evolve only during NSE sessions (regular 09:15–15:30 IST, excluding
 weekends and full holidays; published special sessions follow their listed
 hours), and freeze at the prior session close otherwise. Keep the walkthrough's
 faster refresh cadence isolated from normal dashboard polling.
-Desk AI cash movers, breadth, news, and the rule-based brief must come from
-fictional fixtures; sample strike alerts use stable 90-second IDs so dashboard
-polls produce occasional in-app notifications rather than repeated toasts.
+Desk AI market context, cash movers, breadth, and news must come from fictional
+fixtures; the demo brief must not contain trade recommendations. Sample strike
+alerts use stable 90-second IDs so dashboard polls produce occasional in-app
+notifications rather than repeated toasts.
 Clearly mark these as samples and do not issue sound/browser notifications for
 them. The administrator controls availability from **Header → Admin Settings →
 Site walkthrough**, not Admin configuration. When disabled, render the branded
 maintenance screen and do not mount the dashboard or fetch market data.
+
+### Interactive subscription plan details
+
+The public pricing **More info** dialogs are a plan explorer, separate from
+the `/sitewalkthrough` Dashboard route. Each configured member feature should
+have a concise explanation, its user edge, and an in-place preview. Admin
+Settings → Landing Page controls global visibility of these dialogs, feature
+order and copy for each plan, and has
+an explicit **Capture current app data / Refresh captured data** action. Only
+that Admin action requests and stores a sanitized, static snapshot of shared
+publisher OI, straddle, index events, exchange holidays, Market Intel, Global
+Markets, the publisher desk alert tape, and a whitelisted heavyweight cash
+snapshot (constituent/index, weight, move, breadth, source, timestamp) for the
+Desk AI briefing. Fetch `/public/landing-plan-preview/{plan}`
+endpoint only when a plan detail opens; do not include the snapshot in general
+`/public/site-config`.
+
+Never capture a member-filtered alert inbox, member preferences, broker
+credentials, positions, private journal data, or trade cycles. Positions and
+journal examples remain local fictional data; the member Desk AI preview is a
+read-only market-session briefing with captured breadth and heavyweight
+weight/move facts. It never accesses, analyzes, or comments on member positions.
+The capture filter must exclude the endpoint's buyer/seller ideas and all
+private/account context. Missing or empty feeds use visibly labeled fictional
+samples in the public walkthrough, never values presented as live or captured.
+Admins can preview the current unsaved walkthrough configuration in place.
+Optional screenshots supplement, rather than replace, the feature previews.
+
+The public feature grid is titled **Everything the desk needs, in one view**.
+Keep the current cards synchronized between `Landing.jsx`, Admin Landing Page,
+the backend landing-card allowlist, and the landing-copy editor. Straddle and
+Market & Global Events each have explicitly illustrative sample previews in the
+product demo; do not present their fictional values as live data. The retired
+OI Distribution card must not return.
 
 The Positions phone header keeps the page title, position status, and warning
 controls on separate compact rows. Its PositionMeter entry is labeled "PMeter"

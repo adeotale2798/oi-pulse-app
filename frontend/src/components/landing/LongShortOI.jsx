@@ -1,4 +1,5 @@
 import React from "react";
+import BrowserChrome from "@/components/landing/BrowserChrome";
 
 // Long/Short markers overlaid on the OI wall chart — the flagship Premium view.
 export default function LongShortOI({ snap }) {
@@ -11,12 +12,7 @@ export default function LongShortOI({ snap }) {
 
   return (
     <div className="slz-browser">
-      <div className="slz-browser-bar">
-        <span className="slz-dot" style={{ background: "#ff5f57" }} />
-        <span className="slz-dot" style={{ background: "#febc2e" }} />
-        <span className="slz-dot" style={{ background: "#28c840" }} />
-        <span className="slz-url slz-mono">🔒 striklenz.com/dashboard · positions on OI</span>
-      </div>
+      <BrowserChrome />
       <div className="slz-screen-body">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-300">NIFTY · Your positions on the OI wall</span>

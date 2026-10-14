@@ -2,9 +2,9 @@ import { Activity, BarChart3, BrainCircuit, CalendarDays, Globe2, Newspaper, Shi
 
 const features = [
   [Activity, "Live OI Pulse", "Track market flows"],
-  [BarChart3, "Market Insights", "Find opportunities"],
-  [ShieldCheck, "Risk Lens", "Trade smarter"],
-  [BrainCircuit, "Desk AI", "Your trading copilot"],
+  [BarChart3, "Market Insights", "Review market context"],
+  [ShieldCheck, "Risk Lens", "Track relevant factors"],
+  [BrainCircuit, "Desk AI", "Evidence-aware market context"],
   [Globe2, "Global Market", "Track world indices"],
   [Newspaper, "World Market News", "Stay market-aware"],
   [BarChart3, "Straddle", "Read premium structure"],

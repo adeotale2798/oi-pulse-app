@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripHorizontal, Maximize2, Minimize2, Newspaper, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Grip, GripHorizontal, Maximize2, Minimize2, Newspaper, X } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   bandClass,
@@ -23,11 +23,24 @@ import {
   MI_POPUP_MIN_KEY,
   MI_RELOAD_EVENT,
 } from "@/lib/marketIntel";
-import { clampCarryLeft, clampDockBottom, deskHeaderClearance, snapCarryLeft } from "@/lib/carryDock";
+import {
+  clampCarryLeft,
+  clampDockBottom,
+  clampFloatingPanelSize,
+  deskHeaderClearance,
+  FLOATING_DOCK_SIDE_EVENT,
+  MI_PANEL_HEIGHT,
+  MI_PANEL_WIDTH,
+  MI_POPUP_HEIGHT_KEY,
+  moveOpposingDock,
+  MI_POPUP_WIDTH_KEY,
+  snapCarryLeft,
+  snapDockFromClientX,
+} from "@/lib/carryDock";
 import { nextSessionOpenMs } from "@/lib/overnightBrief";
 import { useFloatingDockFocus } from "@/lib/floatingDock";
 
-const PANEL_W = 320;
+const PANEL_W = MI_PANEL_WIDTH;
 
 function isPhone() {
   return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
@@ -97,8 +110,16 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
   const [dockUntilNext, setDockUntilNext] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [positionReady, setPositionReady] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth : 1200
+  ));
+  const [viewportHeight, setViewportHeight] = useState(() => (
+    typeof window !== "undefined" ? window.innerHeight : 800
+  ));
   const [leftPx, setLeftPx] = useState(() => readNum(MI_POPUP_LEFT_KEY));
   const [bottomPx, setBottomPx] = useState(() => readNum(MI_POPUP_BOTTOM_KEY));
+  const [panelWidth, setPanelWidth] = useState(() => readNum(MI_POPUP_WIDTH_KEY) || PANEL_W);
+  const [panelHeight, setPanelHeight] = useState(() => readNum(MI_POPUP_HEIGHT_KEY) || MI_PANEL_HEIGHT);
   const idxRef = useRef(0);
   const seenNewsIdsRef = useRef(new Set());
   const hasInitialNewsRef = useRef(false);
@@ -112,14 +133,53 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
 
   const setLeft = (px) => {
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    const next = clampCarryLeft(px, w, isPhone() ? 280 : PANEL_W);
+    const next = clampCarryLeft(px, w, isPhone() ? 280 : panelSize.width);
     setLeftPx(next);
     writeNum(MI_POPUP_LEFT_KEY, next);
   };
 
   const snap = (mode) => {
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    setLeft(snapCarryLeft(mode, w, isPhone() ? 280 : PANEL_W));
+    setLeft(snapCarryLeft(mode, w, isPhone() ? 280 : panelSize.width));
+    if (mode === "left" || mode === "right") moveOpposingDock("market-intel", mode, w);
+  };
+
+  const panelSize = clampFloatingPanelSize(panelWidth, panelHeight, viewportWidth, viewportHeight, {
+    minWidth: 320,
+    minHeight: 220,
+    maxWidth: 600,
+    maxHeight: 620,
+    headerClearance: deskHeaderClearance(),
+    bottomClearance: dockClearance(),
+    defaultWidth: PANEL_W,
+    defaultHeight: MI_PANEL_HEIGHT,
+  });
+
+  const applyPanelSize = (width, height) => {
+    const next = clampFloatingPanelSize(width, height, window.innerWidth, window.innerHeight, {
+      minWidth: 320,
+      minHeight: 220,
+      maxWidth: 600,
+      maxHeight: 620,
+      headerClearance: deskHeaderClearance(),
+      bottomClearance: dockClearance(),
+      defaultWidth: PANEL_W,
+      defaultHeight: MI_PANEL_HEIGHT,
+    });
+    setPanelWidth(next.width);
+    setPanelHeight(next.height);
+    writeNum(MI_POPUP_WIDTH_KEY, next.width);
+    writeNum(MI_POPUP_HEIGHT_KEY, next.height);
+    const nextLeft = clampCarryLeft(leftPx ?? 12, window.innerWidth, next.width);
+    setLeftPx(nextLeft);
+    writeNum(MI_POPUP_LEFT_KEY, nextLeft);
+    const nextBottom = clampDockBottom(bottomPx ?? dockClearance(), window.innerHeight, {
+      minBottom: dockClearance(),
+      headerClearance: deskHeaderClearance(),
+      panelHeight: next.height,
+    });
+    setBottomPx(nextBottom);
+    writeNum(MI_POPUP_BOTTOM_KEY, nextBottom);
   };
 
   const clampBottom = useCallback((raw) => {
@@ -134,6 +194,14 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
 
   useLayoutEffect(() => {
     const apply = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+      setLeftPx((prev) => {
+        if (prev == null) return prev;
+        const next = clampCarryLeft(prev, window.innerWidth, isPhone() ? 280 : panelSize.width);
+        if (next !== prev) writeNum(MI_POPUP_LEFT_KEY, next);
+        return next;
+      });
       setBottomPx((prev) => {
         const next = clampBottom(prev != null ? prev : dockClearance());
         if (next !== prev) writeNum(MI_POPUP_BOTTOM_KEY, next);
@@ -144,13 +212,32 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
     apply();
     window.addEventListener("resize", apply);
     return () => window.removeEventListener("resize", apply);
-  }, [clampBottom]);
+  }, [clampBottom, panelSize.height, panelSize.width, viewportHeight, viewportWidth]);
+
+  useEffect(() => {
+    const onOpposingDockMove = (event) => {
+      if (event.detail?.target !== "market-intel") return;
+      const nextLeft = clampCarryLeft(
+        event.detail.left,
+        window.innerWidth,
+        isPhone() ? 280 : panelSize.width,
+      );
+      setLeftPx(nextLeft);
+      writeNum(MI_POPUP_LEFT_KEY, nextLeft);
+      setBottomPx(clampBottom(event.detail.bottom));
+      writeNum(MI_POPUP_BOTTOM_KEY, clampBottom(event.detail.bottom));
+    };
+    window.addEventListener(FLOATING_DOCK_SIDE_EVENT, onOpposingDockMove);
+    return () => window.removeEventListener(FLOATING_DOCK_SIDE_EVENT, onOpposingDockMove);
+  }, [clampBottom, panelSize.width]);
 
   useEffect(() => {
     if (leftPx != null) return;
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-    setLeft(snapCarryLeft("right", w, PANEL_W));
-  }, [leftPx]);
+    const nextLeft = snapCarryLeft("right", w, panelSize.width);
+    setLeftPx(nextLeft);
+    writeNum(MI_POPUP_LEFT_KEY, nextLeft);
+  }, [leftPx, panelSize.width]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -233,12 +320,14 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
     setForceOpen(true);
     const w = typeof window !== "undefined" ? window.innerWidth : 1200;
     const h = typeof window !== "undefined" ? window.innerHeight : 800;
-    const width = isPhone() ? 280 : PANEL_W;
-    setLeft(snapCarryLeft("right", w, width));
+    const width = isPhone() ? 280 : panelSize.width;
+    const rightLeft = snapCarryLeft("right", w, width);
+    setLeft(rightLeft);
+    if (!isPhone()) moveOpposingDock("market-intel", "right", w);
     const nextBottom = clampDockBottom(dockClearance(), h, {
       minBottom: dockClearance(),
       headerClearance: deskHeaderClearance(),
-      panelHeight: isPhone() ? 320 : 280,
+      panelHeight: isPhone() ? 320 : panelSize.height,
     });
     setBottomPx(nextBottom);
     writeNum(MI_POPUP_BOTTOM_KEY, nextBottom);
@@ -251,7 +340,16 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const startBottom = bottomPx != null ? bottomPx : dockClearance();
     const startLeft = leftPx != null ? leftPx : 12;
-    dragRef.current = { kind, startY: e.clientY, startX: e.clientX, startBottom, startLeft, moved: false };
+    dragRef.current = {
+      kind,
+      startY: e.clientY,
+      startX: e.clientX,
+      startBottom,
+      startLeft,
+      startWidth: boxRef.current?.getBoundingClientRect().width || panelSize.width,
+      startHeight: boxRef.current?.getBoundingClientRect().height || panelSize.height,
+      moved: false,
+    };
   };
 
   const onPointerMove = (e) => {
@@ -260,9 +358,17 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
       dragRef.current.moved = true;
     }
     const kind = dragRef.current.kind;
+    if (kind === "resize") {
+      dragRef.current.moved = true;
+      applyPanelSize(
+        dragRef.current.startWidth + (e.clientX - dragRef.current.startX),
+        dragRef.current.startHeight + (dragRef.current.startY - e.clientY),
+      );
+      return;
+    }
     if (kind === "move" || kind === "both") {
       const w = typeof window !== "undefined" ? window.innerWidth : 1200;
-      const panel = minimized || isPhone() ? 88 : PANEL_W;
+      const panel = minimized || isPhone() ? 88 : panelSize.width;
       setLeftPx(clampCarryLeft(dragRef.current.startLeft + (e.clientX - dragRef.current.startX), w, panel));
     }
     if (!minimized && isPhone() && dragRef.current.kind !== "both") return;
@@ -276,9 +382,27 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
     const kind = dragRef.current.kind;
     const moved = dragRef.current.moved;
     const startY = dragRef.current.startY;
+    const startX = dragRef.current.startX;
+    const startLeft = dragRef.current.startLeft;
     const shouldExpand = minimized && !moved;
     if (kind === "move" || kind === "both") {
-      if (moved && leftPx != null) writeNum(MI_POPUP_LEFT_KEY, leftPx);
+      if (moved) {
+        const width = minimized ? 88 : panelSize.width;
+        const droppedLeft = clampCarryLeft(
+          startLeft + (e.clientX - startX),
+          window.innerWidth,
+          width,
+        );
+        writeNum(MI_POPUP_LEFT_KEY, droppedLeft);
+        setLeftPx(droppedLeft);
+        if (!isPhone()) {
+          moveOpposingDock(
+            "market-intel",
+            snapDockFromClientX(droppedLeft + width / 2, window.innerWidth),
+            window.innerWidth,
+          );
+        }
+      }
     }
     if (!minimized && isPhone() && kind !== "both") {
       const swipeDown = e.clientY - startY;
@@ -295,6 +419,16 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
       return next;
     });
     if (shouldExpand) expand();
+  };
+
+  const onResizeKeyDown = (e) => {
+    const step = e.shiftKey ? 48 : 24;
+    if (e.key === "ArrowLeft") applyPanelSize(panelWidth - step, panelHeight);
+    else if (e.key === "ArrowRight") applyPanelSize(panelWidth + step, panelHeight);
+    else if (e.key === "ArrowUp") applyPanelSize(panelWidth, panelHeight + step);
+    else if (e.key === "ArrowDown") applyPanelSize(panelWidth, panelHeight - step);
+    else return;
+    e.preventDefault();
   };
 
   if (!enabled) return null;
@@ -374,17 +508,18 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
 
   return (
     <div
-      className={`oi-configurable-popup fixed ${zIndexClass} md:bottom-3 flex flex-col rounded-xl border-2 ${popupSurfaceClass} shadow-lg pointer-events-auto h-[min(22rem,52vh)] ${
+      className={`oi-configurable-popup fixed ${zIndexClass} md:bottom-3 flex flex-col rounded-xl border-2 ${popupSurfaceClass} shadow-lg pointer-events-auto ${
         phoneOpen ? "left-3 right-3" : ""
       } ${bottomPx == null ? "bottom-[3.25rem] md:bottom-3" : ""}`}
       style={{
         ...posStyle,
+        height: `${panelSize.height}px`,
         visibility: positionReady ? "visible" : "hidden",
         "--oi-popup-opacity": String(Math.max(60, Math.min(100, Number(popupOpacity) || 92)) / 100),
         ...(phoneOpen
           ? {}
           : {
-              width: `min(${PANEL_W}px, calc(100vw - 16px))`,
+              width: `${panelSize.width}px`,
             }),
       }}
       data-testid="market-intel-popup"
@@ -475,16 +610,16 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
         </button>
       </div>
 
-      <div className="px-2.5 pb-2.5 pt-1.5 space-y-1.5 text-xs overflow-y-auto min-h-0 flex-1">
+      <div className="px-3 pb-10 pt-2 space-y-2 text-sm overflow-y-auto min-h-0 flex-1 leading-relaxed">
         {loadError ? (
-          <p className="text-[11px] text-rose-800" data-testid="mi-popup-error">Could not load news: {loadError}</p>
+          <p className="text-xs text-rose-800" data-testid="mi-popup-error">Could not load news: {loadError}</p>
         ) : item ? (
           <>
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm border ${bandClass(item.impact_band)}`}>{item.impact_band || "HIGH"}</span>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm border ${bandClass(item.impact_band)}`}>{impactScoreLabel(item.impact_score)}</span>
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-sm border ${bandClass(item.impact_band)}`}>{item.impact_band || "HIGH"}</span>
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-sm border ${bandClass(item.impact_band)}`}>{impactScoreLabel(item.impact_score)}</span>
               <span
-                className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-sm border ${directionalImpactClass(item.market_direction)}`}
+                className={`inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded-sm border ${directionalImpactClass(item.market_direction)}`}
                 title={`${directionalBasisLabel(item.direction_basis)} ${item.direction_reason || ""}`}
                 data-testid="mi-popup-direction"
               >
@@ -493,13 +628,13 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
                 {directionalImpactLabel(item.market_direction)}
               </span>
               {item.event_type ? (
-                <span className="text-[10px] font-bold uppercase tracking-wide">{formatEventTypeLabel(item.event_type)}</span>
+                <span className="text-[11px] font-bold uppercase tracking-wide">{formatEventTypeLabel(item.event_type)}</span>
               ) : null}
-              <span className="text-[10px] font-semibold text-rose-900">{n} critical today</span>
+              <span className="text-[11px] font-semibold text-rose-900">{n} critical today</span>
             </div>
-            <div className="text-sm font-semibold leading-snug">{item.title}</div>
-            {item.direction_reason ? <p className="text-[11px] opacity-80" data-testid="mi-popup-direction-reason">{item.direction_reason}</p> : null}
-            <div className="flex flex-wrap gap-x-2 gap-y-1 text-[10px] opacity-80">
+            <div className="text-base font-semibold leading-snug">{item.title}</div>
+            {item.direction_reason ? <p className="text-sm opacity-90" data-testid="mi-popup-direction-reason">{item.direction_reason}</p> : null}
+            <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs opacity-80">
               <span>
                 {item.independent_source_count ?? 1} independent source{(item.independent_source_count ?? 1) === 1 ? "" : "s"}
                 {(item.independent_source_names || []).length ? ` · ${item.independent_source_names.slice(0, 2).join(" / ")}` : ""}
@@ -508,36 +643,50 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
               <span>{marketTimingLabel(item.market_timing)}</span>
               <span>{newsFreshnessLabel(item.news_freshness)}</span>
             </div>
-            <div className="text-[10px] opacity-75">
+            <div className="text-xs opacity-75">
               Published: {item.published_at_known ? marketIntelPublicationLabel(item.published_at, item.published_at_precision) : "time not supplied"}
               {" · "}Received: {marketIntelTimeLabel(item.discovered_at)}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] opacity-90">{indiaImpactLabel(item.india_relevance_score)}</span>
-              <span className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold ${volatilityRiskClass(item.volatility_risk)}`} title={item.volatility_risk_reason || "Text-based catalyst assessment, not live implied volatility."}>
+              <span className="text-xs opacity-90">{indiaImpactLabel(item.india_relevance_score)}</span>
+              <span className={`rounded-sm border px-1.5 py-0.5 text-[11px] font-semibold ${volatilityRiskClass(item.volatility_risk)}`} title={item.volatility_risk_reason || "Text-based catalyst assessment, not live implied volatility."}>
                 Volatility {item.volatility_risk || "unavailable"}
               </span>
             </div>
             {volatilitySellerNote(item.volatility_risk) ? (
-              <p className="text-[10px] font-medium opacity-90" data-testid="mi-popup-seller-note">
+              <p className="text-xs font-medium opacity-90" data-testid="mi-popup-seller-note">
                 {volatilitySellerNote(item.volatility_risk)}
               </p>
             ) : null}
-            {item.india_link_reason ? <p className="text-[10px] opacity-80" data-testid="mi-popup-india-link">{item.india_link_reason}</p> : null}
+            {item.india_link_reason ? <p className="text-xs opacity-80" data-testid="mi-popup-india-link">{item.india_link_reason}</p> : null}
             {Array.isArray(item.potential) && (
-              <ul className="text-[11px] list-disc pl-4">
+              <ul className="text-sm list-disc pl-4">
                 {item.potential.slice(0, 4).map((p, i) => <li key={`p-${i}`}>{p}</li>)}
               </ul>
             )}
             <div className="flex flex-wrap gap-2 items-center pt-1">
-              <button type="button" className="text-[11px] font-semibold min-h-11" onClick={() => onOpenPage?.()}>View Market Intelligence</button>
-              <button type="button" className="text-[11px] opacity-70 ml-auto min-h-11" onClick={dismissCurrent}>This story done</button>
+              <button type="button" className="text-xs font-semibold min-h-11" onClick={() => onOpenPage?.()}>View Market Intelligence</button>
+              <button type="button" className="text-xs opacity-70 ml-auto min-h-11" onClick={dismissCurrent}>This story done</button>
             </div>
           </>
         ) : (
-          <p className="text-[11px] opacity-80">No high-impact stories right now.</p>
+          <p className="text-xs opacity-80">No high-impact stories right now.</p>
         )}
       </div>
+      <button
+        type="button"
+        className="hidden md:flex absolute bottom-0 right-0 h-8 w-8 items-center justify-center cursor-nwse-resize touch-none rounded-tl-md bg-black/5 hover:bg-black/10"
+        aria-label="Resize Market Intelligence popup"
+        title="Drag to resize · use arrow keys for precise sizing"
+        data-testid="mi-popup-resize"
+        onPointerDown={(e) => onPointerDown(e, "resize")}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onKeyDown={onResizeKeyDown}
+      >
+        <Grip className="h-4 w-4 rotate-[-45deg] opacity-70" aria-hidden="true" />
+      </button>
     </div>
   );
 }

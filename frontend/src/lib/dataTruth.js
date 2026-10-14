@@ -139,11 +139,11 @@ export function buildDataTruth({
   const reason = ds.stale_reason || "stale_cache";
   return {
     mode: "STALE",
-    badge: "STALE",
+    badge: "OI STALE",
     asOfLabel: asOfClock ? `Last update ${asOfClock} IST` : "Last update unknown",
     detail: reason === "stale_cache"
-      ? "Market open but snapshot lagging — treat as delayed"
-      : String(reason).replace(/_/g, " "),
+      ? "Shared publisher OI feed is stale · your broker connection is separate"
+      : `Shared publisher OI feed · ${String(reason).replace(/_/g, " ")}`,
     tone: "warn",
   };
 }

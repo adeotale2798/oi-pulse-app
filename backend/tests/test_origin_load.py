@@ -3,6 +3,7 @@ from pathlib import Path
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from starlette.requests import Request
 
 import server
@@ -100,7 +101,8 @@ def test_guest_auth_does_not_restore_or_disclose_identity_by_ip():
     assert "guest_token" in kite_lookup
 
 
-def test_auth_state_never_returns_prior_guest_from_ip(monkeypatch):
+@pytest.mark.parametrize("guest_login_enabled", [True, False])
+def test_auth_state_reports_guest_login_without_changing_google_login(monkeypatch, guest_login_enabled):
     async def no_admin(request):
         return None
 
@@ -111,7 +113,14 @@ def test_auth_state_never_returns_prior_guest_from_ip(monkeypatch):
         return True, None
 
     async def no_platform_config():
-        return {}
+        return {
+            "guest_login_enabled": guest_login_enabled,
+            "google": {
+                "enabled": True,
+                "client_id_enc": "configured",
+                "client_secret_enc": "configured",
+            },
+        }
 
     async def no_maintenance():
         return False
@@ -143,9 +152,77 @@ def test_auth_state_never_returns_prior_guest_from_ip(monkeypatch):
 
     result = asyncio.run(server.auth_state(Request(scope)))
 
-    assert result["needs_guest_name"] is True
+    assert result["guest_login_enabled"] is guest_login_enabled
+    assert result["google_login_enabled"] is True
+    assert result["needs_guest_name"] is guest_login_enabled
     assert result["suggested_guest_name"] is None
     assert result["auto_guest_token"] is None
+
+
+def test_auth_state_reports_disabled_basic_and_only_ready_paid_plans(monkeypatch):
+    member_session = {
+        "is_member": True,
+        "member": {"plan": "normal", "preferences": {}},
+    }
+
+    async def no_admin(request):
+        return None
+
+    async def member_session_for_request(request):
+        return member_session
+
+    async def public_open():
+        return True, None
+
+    async def platform_config():
+        return {
+            "membership": {
+                "experience_enabled": True,
+                "paid_subscriptions_enabled": True,
+                "plans": {
+                    "normal": {"enabled": False},
+                    "premium": {"enabled": True},
+                    "pro": {"enabled": False},
+                },
+            },
+        }
+
+    async def no_maintenance():
+        return False
+
+    async def no_auth_user_kite(is_admin, guest):
+        return {}
+
+    monkeypatch.setattr(server, "db", object())
+    monkeypatch.setattr(server, "tracker", None)
+    monkeypatch.setattr(server, "_get_public_access_state", public_open)
+    monkeypatch.setattr(server, "_load_platform_config", platform_config)
+    monkeypatch.setattr(server, "_get_maintenance_state", no_maintenance)
+    monkeypatch.setattr(server, "_get_sitewalkthrough_enabled", lambda: _async_value(True))
+    monkeypatch.setattr(server, "_admin_from_request", no_admin)
+    monkeypatch.setattr(server, "_guest_from_request", member_session_for_request)
+    monkeypatch.setattr(server, "_get_guest_require_approval", lambda: _async_value(True))
+    monkeypatch.setattr(server, "_auth_user_kite_payload", no_auth_user_kite)
+    monkeypatch.setattr(server, "_is_ip_blocked", lambda ip: _async_value(False))
+    monkeypatch.setattr(server, "_billing_readiness", lambda doc, membership: {"ready": True})
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/auth/state",
+        "query_string": b"",
+        "headers": [],
+        "client": ("198.51.100.12", 4321),
+        "server": ("testserver", 80),
+    }
+
+    result = asyncio.run(server.auth_state(Request(scope)))
+
+    assert result["membership"]["plan"] == "normal"
+    assert result["membership"]["enabled"] is False
+    assert result["membership"]["available_paid_plans"] == ["premium"]
+    assert result["sitewalkthrough_enabled"] is True
 
 
 def test_guest_kite_lookup_does_not_use_ip_or_name(monkeypatch):

@@ -197,7 +197,7 @@ deployment.
 
 After DNS:
 
-1. Set `CORS_ORIGINS=https://striklenz.com,https://www.striklenz.com,https://admin.striklenz.com` (real origins only), `TRUSTED_HOSTS=striklenz.com,www.striklenz.com,admin.striklenz.com`, and `API_DOCS_ENABLED=false`. Set Kite Connect redirect URL to `https://striklenz.com/kite-callback` (not aaisnamkeen.com).
+1. Set `CORS_ORIGINS=https://striklenz.com,https://www.striklenz.com,https://admin.striklenz.com` (real origins only), `TRUSTED_HOSTS=striklenz.com,www.striklenz.com,admin.striklenz.com`, and `API_DOCS_ENABLED=false`. Set Kite Connect redirect URL to `https://striklenz.com/api/kite/user/callback` (not aaisnamkeen.com or the SPA route). `/api/kite/user/login-url` reports the exact URI to register for the current app host.
 2. Zerodha developer console: add `https://YOUR_DOMAIN` login/redirect URLs (publisher + guest Kite).
 3. Open the desk, login, Fresh Pull, journal, Positions.
 

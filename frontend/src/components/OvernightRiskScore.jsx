@@ -3,10 +3,10 @@ import { eventsWithinDays } from "@/lib/econCalendar";
 import InfoTip from "@/components/InfoTip";
 
 // Same shell as Positions StatBox so this tile sits in the same row.
-export default function OvernightRiskScore({ vix, netDelta, positionsCount, minutesToExpiry }) {
+export default function OvernightRiskScore({ vix, netDelta, positionsCount, minutesToExpiry, isAdmin = false }) {
   const near = useMemo(() => eventsWithinDays(2), []);
 
-  const { score, band, factors, advice } = useMemo(() => {
+  const { score, band, factors, advice, summary } = useMemo(() => {
     let s = 0;
     const f = [];
 
@@ -53,7 +53,11 @@ export default function OvernightRiskScore({ vix, netDelta, positionsCount, minu
       band.tone === "rose" ? "Cut or hedge before the close"
         : band.tone === "amber" ? "Hold smaller into the next open"
           : "Gap risk looks contained";
-    return { score: s, band, factors: f, advice };
+    const summary =
+      band.tone === "rose" ? "Multiple overnight risk factors are elevated."
+        : band.tone === "amber" ? "Some overnight risk factors are elevated."
+          : "Few overnight risk factors were detected.";
+    return { score: s, band, factors: f, advice, summary };
   }, [near, vix, netDelta, positionsCount, minutesToExpiry]);
 
   const cls =
@@ -82,7 +86,10 @@ export default function OvernightRiskScore({ vix, netDelta, positionsCount, minu
         {score}<span className="text-[11px] opacity-60">/100</span>
         <span className="ml-1.5 text-[11px] font-bold tracking-wide" data-testid="overnight-risk-band">{band.label}</span>
       </div>
-      <div className="text-[10px] text-slate-600 leading-tight" data-testid="overnight-risk-advice">{advice}</div>
+      {/* Keep member risk metrics descriptive; actionable carry guidance stays on the Admin desk. */}
+      <div className="text-[10px] text-slate-600 leading-tight" data-testid="overnight-risk-advice">
+        {isAdmin ? advice : summary}
+      </div>
     </div>
   );
 }

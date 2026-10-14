@@ -1,4 +1,4 @@
-/** CAS Indicative price popup window + ticker IEP merge (do not drop last print on sparse ticks). */
+/** CAS Indicative price display window + ticker IEP merge (do not drop last print on sparse ticks). */
 
 export const CAS_IEP_POPUP_PREF = "oiCasIepPopup";
 /** NSE cash / Kite IEP typically stops printing at 15:30 IST. */
@@ -33,7 +33,7 @@ export function casIepDisplayEndMinutes(endIst = "15:30") {
   return Math.min(end, KITE_IEP_SETTLE_MINUTE);
 }
 
-/** Popup from one minute before admin IEP start through Kite settle (15:30) or admin end, whichever is sooner. */
+/** Display window from one minute before configured IEP start through settlement or admin end. */
 export function casIepPopupActive({
   enabled = true,
   force = false,

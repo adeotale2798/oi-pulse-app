@@ -396,6 +396,20 @@ export const addJournalScreenshot = (day, body) =>
   api.post(`/journal/${day}/screenshot`, body).then((r) => r.data);
 export const deleteJournalScreenshot = (day, id) =>
   api.delete(`/journal/${day}/screenshot/${id}`).then((r) => r.data);
+export const fetchMemberJournalMonth = (year, month) =>
+  api.get("/membership/journal", { params: { year, month } }).then((r) => r.data);
+export const fetchMemberJournalYear = (year) =>
+  api.get("/membership/journal", { params: { year, view: "year" } }).then((r) => r.data);
+export const fetchMemberJournalPeriod = (from, to) =>
+  api.get("/membership/journal-period", { params: { from, to } }).then((r) => r.data);
+export const fetchMemberJournalDay = (day) =>
+  api.get(`/membership/journal/${day}`).then((r) => r.data);
+export const saveMemberJournalDay = (day, body) =>
+  api.put(`/membership/journal/${day}`, body).then((r) => r.data);
+export const addMemberJournalScreenshot = (day, body) =>
+  api.post(`/membership/journal/${day}/screenshot`, body).then((r) => r.data);
+export const deleteMemberJournalScreenshot = (day, id) =>
+  api.delete(`/membership/journal/${day}/screenshot/${id}`).then((r) => r.data);
 
 function filenameFromDisposition(header, fallback) {
   const raw = String(header || "");
@@ -547,6 +561,12 @@ export const refreshKiteSession = (request_token) =>
   api.post("/kite/refresh", { request_token }).then((r) => r.data);
 export const userKiteStatus = () =>
   api.get("/kite/user/status").then((r) => r.data);
+export const saveUserKiteCredentials = (api_key, api_secret) =>
+  api.put("/kite/user/credentials", { api_key, api_secret }).then((r) => r.data);
+export const deleteUserKiteCredentials = () =>
+  api.delete("/membership/broker-credentials").then((r) => r.data);
+export const memberBrokerCredentialsStatus = () =>
+  api.get("/membership/broker-credentials").then((r) => r.data);
 export const userKiteLoginUrl = () =>
   api.get("/kite/user/login-url").then((r) => r.data);
 export const completeUserKiteSession = (request_token) =>

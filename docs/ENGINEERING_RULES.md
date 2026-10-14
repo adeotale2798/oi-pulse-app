@@ -73,7 +73,9 @@ If a value is on the Admin configuration form (`DEFAULT_SETTINGS` / `POST /setti
 - Prefix `/api`. Auth: `X-Admin-Token` or `X-Guest-Token` as today.
 - Do not break existing paths or response keys. Additive fields (`universe` on `/config`) are OK.
 - Validate index ids with `INDEX_CONFIG` / `is_pollable`.
-- Publisher Kite owns OI. Guest books use the guest’s own Kite login. Journal is admin-only.
+- Publisher Kite owns OI. Guest and Pro books use the caller’s own Kite login.
+  The admin daily P&L journal remains admin-only; Pro text journal entries are
+  separately scoped to the authenticated member.
 
 ## Database
 

@@ -12,55 +12,36 @@ export const BRAND = {
 export const NAV_LINKS = [
   { id: "product", label: "Product", href: "#product" },
   { id: "features", label: "Features", href: "#features" },
-  { id: "premium", label: "Premium", href: "#premium" },
+  { id: "premium", label: "Pro tools", href: "#pro" },
   { id: "pricing", label: "Pricing", href: "#pricing" },
   { id: "faq", label: "FAQ", href: "#faq" },
 ];
 
-export const FREE_FEATURES = [
-  "NIFTY, BANK NIFTY & SENSEX live view",
-  "Full option chain with OI & OI change",
-  "Volume, PCR & put/call build-up",
-  "Strike Pressure meter",
-  "Market structure: support & resistance",
-  "Market intelligence & regime read",
-  "No broker connection required",
-];
-
-export const PREMIUM_FEATURES = [
-  "Connect your broker & import positions",
-  "Position-level P&L & risk exposure",
-  "Position-specific OI analysis",
-  "Long / Short markers on the OI chart",
-  "Position Brain — instant position read",
-  "Desk AI — ask anything about your book",
-  "Advanced, personalised alerts",
-];
-
 export const FAQS = [
   {
+    key: "faq_0",
     q: "Do I need to connect my broker to use Striklenz?",
-    a: "No. The core market intelligence — option chain, OI, OI change, PCR, Strike Pressure and market structure for NIFTY, BANK NIFTY and SENSEX — is completely free and needs no broker connection.",
+    a: "No. Core market intelligence — option chain, OI, OI Change, PCR and Strike Pressure for NIFTY, BANK NIFTY and SENSEX — is available without a broker connection.",
   },
   {
+    key: "faq_1",
     q: "What does Premium add?",
-    a: "Premium makes it personal. Connect your broker to import live positions and unlock position P&L, position-specific OI analysis, Long/Short markers on the OI chart, Position Brain and Desk AI.",
+    a: "Premium adds personal in-app OI change and OI shift alerts, alert preferences, Market Intel, and Global Markets.",
   },
   {
-    q: "Is my broker password stored?",
-    a: "Never. Striklenz uses official broker OAuth / approved login flows. We never see or store your broker password, and you can disconnect any time.",
+    key: "faq_2",
+    q: "What does Pro add?",
+    a: "Pro includes Premium plus your own broker-connected Positions workspace, a private trade journal, an overnight risk-factor summary, and Desk AI, which brings Market Intel, Global Markets and Indian index movers together in one consolidated market briefing.",
   },
   {
-    q: "Which brokers are supported?",
-    a: "Zerodha is live today. Upstox, Angel One, Dhan, Groww, Fyers and more are being added through a single secure connection layer.",
-  },
-  {
+    key: "faq_data",
     q: "Is the data on this page live?",
-    a: "The product demos on this page use an interactive simulated feed so you can explore the experience instantly. Inside Striklenz you get real market data.",
+    a: "The product demos on this page use an interactive simulated feed so you can explore the experience instantly. Inside StrikLenz you get real market data.",
   },
   {
+    key: "faq_signin",
     q: "How do I sign in?",
-    a: "Tap Get Started and continue with Google, or enter as a guest. It takes seconds.",
+    a: "Tap Get Started and continue with Google. It takes seconds.",
   },
 ];
 
@@ -69,6 +50,7 @@ export const PRICING_FALLBACK = {
   currency: "INR",
   free: { price: 0, label: "Free" },
   premium: { monthly: 999, quarterly: 2499, yearly: 7999, label: "Premium", billing_default: "monthly" },
+  pro: { monthly: 0, quarterly: 0, yearly: 0, label: "Pro", billing_default: "monthly" },
 };
 
 export const money = (n, currency = "INR") => {

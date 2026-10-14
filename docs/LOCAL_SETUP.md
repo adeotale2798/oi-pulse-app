@@ -105,6 +105,11 @@ client address and host are loopback (`localhost`, `127.0.0.1`, or `::1`).
 Do not copy these settings to staging, production, or any shared server. The
 full contract is in [`LOCAL_DEVELOPMENT_AUTH.md`](./LOCAL_DEVELOPMENT_AUTH.md).
 
+For local membership UI testing, the same contract documents optional
+`LOCAL_DEV_MEMBER_USERS` accounts for the Normal, Premium, and Pro tiers. They
+are visible and accepted only on loopback development requests and should use
+an isolated local Mongo database.
+
 To test the real login flow locally, set `LOCAL_DEV_ADMIN_BYPASS=false` or
 remove it from `backend/.env`, then restart the backend.
 

@@ -11,6 +11,7 @@ import MaintenanceScreen from "@/components/MaintenanceScreen";
 import DataLoadingState from "@/components/DataLoadingState";
 import { installDeskErrorLog } from "@/lib/errorLog";
 import { api } from "@/lib/api";
+import { loadPublicEntryAuthState } from "@/lib/authBoot";
 import { isSiteWalkthroughPath } from "@/lib/siteWalkthroughApi";
 
 const Landing = lazy(() => import("@/pages/Landing"));
@@ -19,6 +20,10 @@ const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const AdminLogin = lazy(() => import("@/pages/AdminLogin"));
 const AdminSettings = lazy(() => import("@/pages/AdminSettings"));
+const AdminLandingPage = lazy(() => import("@/pages/AdminLandingPage"));
+const AdminSubscriptions = lazy(() => import("@/pages/AdminSubscriptions"));
+const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
+const MemberJournal = lazy(() => import("@/pages/MemberJournal"));
 const KiteCallback = lazy(() => import("@/pages/KiteCallback"));
 const AboutAppModal = lazy(() => import("@/components/AboutAppModal"));
 
@@ -32,10 +37,13 @@ function PublicEntry() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [walkthroughEnabled, setWalkthroughEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [authUnavailable, setAuthUnavailable] = useState(false);
 
   const loadState = useCallback(() => {
     setLoading(true);
-    return api.get("/auth/state")
+    setAuthUnavailable(false);
+    // Keep a stalled auth API from trapping the public entry on its boot spinner.
+    return loadPublicEntryAuthState(api)
       .then(({ data }) => {
         setShowLanding(!!data?.public_landing_enabled);
         setMaintenanceMode(!!data?.maintenance_mode);
@@ -43,10 +51,7 @@ function PublicEntry() {
         setWalkthroughEnabled(data?.sitewalkthrough_enabled !== false);
       })
       .catch(() => {
-        setShowLanding(false);
-        setMaintenanceMode(false);
-        setIsAdmin(false);
-        setWalkthroughEnabled(false);
+        setAuthUnavailable(true);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -56,6 +61,24 @@ function PublicEntry() {
   }, [loadState]);
 
   if (loading) return <BootFallback />;
+  if (authUnavailable) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-5 text-center text-white">
+        <section className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-7">
+          <h1 className="text-xl font-bold">StrikLenz is taking longer to connect</h1>
+          <p className="mt-2 text-sm text-slate-300">The app could not reach its access service. Check that the backend is running, then retry.</p>
+          <div className="mt-5 flex justify-center gap-3">
+            <button type="button" onClick={loadState} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950">
+              Retry
+            </button>
+            <a href="/login" className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white">
+              Sign in
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
   if (maintenanceMode && !isAdmin) {
     return <MaintenanceScreen retrying={loading} onRetry={loadState} />;
   }
@@ -81,6 +104,11 @@ function AppRoutes({ isAdminHost }) {
               <Route path="/admin" element={<AdminLogin />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin/settings" element={<AdminSettings />} />
+              <Route path="/admin/settings/landingpage" element={<AdminLandingPage />} />
+              <Route path="/admin/subscriptions" element={<AdminSubscriptions />} />
+              <Route path="/kite-callback" element={<KiteCallback />} />
+              <Route path="/account" element={<AuthGate><AccountSettings /></AuthGate>} />
+              <Route path="/account/journal" element={<AuthGate><MemberJournal /></AuthGate>} />
               <Route
                 path="/dashboard/*"
                 element={
@@ -99,6 +127,10 @@ function AppRoutes({ isAdminHost }) {
               <Route path="/admin" element={<AdminLogin />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin/settings" element={<AdminSettings />} />
+              <Route path="/admin/settings/landingpage" element={<AdminLandingPage />} />
+              <Route path="/admin/subscriptions" element={<AdminSubscriptions />} />
+              <Route path="/account" element={<AuthGate><AccountSettings /></AuthGate>} />
+              <Route path="/account/journal" element={<AuthGate><MemberJournal /></AuthGate>} />
               <Route path="/kite-callback" element={<KiteCallback />} />
               <Route
                 path="/dashboard/*"

@@ -14,6 +14,7 @@ import StrikeAroundChips from "@/components/StrikeAroundChips";
 import { INDEX_SHORT, INDEX_STEP, INDEX_DOT, usesIndexOverflow } from "@/lib/universe";
 import { pickIndexLtp } from "@/lib/indexQuotes";
 import { annotateExpiries } from "@/lib/expiryKind";
+import { indicativeChangePct as getIndicativeChangePct } from "@/lib/casIepPopup";
 
 const INDEX_THEME = {
   NIFTY: {
@@ -185,6 +186,8 @@ export default function Sidebar({
   marketOpen = true,
   indicativeClose = null,
   indicativeChangePct = null,
+  indicativeQuotes = {},
+  indicativeWindowOn = false,
   onCollapse,
   layoutNonce = 0,
 }) {
@@ -523,22 +526,44 @@ export default function Sidebar({
                 )}
               </span>
             </div>
-            {indicativeClose != null && Number(indicativeClose) > 0 ? (
-              <div className="mt-1.5" data-testid="sidebar-iep">
-                <div className="text-[10px] uppercase tracking-wide text-slate-500">Indicative price</div>
-                <div className="font-mono-data text-sm font-bold text-slate-900 dark:text-slate-100">
-                  ₹{Number(indicativeClose).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  {indicativeChangePct != null && Number.isFinite(Number(indicativeChangePct)) ? (
-                    <span className={`ml-1.5 text-xs font-semibold ${Number(indicativeChangePct) > 0 ? "text-emerald-600" : Number(indicativeChangePct) < 0 ? "text-rose-600" : "text-slate-500"}`}>
-                      {Number(indicativeChangePct) > 0 ? "+" : ""}{Number(indicativeChangePct).toFixed(2)}%
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </div>
         )}
       </div>
+
+      {/* Keep both CAS indices visible here so switching the selected OI index cannot hide an IEP. */}
+      {indicativeWindowOn && (
+        <div className="border-b border-emerald-200 bg-emerald-50/70 px-3 py-2.5" data-testid="sidebar-iep">
+          <Label className="text-[10px] uppercase tracking-widest text-emerald-800">Indicative Prices</Label>
+          <div className="mt-1.5 grid grid-cols-2 gap-2">
+            {["NIFTY", "SENSEX"].map((index) => {
+              const quote = indicativeQuotes?.[index] || {};
+              const close = quote.indicative_close_price
+                ?? (index === activeIndex ? indicativeClose : null);
+              const changePct = getIndicativeChangePct(quote)
+                ?? (index === activeIndex ? indicativeChangePct : null);
+              return (
+                <div key={index} className="min-w-0 rounded-md border border-emerald-100 bg-white/70 px-2 py-1.5">
+                  <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">{index}</div>
+                  {close != null && Number(close) > 0 ? (
+                    <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1 font-mono-data">
+                      <span className="text-[13px] font-bold leading-tight text-slate-900">
+                        ₹{Number(close).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </span>
+                      {changePct != null && Number.isFinite(Number(changePct)) ? (
+                        <span className={`text-[10px] font-semibold ${Number(changePct) > 0 ? "text-emerald-700" : Number(changePct) < 0 ? "text-rose-700" : "text-slate-500"}`}>
+                          {Number(changePct) > 0 ? "+" : ""}{Number(changePct).toFixed(2)}%
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 text-[10px] text-slate-500" aria-live="polite">Waiting…</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Expiry list — with W (Weekly) / M (Monthly) tags; height drag-resizable */}
       <div className="p-4 border-b border-slate-200">

@@ -838,6 +838,29 @@ def test_period_stats_from_to_and_index_filter():
     assert nifty["booked_after_charges"] is None
 
 
+def test_period_stats_uses_member_aggregate_trade_counts_without_legs():
+    result = period_stats(
+        [{
+            "date": "2026-08-17",
+            "booked_pnl": 100,
+            "exited_count": 1,
+            "trade_count": 2,
+            "win_trades": 1,
+            "loss_trades": 1,
+            "booked_index_pnl": {"NIFTY": 100},
+        }],
+        start="2026-08-17",
+        end="2026-08-17",
+    )
+
+    assert result["booked_pnl"] == 100
+    assert result["trading_days"] == 1
+    assert result["win_trades"] == 1
+    assert result["loss_trades"] == 1
+    assert result["win_rate"] == 50
+    assert result["day_win_rate"] == 100
+
+
 def test_mongo_upsert_ops_no_path_conflict_when_locking():
     snap = snapshot_from_positions(_payload(), date="2026-09-16")
     locked = apply_snapshot({}, snap, now=datetime(2026, 9, 16, 15, 50, tzinfo=IST))

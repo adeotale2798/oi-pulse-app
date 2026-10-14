@@ -10,11 +10,11 @@ Primary database name comes from `DB_NAME` (env). Key collections:
 | `index_registry` | Admin-enabled underlyings (bootstrap NIFTY/SENSEX/BANKNIFTY). Disable hides from the desk; snapshots stay |
 | `kite_underlyings` | Compact search cache from the daily Kite instruments dump |
 | `admin_audit` | Admin enable/disable (and similar) with previous/new state |
-| `alerts` | Server-side OI reversal / pressure alerts |
+| `alerts` | Shared server-side OI reversal / pressure alerts; prior-day records are removed at 09:00 IST |
 | `straddle_samples` | ATM straddle time series |
 | `market_memory_events` / `market_memory_state` | Level interactions and latest per-index memory state, captured from existing OI snapshots |
 | `credentials` | Encrypted Kite API key/secret/token vault (`_id: kite`) |
-| `settings` | Admin settings, public access flag (`open`, `require_approval`, expiry), password hash, sidebar notes, `mcx_desk_on`, Market Intelligence ingest/retention, `telegram_prefs` (alert filters + Fernet `bot_token_enc` + `chat_id`), `adr_prefs` (Twelve Data Fernet `api_key_enc`, poll/alerts) |
+| `settings` | Admin settings, public access flag (`open`, `require_approval`, expiry), configurable public-entry auth wait (5–60 seconds), password hash, sidebar notes, `mcx_desk_on`, Market Intelligence ingest/retention, `telegram_prefs` (alert filters + Fernet `bot_token_enc` + `chat_id`), `adr_prefs` (Twelve Data Fernet `api_key_enc`, poll/alerts), and landing-page config including the Admin-refreshed sanitized plan-demo snapshot |
 | `adr_universe` | Admin-editable Indian ADR list (company, NSE symbol, US ticker, sector, ratio) |
 | `adr_observations` | Twelve Data quote snapshots (time series; pruned with snapshot retention, latest kept) |
 | `adr_latest` | Last successful observation per ADR (survives a failed poll) |
@@ -27,11 +27,20 @@ Primary database name comes from `DB_NAME` (env). Key collections:
 | `admin_sessions` | Short-lived admin bearer tokens |
 | `admin_remember_devices` | 24h IP-bound remember-me tokens |
 | `guest_sessions` | Guest tokens, revoke, IP |
+| `members` | Google-verified member identity, current plan/subscription pointer, private normalized preferences including hidden dashboard pages, and the immutable first-linked `linked_kite_user_id` for Pro's single-Zerodha-account boundary |
+| `member_sessions` | Long-lived member sessions with expiry and revocation state; `_id` is SHA-256 of the bearer token (legacy raw-token rows remain readable for compatibility) |
+| `user_kite` | Encrypted caller broker API key, API secret and daily access token; Pro member rows use the stable Google `member_id` (Google subject), not a per-login session. The member name/email remain in `members`, avoiding duplicate profile data in the credential vault. App credentials survive token expiry, broker sign-out, broker rejection, and plan lapses; members can permanently remove the encrypted credential record from the account broker settings, including after access lapses. The first successful Pro token exchange binds `members.linked_kite_user_id`; that identity remains after credential replacement/removal and daily-session expiry, and mismatched account IDs are rejected. Member secrets are never returned to the client; guests continue using the publisher app. No automatic TTL is configured. |
+| `member_journal` | Private Pro journal, unique per `(user_id, date)`; month/year/period/day queries are filtered by the authenticated member ID and never read admin `trade_journal` rows. Successful member Positions refreshes save daily booked/open P&L, aggregate counts, and per-index P&L only—never broker position legs or detailed cycles. Member summaries do not include brokerage/charges. Member notes, tags, rating, screenshots, and daily summaries remain stored after a plan lapse; detailed cycles remain controlled separately by the admin opt-in. No automatic TTL or member self-service journal deletion is configured. |
+| `member_subscriptions` | Razorpay subscription lifecycle and plan/cadence metadata scoped to `user_id`; pending checkout link and payment state are retained for member recovery and admin audit. No automatic TTL is configured. |
+| `billing_events` | Razorpay webhook event records for provider delivery tracking; event IDs, event type, subscription ID, and receipt time only. These deduplicated records back Admin's all-time charges/renewals, cancellations, and failed-payment counts (indexed by event type). No automatic TTL is configured. |
+| `member_audit` | Redacted member/admin/provider actions for plan overrides, suspension, consent, checkout, payment-state transitions, and broker-credential/session changes; never stores broker secrets or request tokens. Admins can inspect the audit; a member can read only their own latest 25 subscription events through `/membership/me`, with details allowlisted and redacted. No automatic TTL is configured. |
+| `member_alerts` | Small per-member alert acknowledgement records keyed by member and shared alert ID; source alert data is not copied |
+| `member_alert_events` | Per-member OI-shift inbox events keyed by a member-scoped digest; the authenticated member ID is the ownership boundary and a TTL index expires events at the daily alert-retention boundary |
 | `guest_ip_names` | Last guest display name per IP |
 | `access_requests` | Pending/approved/rejected guest entry requests |
 | `blocked_ips` | Hard blocks |
 | `trade_journal` | Admin trade journal: one document per **session** IST date (`session_anchor_date`, not midnight). Pre-open / weekend writes stay on the last session so Kite’s still-open day P&L cannot clone yesterday onto today. Stores booked P&L from **full exits and partial closes**, `funds_base` (**wallet** = Kite opening cash + collateral + pay-in; never leftover `net`, never SPAN/`utilised`), `booked_pct` of wallet **after charges**, `funds_total` / `funds_close`, inferred `inferred_cashflow` (Kite has no withdrawal API), brokerage/`charges_total`, notes, tags, rating, screenshots. Session-day rows have no TTL or date-based retention. Cleanup is limited to automatic non-session rows and pre-open calendar-date clones; equal P&L on consecutive days is not used to skip or delete a current session-day row. |
-| `trade_cycles` | Admin/guest broker-book trade cycles, scoped by owner and contract cycle. The Journal's **Save my trade cycles** toggle controls only future admin cycle writes; it defaults on for existing installations. Turning it off keeps existing cycle records and daily `trade_journal` P&L, and does not affect guest cycle history. The admin Trade Journal can export this admin's closed-cycle documents for an exact inclusive Exit Date range as gzip NDJSON. After explicit confirmation and a matching SHA-256 check over that same range, Compact removes only `events` / `fills`; permanent Delete removes the selected closed cycles. Both actions require downloading the matching archive first. Guest cycles, open/partial cycles, and dates outside the range are never touched. Compact retains summaries and partials; Delete does not. |
+| `trade_cycles` | Admin/guest/opted-in Pro broker-book trade cycles, scoped by owner and contract cycle. Admin **Save my trade cycles** controls future admin writes; Pro member persistence is a separate per-account admin opt-in and defaults off. Turning storage off keeps existing records and daily `trade_journal` P&L, and does not affect guest cycle history. The admin Trade Journal can export this admin's closed-cycle documents for an exact inclusive Exit Date range as gzip NDJSON. After explicit confirmation and a matching SHA-256 check over that same range, Compact removes only `events` / `fills`; permanent Delete removes the selected closed cycles. Both actions require downloading the matching archive first. Guest/member cycles, open/partial cycles, and dates outside the range are never touched by admin archive actions. Compact retains summaries and partials; Delete does not. |
 
 Trade-cycle archives are downloaded from the admin Trade Journal as
 `striklenz-cycle-archive-YYYY-MM-DD-to-YYYY-MM-DD.jsonl.gz`. Each decompressed
@@ -58,6 +67,25 @@ compaction and deletion.
 | Constituents / events / holidays | Uploaded calendars & index members (`index_constituents`, `nse_events`, `nse_holidays`) — see [UPLOAD.md](./UPLOAD.md) for CSV columns and replace rules |
 
 Retention: OI / straddle samples default to **96 hours** so Friday’s session survives the weekend and Monday pre-open (`SNAPSHOT_RETENTION_HOURS` / `STRADDLE_RETENTION_HOURS`). Prune also floors at the previous trading day’s open. Weekend / holiday / pre-open APIs resolve `session_anchor_date` (last trading day) for history, straddle, and banners. After configured market close, OI polling stops; **GIFT Nifty** continues on its own schedule.
+
+Member journal entries, billing records, and audit events currently have no
+automatic expiry. A subscription lapse, refund, cancellation, or admin
+suspension changes feature access but does not delete a member's journal,
+broker configuration, or other private records. A member can remove their own
+encrypted broker credential record at any time; that action also clears the
+daily session token. Pro trade-cycle persistence is off unless explicitly
+enabled by an admin. Turning it off stops future saved cycles but does not
+delete prior cycles. The application does not currently provide member account
+or journal deletion/export controls; data removal beyond broker credentials
+requires an operator-managed database action. Backups follow the hosting
+provider's configured retention, which is separate from application cleanup.
+
+Shared OI alert records and member acknowledgement rows are removed at the
+09:00 IST wall-clock boundary. Member alert reads filter the shared alert
+source by the member's selected indices, alert type, and minimum OI-change
+threshold; they do not fan out full market snapshots or write a duplicate alert
+document for each member. Trade-cycle saving for Pro is off until the admin
+explicitly opts in for that account.
 
 Market Intel outcome measurement reads the already-persisted `oi_snapshots`
 collection only; it does not request quotes or change poll timing. A direction

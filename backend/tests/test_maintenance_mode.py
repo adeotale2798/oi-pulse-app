@@ -36,6 +36,24 @@ def test_guest_entry_is_safely_blocked_during_maintenance(monkeypatch):
     assert response.json() == {"detail": "Desk is preparing for a short update. Please try again soon."}
 
 
+def test_guest_entry_and_approval_poll_are_blocked_when_guest_login_is_disabled(monkeypatch):
+    monkeypatch.setattr(server, "db", type("DB", (), {"settings": SettingsCollection(False)})())
+
+    async def guest_login_disabled():
+        return False
+
+    monkeypatch.setattr(server, "_get_guest_login_enabled", guest_login_disabled)
+    client = TestClient(server.app)
+
+    entry = client.post("/api/auth/guest", json={"name": "Test Guest"})
+    poll = client.get("/api/auth/access-request/pending-request")
+
+    assert entry.status_code == 403
+    assert poll.status_code == 403
+    assert entry.json()["detail"] == "Guest sign-in is disabled. Please sign in with Google."
+    assert poll.json()["detail"] == entry.json()["detail"]
+
+
 def test_maintenance_state_defaults_off_when_database_is_unavailable(monkeypatch):
     monkeypatch.setattr(server, "db", None)
     assert __import__("asyncio").run(server._get_maintenance_state()) is False

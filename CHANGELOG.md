@@ -1,5 +1,313 @@
 # Changelog
 
+## V20.37 — 2026-10-15
+
+Make Admin subscription health actionable with member-level lists for accounts
+blocked by disabled Basic access and payment states needing attention. Add a
+caller-scoped, redacted subscription history to Account settings with a direct
+path to subscribe again. Extend lifecycle/privacy tests; member-owned data
+remains intact when paid access ends.
+
+## V20.36 — 2026-10-15
+
+End paid access immediately after cancellation or a failed/ended provider
+subscription and return the member to Basic. Add an Admin subscription health
+overview with current accessible member counts, all-time charges/renewals,
+cancellations, failed payments, and Basic members blocked by plan availability.
+
+## V20.35 — 2026-10-14
+
+Use one persisted Site Walkthrough setting from both Admin controls and hide
+public demo entry points when it is disabled. Present the internal Normal
+membership tier as Basic and direct members whose plan is disabled to account
+and available subscription options without removing their account access.
+
+## V20.34 — 2026-10-14
+
+Open the landing terminal walkthrough with Straddle, Strike Pressure, and
+Trade Journal. Restyle the Strike Pressure sample with a centered, percentage
+bar that matches the dashboard's session-bias presentation; its inputs remain
+fictional preview snapshots.
+
+## V20.33 — 2026-10-14
+
+Prevent the landing hero from clipping the floating dashboard previews'
+shadows. Preserve horizontal overflow control and add enough bottom clearance
+before the live ticker so the hero and following section feel continuous.
+
+## V20.32 — 2026-10-14
+
+Show the landing sample expiry as 28 Sep with Monthly on the next line. Replace
+the hero index list with “Live options intelligence,” present Desk AI as a
+consolidated briefing across Market Intel, Global Markets and Indian movers,
+and remove the unwanted Premium FAQ sentence. Exact prior default copy is
+migrated while custom Admin copy is preserved; landing market ticker continues
+to use the shared live feed at the app's 60-second cadence.
+
+## V20.31 — 2026-10-14
+
+Replace the landing hero's index list with “Live options intelligence,” show
+the sample expiry as 28 Sep with Monthly on the next line, and describe Desk AI
+as a consolidated view across Market Intel, Global Markets and Indian index
+movers. Remove the unwanted broker-feed FAQ sentence and migrate only matching
+legacy defaults, leaving custom Admin copy untouched.
+
+## V20.30 — 2026-10-14
+
+Increase the landing ticker offset to 25px and add hero bottom clearance so the
+floating animated sample preview remains fully visible without overlapping the
+ticker.
+
+## V20.29 — 2026-10-14
+
+Reduce the fictional landing-page OI chart from 25 strikes to 11 centered on
+ATM to match the compact sample preview. Admin-captured chart data and live
+dashboard strike ranges remain unchanged.
+
+## V20.28 — 2026-10-14
+
+Show NIFTY, BANK NIFTY, SENSEX, India VIX, and GIFT NIFTY in the public
+landing ticker, followed by all additional Admin-enabled indices. Use the
+shared market feeds, show dashes instead of fabricated prices when unavailable,
+and move the ticker strip 15px down from the hero.
+
+## V20.27 — 2026-10-14
+
+Refine the landing-page PositionMeter mockup to use less vertical space and
+give the Analyze showcase a descriptive caption. Add active-section navigation,
+consistent brand accents across section headings and Pro pricing, accessible
+FAQ and billing controls, and reduced-motion support.
+
+## V20.26 — 2026-10-14
+
+Replace the Desk AI preview in the Pro landing showcase with a detailed,
+fictional PositionMeter interface based on the product screenshot. Apply a
+consistent emerald brand accent to the landing section headings and split the
+StrikLenz name in the plan heading using the brand colors.
+
+## V20.25 — 2026-10-14
+
+Center the StrikLenz wordmark on the public sign-in card and desktop brand
+panel. Improve narrow-screen sign-in spacing, keep taller forms vertically
+scrollable, and prevent long headings or controls from being clipped.
+
+## V20.24 — 2026-10-14
+
+Add an explicit Mobile / Tablet compatible marker beneath the landing feature
+tiles and reduce the vertical spacing between those tiles and the interactive
+product demo.
+
+## V20.23 — 2026-10-14
+
+Center the sign-in hero text, supporting copy, and dashboard preview within the
+dark brand panel.
+
+## V20.22 — 2026-10-14
+
+Remove the browser address bar and mock browser frame from the Market
+Intelligence, Trade Journal, and Desk AI tiles in the Pro showcase. Present
+each preview directly as a product tile to match Analyze; leave the separate
+interactive product tour unchanged.
+
+## V20.21 — 2026-10-14
+
+Polish the StrikLenz split-color wordmark across shared, Admin, and sign-in
+surfaces. Move the desktop sign-in notice onto the dark brand panel, remove
+broker-password reassurance copy, compact the member account control into a
+responsive account menu, and start Site Walkthrough with a slim header without
+overwriting saved desk density.
+
+## V20.20 — 2026-10-14
+
+Refine the landing-page browser frame so its URL and sample label fit on
+smaller screens. Add illustrative Straddle and Market & Global Events previews,
+replace the OI Distribution feature card, and retain Admin control over cards.
+
+## V20.19 — 2026-10-14
+
+Allow Admin to set an optional first-period price per paid plan and cadence.
+Public pricing shows the regular amount with a diagonal strike and the offer
+amount, while checkout attaches the matching Razorpay offer and keeps recurring
+cycles at the regular plan price.
+
+## V20.18 — 2026-10-14
+
+Improve the Admin plan pricing cards by separating first-period offer guidance
+from the three billing-cadence fields, keeping monthly, quarterly, and yearly
+Razorpay offer IDs aligned and easier to scan.
+
+## V20.17 — 2026-10-14
+
+Let Admin configure the public entry's auth wait (5–60 seconds, default 10)
+from Admin Settings. The public boot config exposes only this non-sensitive
+value, and its fetch overlaps the auth-state request.
+
+## V20.16 — 2026-10-14
+
+Replace the Pro showcase's shared open-interest preview with a responsive
+fictional Analyze scenario showing sample legs, payoff curves, and summary data.
+
+## V20.15 — 2026-10-14
+
+Round Market Memory point measurements to one decimal place so floating-point
+artifacts do not appear in summary cards or the full-history table.
+
+## V20.14 — 2026-10-14
+
+Give the public entry auth-state request up to 10 seconds (11-second guard)
+before showing the backend connection retry screen.
+
+## V20.13 — 2026-10-14
+
+Prevent OI chart axis labels from clipping at the chart's left edge and remove
+the duplicate Dashboard selection from the terminal walkthrough.
+
+## V20.12 — 2026-10-14
+
+Keep non-admin Market Memory focused on neutral historical measurements by
+hiding support/resistance categories and signed up/down reaction details.
+Preserve the full analytical view for Admin.
+
+## V20.11 — 2026-10-14
+
+Separate current Open Interest distribution from OI Change overlays, replace
+the Strike Pressure preview graphic with neutral call/put OI measurements, and
+expand fictional Index Risk events. Keep member dashboard summaries limited to
+neutral measurements by hiding directional sentiment, build-up classifications,
+and the GEX direction guide; preserve those existing views for Admin.
+
+## V20.10 — 2026-10-14
+
+Refine landing-page plan walkthroughs with a 25-strike CE/PE chart styled after
+the live desk, including an ATM marker, OI scale, and striped/outlined window
+changes. Keep OI Change and Open Interest distinct from the neutral Build-up
+table and Index Risk calendar. Populate Premium's fictional alert inbox with
+OI, Market Intel, Global Markets, constituent-move, and event examples; replace
+the repeated Strike Pressure bars and remove preview-only bullish, bearish,
+support, and resistance labels. Admin-captured Desk AI and live market/member
+data paths remain unchanged.
+
+## V20.09 — 2026-10-14
+
+Add an Admin-controlled guest sign-in switch beneath Google Sign-In, default it
+off, and enforce it for new guest entry and approval-token polling while keeping
+Google member login independent. Remove the broker FAQ entries and guest-login
+copy, move landing-preview quote strips out of the product content, remove the
+overlapping decorative hero dot, and keep bullish/bearish labels readable at
+compact widths.
+
+## V20.08 — 2026-10-14
+
+Add an Admin-controlled switch for plan “More info” walkthroughs and block the
+public plan-detail data endpoints while the switch is off. Expand landing-page
+regression coverage for named plan features and the Admin/public toggle flow.
+
+## V20.07 — 2026-10-14
+
+Use the app's NSE holiday calendar when its upload feed is unavailable, add a
+Market Intelligence view to the Pro showcase, show a dedicated overnight
+risk-factor preview, remove the broker-password hero note, and let Admins edit
+landing-page copy and screenshot titles in place.
+
+## V20.06 — 2026-10-14
+
+Allow Admins to capture or refresh the sanitized shared-feed snapshot directly
+inside the plan walkthrough preview, then inspect current feed data across the
+feature tabs without leaving the preview.
+
+## V20.05 — 2026-10-14
+
+Populate plan walkthroughs with clearly labeled illustrative examples wherever
+an Admin-captured feed is missing; tighten Desk AI copy to shared-market
+context only; remove hollow OI bar caps and align the landing sample bias; and
+show Pro journal and Desk AI terminal previews alongside Positions.
+
+## V20.04 — 2026-10-16
+
+Replace the duplicate Market Structure marketing preview with Global Markets and
+Market Intel views, remove the Play control in favor of direct page selection,
+and present Desk AI as a captured factual market briefing with heavyweight
+weightage/breadth context and no trade suggestions.
+
+## V20.03 — 2026-10-15
+
+Keep member-facing plan previews and dashboard surfaces free of trade-action
+guidance; reserve position-aware Desk AI and carry guidance for Admin. Replace
+the public walkthrough's empty journal/settings responses with clearly
+fictional, in-memory sample entries and remove obsolete OAuth marketing copy.
+
+## V20.02 — 2026-10-15
+
+Replace fabricated market values in plan details with Admin-captured, static shared-app snapshots; configure each plan's feature order and copy, and preview edits in place. Keep subscriber alert history, broker data, positions, and journals out of public captures.
+
+## V20.01 — 2026-10-14
+
+Remove the always-visible dashboard-tab close icons; hide a page from its context menu using right-click, touch long-press, or the keyboard context-menu shortcut, while keeping the existing restore menu.
+
+## V20.00 — 2026-10-14
+
+Replace screenshot-only plan details with interactive Normal, Premium, and Pro feature walkthroughs, including browsable event/holiday and Index Risk previews; keep optional admin screenshots as supporting illustrations. Permanently bind each Pro Google member to the first successful Zerodha identity, including existing linked identities, and reject attempts to connect a different account.
+
+## V19.14 — 2026-10-14
+
+Clarify shared OI freshness versus a member's private broker session, remove the duplicate member broker banner, add persistent hide/restore dashboard tabs, save Premium/Pro OI-shift alerts in each member's inbox, and add plan details with admin-managed screenshots.
+
+## V19.13 — 2026-10-13
+
+Make Market Intel and Overnight Hold popups larger and resizable on desktop, remember each popup's dimensions, keep phone sheets within the viewport, and improve Market Intel story text readability.
+
+## V19.12 — 2026-10-13
+
+Keep Market Intel within the usable viewport at browser zoom levels and dock it opposite Overnight Hold when either popup is moved to a screen side. During the configured indicative-price window, show NIFTY and SENSEX together in the sidebar above Expiries Included.
+
+## V19.11 — 2026-10-13
+
+Use the Positions Trade Journal experience for Pro members, with private daily P&L summaries, calendar/year/period statistics, notes, tags, and screenshots. Member snapshots store aggregates only; detailed position legs and trade cycles remain controlled by the existing admin opt-in.
+
+## V19.10 — 2026-10-13
+
+Clarify subscription payment/access states and pending checkout recovery; cover provider-driven cancellation, payment failure, expiry, and full-refund entitlements; add member-removable encrypted broker credentials, rejected-session refresh handling, redacted admin/member audit history, and member data-retention documentation.
+
+## V19.09 — 2026-10-13
+
+Keep Pro broker app credentials encrypted and linked to each Google member identity across daily session expiry, sign-out, and plan lapses; show masked saved credentials, a daily request-token refresh action, clear stale-session guidance, and the connected broker account ID in the member header and Positions toolbar.
+
+## V19.08 — 2026-10-13
+
+Allow Pro members to save their own encrypted broker API key and secret, generate an app-specific login link, automatically exchange callback request tokens, or manually paste a request token; changing credentials invalidates the prior session.
+
+## V19.07 — 2026-10-13
+
+Add dedicated admin controls for public landing-page section and card visibility, including a default-hidden broker directory, without changing broker integration or plan entitlements.
+
+## V19.06 — 2026-10-13
+
+Move Indicative Price from the draggable popup into a fixed sidebar display during its configured window, make it available across all plans, and remove obsolete popup controls.
+
+## V19.05 — 2026-10-13
+
+Route broker OAuth redirects through the authenticated app callback bridge, exchange the one-time token into the member's encrypted broker session, return to Positions, and prevent duplicate callback exchanges.
+
+## V19.04 — 2026-10-13
+
+Make alert sound settings an admin-grantable member entitlement (off for Normal by default), use generic broker-credential wording in member Positions, add visible member sign-out controls, and present the private Pro journal as a member-scoped calendar without exposing admin P&L.
+
+## V19.03 — 2026-10-13
+
+Expose the public landing-page switch alongside membership rollout and plan configuration in Admin Settings, retain the dashboard-header control, and deny CAS desk/status/backtest access to subscription members while preserving admin and guest behavior.
+
+## V19.02 — 2026-10-13
+
+Bound public-entry authentication loading with a retryable timeout and add loopback-only local member test accounts for Normal, Premium, and Pro without enabling password login outside development.
+
+## V19.01 — 2026-10-13
+
+Make the public landing page consistently show all three admin-configurable plans, with feature lists aligned to actual entitlements, clear shared-feed versus Pro broker-data boundaries, and signup/checkout calls to action gated by provider readiness.
+
+## V19.00 — 2026-10-10
+
+Add the Normal / Premium / Pro membership foundation: Google member sessions independent of guest access, admin-managed plan entitlements and subscriber controls, private member preferences and Pro journal, personalized in-app OI alerts with 09:00 IST retention, and Razorpay subscription checkout/cancellation with signed webhook entitlement updates.
+
 ## V18.54 — 2026-10-09
 
 Broaden Market Intel coverage with a dedicated India-linked international company news feed and ensure material news naming uploaded NIFTY / SENSEX constituents is retained and scored as India-relevant, including IT, steel, chemicals, and construction developments.

@@ -1,5 +1,54 @@
 /** Boot/auth helpers — keep a desk session through origin 520/timeouts. */
 
+export const PUBLIC_ENTRY_AUTH_TIMEOUT_DEFAULT_SECONDS = 10;
+export const PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS = 5;
+export const PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS = 60;
+
+export function normalizePublicEntryAuthTimeout(value) {
+  if (!Number.isInteger(value)) return PUBLIC_ENTRY_AUTH_TIMEOUT_DEFAULT_SECONDS;
+  return Math.min(
+    PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS,
+    Math.max(PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS, value),
+  );
+}
+
+export function loadPublicEntryAuthState(api) {
+  const startedAt = Date.now();
+  let finished = false;
+  let timeoutId;
+  let rejectTimeout;
+  const timeoutPromise = new Promise((_, reject) => {
+    rejectTimeout = reject;
+  });
+
+  const armTimeout = (seconds) => {
+    if (finished) return;
+    clearTimeout(timeoutId);
+    const remaining = Math.max(0, seconds * 1000 - (Date.now() - startedAt));
+    timeoutId = setTimeout(() => {
+      const error = new Error("public entry auth state timeout");
+      error.code = "ECONNABORTED";
+      rejectTimeout(error);
+    }, remaining);
+  };
+
+  // Fetch the setting alongside auth, so configuration never adds another network round trip.
+  armTimeout(PUBLIC_ENTRY_AUTH_TIMEOUT_DEFAULT_SECONDS);
+  api.get("/public/boot-config", { timeout: 5000 })
+    .then(({ data }) => armTimeout(normalizePublicEntryAuthTimeout(data?.public_entry_auth_timeout_seconds)))
+    .catch((error) => {
+      console.warn("Could not load the public entry timeout setting; using the 10-second default.", error);
+    });
+
+  const authRequest = api.get("/auth/state", {
+    timeout: (PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS + 1) * 1000,
+  });
+  return Promise.race([authRequest, timeoutPromise]).finally(() => {
+    finished = true;
+    clearTimeout(timeoutId);
+  });
+}
+
 export function isTransientHttpError(err) {
   const status = err?.response?.status;
   const code = String(err?.code || "");

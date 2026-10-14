@@ -19,6 +19,7 @@ import { DESK_IDS, isMcxMajorId } from "@/lib/universe";
 
 const ALL_INDICES = DESK_IDS;
 const HARD_ADMIN_PAGES = new Set([]);
+const PUBLIC_RESTRICTED_PAGES = new Set(["sell-candidates"]);
 const DASHBOARD_PAGES = [
   { id: "oi-change", label: "OI Change" },
   { id: "open-interest", label: "Open Interest" },
@@ -92,7 +93,6 @@ function normalizeLoadedSettings(d) {
     "alert_toast_opacity",
     "overnight_popup_opacity",
     "market_intel_popup_opacity",
-    "indicative_popup_opacity",
   ]) {
     if (next[key] == null || next[key] === "") continue;
     const n = key === "threshold_pct" ? parseFloat(next[key]) : parseInt(next[key], 10);
@@ -178,7 +178,9 @@ export default function SettingsModal({
           weekday_dashboard_defaults: { "0": "NIFTY", "1": "NIFTY", "2": "SENSEX", "3": "SENSEX", "4": "NIFTY" },
           show_strike_range: false,
           show_market_memory: true,
-          visible_pages: DASHBOARD_PAGES.filter((p) => !p.hardAdmin && p.id !== "cas").map((p) => p.id),
+          visible_pages: DASHBOARD_PAGES
+            .filter((p) => !p.hardAdmin && !PUBLIC_RESTRICTED_PAGES.has(p.id) && p.id !== "cas")
+            .map((p) => p.id),
           admin_visible_pages: ALL_PAGE_IDS,
           show_writer_defense: true,
           show_suggestion: true,
@@ -188,7 +190,6 @@ export default function SettingsModal({
           alert_toast_opacity: 90,
           overnight_popup_opacity: 92,
           market_intel_popup_opacity: 92,
-          indicative_popup_opacity: 92,
         });
       });
   }, [open, isAdmin, loadAttempt]);
@@ -228,9 +229,10 @@ export default function SettingsModal({
   };
 
   const toggleVisiblePage = (pageId) => {
-    if (HARD_ADMIN_PAGES.has(pageId)) return;
+    if (HARD_ADMIN_PAGES.has(pageId) || PUBLIC_RESTRICTED_PAGES.has(pageId)) return;
     const cur = new Set(Array.isArray(settings.visible_pages) ? settings.visible_pages : ALL_PAGE_IDS);
     for (const id of HARD_ADMIN_PAGES) cur.delete(id);
+    for (const id of PUBLIC_RESTRICTED_PAGES) cur.delete(id);
     if (cur.has(pageId)) {
       if (cur.size <= 1) {
         toast.error("Keep at least one public page visible");
@@ -337,14 +339,13 @@ export default function SettingsModal({
         alert_toast_opacity: settings.alert_toast_opacity ?? 90,
         overnight_popup_opacity: settings.overnight_popup_opacity ?? 92,
         market_intel_popup_opacity: settings.market_intel_popup_opacity ?? 92,
-        indicative_popup_opacity: settings.indicative_popup_opacity ?? 92,
         market_intel_ingest_seconds: settings.market_intel_ingest_seconds,
         market_intel_retention_days: settings.market_intel_retention_days,
         market_intel_min_history_days: settings.market_intel_min_history_days,
         market_intel_popup_enabled: settings.market_intel_popup_enabled !== false,
         visible_pages: Array.from(new Set(
           (Array.isArray(settings.visible_pages) ? settings.visible_pages : [])
-            .filter((id) => VALID_PAGE_IDS.has(id) && !HARD_ADMIN_PAGES.has(id)),
+            .filter((id) => VALID_PAGE_IDS.has(id) && !HARD_ADMIN_PAGES.has(id) && !PUBLIC_RESTRICTED_PAGES.has(id)),
         )),
         admin_visible_pages: Array.from(new Set(
           (Array.isArray(settings.admin_visible_pages) && settings.admin_visible_pages.length
@@ -687,7 +688,6 @@ export default function SettingsModal({
                     {[
                       ["Overnight carry", "overnight_popup_opacity"],
                       ["Market Intel", "market_intel_popup_opacity"],
-                      ["Indicative price", "indicative_popup_opacity"],
                     ].map(([label, key]) => (
                       <div key={key}>
                         <div className="flex justify-between text-[11px] text-slate-600"><span>{label}</span><span className="font-mono-data font-semibold">{settings[key] ?? 92}%</span></div>
@@ -980,7 +980,9 @@ export default function SettingsModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {DASHBOARD_PAGES.map((page) => {
                     const hardAdmin = !!page.hardAdmin || HARD_ADMIN_PAGES.has(page.id);
-                    const guestOn = hardAdmin
+                    const publicRestricted = PUBLIC_RESTRICTED_PAGES.has(page.id);
+                    const publicDisabled = hardAdmin || publicRestricted;
+                    const guestOn = publicDisabled
                       ? false
                       : (Array.isArray(settings.visible_pages) ? settings.visible_pages : ALL_PAGE_IDS).includes(page.id);
                     const adminList = Array.isArray(settings.admin_visible_pages) && settings.admin_visible_pages.length
@@ -994,7 +996,7 @@ export default function SettingsModal({
                       : page.id === "positions"
                         ? "Guests see Connect Zerodha for their own book. Charts stay on your publisher token. Header Today P&L stays admin-only."
                         : page.id === "sell-candidates"
-                          ? "Optional for guests — also on the Public icon menu."
+                          ? "Admin-only candidate analysis; unavailable to guests and members."
                           : page.id === "cas"
                             ? "Guests can view; only admin can Activate / Live."
                             : page.id === "adrs"
@@ -1012,10 +1014,10 @@ export default function SettingsModal({
                         {hint ? <div className="text-[10px] text-slate-500 leading-snug mt-0.5">{hint}</div> : null}
                       </div>
                       <div className="flex items-center gap-5">
-                        <label className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${hardAdmin ? "opacity-40" : "text-slate-700 cursor-pointer"}`}>
+                        <label className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${publicDisabled ? "opacity-40" : "text-slate-700 cursor-pointer"}`}>
                           <Checkbox
                             data-testid={`visible-page-${page.id}`}
-                            disabled={hardAdmin}
+                            disabled={publicDisabled}
                             checked={guestOn}
                             onCheckedChange={() => toggleVisiblePage(page.id)}
                             aria-label={`${page.label} public`}
