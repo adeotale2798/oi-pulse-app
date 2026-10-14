@@ -231,6 +231,15 @@ html:has(.slz-light) { scroll-behavior: smooth; }
   height: 100dvh;
   min-height: 100dvh;
 }
+.admin-login-card input:-webkit-autofill,
+.admin-login-card input:-webkit-autofill:hover,
+.admin-login-card input:-webkit-autofill:focus,
+.admin-login-card input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px rgba(2, 6, 23, .82) inset !important;
+  -webkit-text-fill-color: #fff !important;
+  caret-color: #fff;
+  transition: background-color 99999s ease-out 0s;
+}
 .admin-login-ticker-track {
   display: flex;
   width: max-content;

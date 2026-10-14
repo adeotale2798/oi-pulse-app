@@ -1,5 +1,22 @@
 # Changelog
 
+## V20.40 — 2026-10-15
+
+Keep browser autofill fields on the dark Admin login theme. Hide the hidden-page
+restore control when no pages are hidden and portal its menu above dashboard
+layers without letting the trigger cover dialogs.
+
+## V20.39 — 2026-10-15
+
+Start the Market Intel popup at the bottom-right on each app load while keeping
+its in-session docking controls. Improve Positions table-header contrast and
+make the ATM-distance percentage easier to read.
+
+## V20.38 — 2026-10-16
+
+Keep the hidden-dashboard-pages dropdown above nearby dashboard content on
+desktop and mobile.
+
 ## V20.37 — 2026-10-15
 
 Make Admin subscription health actionable with member-level lists for accounts

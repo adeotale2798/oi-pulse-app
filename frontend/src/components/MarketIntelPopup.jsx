@@ -116,8 +116,8 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
   const [viewportHeight, setViewportHeight] = useState(() => (
     typeof window !== "undefined" ? window.innerHeight : 800
   ));
-  const [leftPx, setLeftPx] = useState(() => readNum(MI_POPUP_LEFT_KEY));
-  const [bottomPx, setBottomPx] = useState(() => readNum(MI_POPUP_BOTTOM_KEY));
+  const [leftPx, setLeftPx] = useState(null);
+  const [bottomPx, setBottomPx] = useState(null);
   const [panelWidth, setPanelWidth] = useState(() => readNum(MI_POPUP_WIDTH_KEY) || PANEL_W);
   const [panelHeight, setPanelHeight] = useState(() => readNum(MI_POPUP_HEIGHT_KEY) || MI_PANEL_HEIGHT);
   const idxRef = useRef(0);

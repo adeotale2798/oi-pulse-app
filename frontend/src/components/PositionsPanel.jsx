@@ -529,7 +529,7 @@ function AtmDistanceCell({ row }) {
       data-testid="atm-distance"
     >
       {sign}{Math.round(absPts)}
-      <span className="text-[10px] text-slate-400 ml-0.5">
+      <span className="text-[10px] text-slate-900 ml-0.5">
         ({sign}{Math.abs(pct).toFixed(1)}%)
       </span>
     </span>
@@ -2322,7 +2322,7 @@ export default function PositionsPanel({
               />
             ))}
           </colgroup>
-          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 uppercase tracking-wide text-xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-950 uppercase tracking-wide text-xs">
             <tr className="border-b border-slate-200/80">
               {shownCols.map((id) => {
                 const align = columnAlign(id);
