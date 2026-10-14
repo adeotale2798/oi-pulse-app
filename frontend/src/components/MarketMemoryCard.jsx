@@ -7,7 +7,7 @@ import InfoTip from "@/components/InfoTip";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
-export default function MarketMemoryCard({ index, marketOpen }) {
+export default function MarketMemoryCard({ index, marketOpen, neutralOnly = false }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -71,7 +71,14 @@ export default function MarketMemoryCard({ index, marketOpen }) {
     : marketOpen === false
       ? `Market closed · last OI snapshot ${ageLabel}`
       : `Updated ${ageLabel}`;
-  const formatReaction = (value) => value == null ? "—" : `${value > 0 ? "+" : ""}${value} pts`;
+  const formatPoints = (value) => {
+    if (value == null || !Number.isFinite(Number(value))) return "—";
+    return Number(value).toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  };
+  const formatReaction = (value) => {
+    if (value == null || !Number.isFinite(Number(value))) return "—";
+    return `${Number(value) > 0 ? "+" : ""}${formatPoints(value)} pts`;
+  };
   const formatContext = (context) => {
     if (!context || typeof context !== "object") return null;
     const parts = [];
@@ -85,13 +92,23 @@ export default function MarketMemoryCard({ index, marketOpen }) {
       <div className="flex items-center gap-1 text-[10px] font-semibold tracking-widest text-slate-500 uppercase">
         <span>Market Memory</span>
         <InfoTip title="How to read Market Memory" size="xs" testId="market-memory-info">
-          <div className="space-y-2">
-            <p>Market Memory records how price behaved when it previously reached a structural level. It is context, not a forecast or trade signal.</p>
-            <p><b>Interactions</b> = meaningful touches, rejections, breakouts, and failed breakouts. Repeated snapshots during one visit are grouped.</p>
-            <p><b>Average reaction</b> = the average absolute move after a recorded test. It shows typical movement, not direction or guaranteed follow-through.</p>
-            <p><b>Distance</b> = live price minus the level. Positive means price is above it; negative means price is below it.</p>
-            <p><b>Strength</b> combines reaction history and recency. Old reactions fade in relevance.</p>
-          </div>
+          {neutralOnly ? (
+            <div className="space-y-2">
+              <p>Market Memory summarizes historical price observations around recorded levels. It is not a forecast or trade signal.</p>
+              <p><b>Interactions</b> = meaningful visits to a level, with repeated snapshots during one visit grouped together.</p>
+              <p><b>Average reaction</b> = the average absolute price move after a recorded test.</p>
+              <p><b>Distance</b> = the number of points between the current price and a recorded level.</p>
+              <p><b>Strength</b> combines historical reactions and recency. Old observations fade in relevance.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p>Market Memory records how price behaved when it previously reached a structural level. It is context, not a forecast or trade signal.</p>
+              <p><b>Interactions</b> = meaningful touches, rejections, breakouts, and failed breakouts. Repeated snapshots during one visit are grouped.</p>
+              <p><b>Average reaction</b> = the average absolute move after a recorded test. It shows typical movement, not direction or guaranteed follow-through.</p>
+              <p><b>Distance</b> = live price minus the level. Positive means price is above it; negative means price is below it.</p>
+              <p><b>Strength</b> combines reaction history and recency. Old reactions fade in relevance.</p>
+            </div>
+          )}
         </InfoTip>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2">
@@ -112,10 +129,10 @@ export default function MarketMemoryCard({ index, marketOpen }) {
           <div key={`${row.level}-${row.levelType}`} className={`rounded border border-slate-100 bg-slate-50/70 px-2 py-1.5 dark:border-slate-800 dark:bg-slate-800/50 ${pulse ? "market-memory-level-refresh" : ""}`}>
             <div className="flex items-center justify-between gap-2">
               <span className="font-mono-data text-xs font-semibold">{Number(row.level).toLocaleString("en-IN")}</span>
-              <span className={`text-[9px] font-bold ${row.levelType === "SUPPORT" ? "text-emerald-600" : row.levelType === "RESISTANCE" ? "text-rose-600" : "text-amber-600"}`}>{row.levelType}</span>
+              <span className={`text-[9px] font-bold ${neutralOnly ? "text-slate-500" : row.levelType === "SUPPORT" ? "text-emerald-600" : row.levelType === "RESISTANCE" ? "text-rose-600" : "text-amber-600"}`}>{neutralOnly ? "HISTORICAL LEVEL" : row.levelType}</span>
             </div>
-            <div className="mt-0.5 text-[10px] text-slate-500">{row.strength || "—"} · {(row.rejectionCount || 0) + (row.touchCount || 0) + (row.breakoutCount || 0) + (row.failedBreakoutCount || 0)} interactions (20d) · {row.currentDistance == null ? "—" : `${row.currentDistance} pts`}</div>
-            <div className="mt-1 text-[10px] text-slate-600 dark:text-slate-300">5d avg {row.recentAverageReaction == null ? "—" : `${row.recentAverageReaction} pts`} · {row.failedBreakoutRate == null ? "—" : `${row.failedBreakoutRate}% failed retests`}</div>
+            <div className="mt-0.5 text-[10px] text-slate-500">{row.strength || "—"} · {(row.rejectionCount || 0) + (row.touchCount || 0) + (row.breakoutCount || 0) + (row.failedBreakoutCount || 0)} interactions (20d) · {row.currentDistance == null ? "—" : `${formatPoints(row.currentDistance)} pts`}</div>
+            <div className="mt-1 text-[10px] text-slate-600 dark:text-slate-300">5d avg {row.recentAverageReaction == null ? "—" : `${formatPoints(row.recentAverageReaction)} pts`} · {row.failedBreakoutRate == null ? "—" : `${row.failedBreakoutRate}% failed retests`}</div>
           </div>
         ))}
       </div> : null}
@@ -129,29 +146,35 @@ export default function MarketMemoryCard({ index, marketOpen }) {
                 <div className="space-y-2">
                   <p>These are historical reactions from the existing OI snapshot stream.</p>
                   <p><b>Interactions:</b> touches, rejections, breakouts, and failed breakouts grouped into meaningful visits.</p>
-                  <p><b>Avg reaction:</b> average absolute price move after a test. It does not say whether the next move will be up or down.</p>
-                  <p><b>Distance:</b> current price minus the level. Negative means price is below the level.</p>
+                  <p><b>Avg reaction:</b> average absolute price move after a test. It does not indicate future movement.</p>
+                  {neutralOnly
+                    ? <p><b>Distance:</b> the number of points between current price and the recorded level.</p>
+                    : <p><b>Distance:</b> current price minus the level. Negative means price is below the level.</p>}
                 </div>
               </InfoTip>
             </div>
-            <p className="text-xs leading-5 text-slate-500">Market Memory shows how the index reacted around a level before. Use it with current OI, price action, and data freshness—not as a standalone entry signal.</p>
+            <p className="text-xs leading-5 text-slate-500">
+              {neutralOnly
+                ? "This view summarizes past observations around recorded price levels. It is not a forecast or trade signal."
+                : "Market Memory shows how the index reacted around a level before. Use it with current OI, price action, and data freshness—not as a standalone entry signal."}
+            </p>
             <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-400"><span>{freshness}</span>{visibleData?.price != null ? <span>Live price {Number(visibleData.price).toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span> : null}</div>
           </SheetHeader>
           <div className="mt-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-[11px] leading-4 text-slate-600 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
             <div><b className="text-slate-800 dark:text-slate-100">Level</b><br />The rounded structural price zone being remembered. The small range below it is the level tolerance band.</div>
-            <div><b className="text-slate-800 dark:text-slate-100">Type</b><br />Support means reactions below price, resistance means reactions above price, and structural means there is not enough directional evidence.</div>
+            {!neutralOnly ? <div><b className="text-slate-800 dark:text-slate-100">Type</b><br />Support means reactions below price, resistance means reactions above price, and structural means there is not enough directional evidence.</div> : null}
             <div><b className="text-slate-800 dark:text-slate-100">Strength</b><br />A recency-weighted memory score based on touches, rejections, and failed breakouts. It is not probability.</div>
             <div><b className="text-slate-800 dark:text-slate-100">Interactions</b><br />Meaningful visits to the zone: touches, rejections, clean breakouts, and failed breakouts. Repeated polling ticks are grouped.</div>
             <div><b className="text-slate-800 dark:text-slate-100">Avg reaction</b><br />Typical absolute move after a test. “Largest” is the biggest recorded move; neither guarantees the next move.</div>
-            <div><b className="text-slate-800 dark:text-slate-100">Direction</b><br />Signed reaction: positive is upward and negative is downward. Up/down lines show the average for each direction separately.</div>
+            {!neutralOnly ? <div><b className="text-slate-800 dark:text-slate-100">Direction</b><br />Signed reaction: positive is upward and negative is downward. Up/down lines show the average for each direction separately.</div> : null}
             <div><b className="text-slate-800 dark:text-slate-100">5d / 20d</b><br />Recent average reaction versus the longer stored window. A large difference means the level’s behavior may be changing.</div>
             <div><b className="text-slate-800 dark:text-slate-100">Failure</b><br />Break rate shows how often tests became breakouts. Failed retest is the share of breakouts that later returned through the level.</div>
-            <div><b className="text-slate-800 dark:text-slate-100">Distance</b><br />Live price minus level. Positive means price is above it; negative means price is below it. Near zero means price is testing the zone.</div>
+            <div><b className="text-slate-800 dark:text-slate-100">Distance</b><br />{neutralOnly ? "Points between the live price and the recorded level." : "Live price minus level. Positive means price is above it; negative means price is below it. Near zero means price is testing the zone."}</div>
             <div><b className="text-slate-800 dark:text-slate-100">Context</b><br />PCR, VIX, and expiry captured at the latest interaction when available. It describes the environment, not a recommendation.</div>
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[900px] text-xs"><thead className="text-left text-[10px] uppercase text-slate-500"><tr><th className="sticky left-0 z-10 bg-slate-50 py-2 pr-4 dark:bg-slate-900">Level</th><th>Type</th><th>Strength</th><th>Interactions</th><th>Avg reaction</th><th>Direction</th><th>5d / 20d</th><th>Failure</th><th>Distance</th><th>Context</th></tr></thead>
-              <tbody>{(visibleData?.levels || []).map((row) => <tr key={`${row.level}-${row.levelType}`} className="border-t border-slate-100 dark:border-slate-800"><td className="sticky left-0 z-10 bg-white py-2 pr-4 font-mono-data dark:bg-slate-900">{Number(row.level).toLocaleString("en-IN")}<div className="text-[9px] text-slate-400">{row.zoneLow}–{row.zoneHigh}</div></td><td>{row.levelType}</td><td className={row.strength === "HIGH" ? "font-semibold text-emerald-600" : "text-amber-600"}>{row.strength || "—"}</td><td>{(row.rejectionCount || 0) + (row.touchCount || 0) + (row.breakoutCount || 0) + (row.failedBreakoutCount || 0)}<div className="text-[9px] text-slate-400">{row.touchCount || 0} touch · {row.rejectionCount || 0} reject</div></td><td>{row.averageReaction == null ? "—" : `${row.averageReaction} pts`}<div className="text-[9px] text-slate-400">{row.largestReaction == null ? "" : `largest ${row.largestReaction} pts`}</div></td><td>{formatReaction(row.averageSignedReaction)}<div className="text-[9px] text-slate-400">up {formatReaction(row.averageUpReaction)} · down {formatReaction(row.averageDownReaction)}</div></td><td>{row.recentAverageReaction == null ? "—" : `${row.recentAverageReaction}`} / {row.historicalAverageReaction == null ? "—" : row.historicalAverageReaction}</td><td>{row.failureRate == null ? "—" : `${row.failureRate}% breakout`}<div className="text-[9px] text-slate-400">{row.failedBreakoutRate == null ? "—" : `${row.failedBreakoutRate}% failed retest`}</div></td><td>{row.currentDistance == null ? "—" : `${row.currentDistance} pts`}</td><td className="text-[10px] text-slate-500">{formatContext(row.lastContext) || "—"}</td></tr>)}</tbody>
+            <table className="w-full min-w-[900px] text-xs"><thead className="text-left text-[10px] uppercase text-slate-500"><tr><th className="sticky left-0 z-10 bg-slate-50 py-2 pr-4 dark:bg-slate-900">Level</th>{!neutralOnly ? <th>Type</th> : null}<th>Strength</th><th>Interactions</th><th>Avg reaction</th>{!neutralOnly ? <th>Direction</th> : null}<th>5d / 20d</th><th>Failure</th><th>Distance</th><th>Context</th></tr></thead>
+              <tbody>{(visibleData?.levels || []).map((row) => <tr key={`${row.level}-${row.levelType}`} className="border-t border-slate-100 dark:border-slate-800"><td className="sticky left-0 z-10 bg-white py-2 pr-4 font-mono-data dark:bg-slate-900">{Number(row.level).toLocaleString("en-IN")}<div className="text-[9px] text-slate-400">{row.zoneLow}–{row.zoneHigh}</div></td>{!neutralOnly ? <td>{row.levelType}</td> : null}<td className={row.strength === "HIGH" ? "font-semibold text-emerald-600" : "text-amber-600"}>{row.strength || "—"}</td><td>{(row.rejectionCount || 0) + (row.touchCount || 0) + (row.breakoutCount || 0) + (row.failedBreakoutCount || 0)}<div className="text-[9px] text-slate-400">{row.touchCount || 0} touch · {row.rejectionCount || 0} reject</div></td><td>{row.averageReaction == null ? "—" : `${formatPoints(row.averageReaction)} pts`}<div className="text-[9px] text-slate-400">{row.largestReaction == null ? "" : `largest ${formatPoints(row.largestReaction)} pts`}</div></td>{!neutralOnly ? <td>{formatReaction(row.averageSignedReaction)}<div className="text-[9px] text-slate-400">up {formatReaction(row.averageUpReaction)} · down {formatReaction(row.averageDownReaction)}</div></td> : null}<td>{row.recentAverageReaction == null ? "—" : formatPoints(row.recentAverageReaction)} / {row.historicalAverageReaction == null ? "—" : formatPoints(row.historicalAverageReaction)}</td><td>{row.failureRate == null ? "—" : `${row.failureRate}% breakout`}<div className="text-[9px] text-slate-400">{row.failedBreakoutRate == null ? "—" : `${row.failedBreakoutRate}% failed retest`}</div></td><td>{row.currentDistance == null ? "—" : `${formatPoints(row.currentDistance)} pts`}</td><td className="text-[10px] text-slate-500">{formatContext(row.lastContext) || "—"}</td></tr>)}</tbody>
             </table>
           </div>
         </SheetContent>

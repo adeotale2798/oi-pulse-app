@@ -39,4 +39,29 @@ describe("AlertsPanel", () => {
     expect(markup).toContain("Sample");
     expect(markup).toContain("Put writing");
   });
+
+  it("renders member OI shift alerts with their window and contract total", () => {
+    const markup = renderToStaticMarkup(
+      <AlertsPanel
+        activeIndex="NIFTY"
+        canClear={false}
+        alerts={[{
+          alert_id: "member-shift-1",
+          type: "oi_shift",
+          created_at: "2026-10-06T04:00:00.000Z",
+          index: "NIFTY",
+          side: "PE",
+          direction: "build",
+          value: 125000,
+          window: 3,
+          atm: 25000,
+          price: 25010.5,
+        }]}
+      />,
+    );
+
+    expect(markup).toContain("OI Shift · PE build");
+    expect(markup).toContain("1,25,000 contracts · 3 min · ATM 25000");
+    expect(markup).toContain("Price 25010.50");
+  });
 });

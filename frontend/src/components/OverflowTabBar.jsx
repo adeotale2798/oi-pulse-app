@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, RotateCcw } from "lucide-react";
+import { ChevronDown, Plus, RotateCcw } from "lucide-react";
+import TabHideContextMenu from "./TabHideContextMenu";
 
 /**
  * Progressive tab overflow: as width shrinks, trailing tabs move into a
@@ -21,6 +22,10 @@ export default function OverflowTabBar({
   onFavorite,
   onMove,
   onResetLayout,
+  onHideTab,
+  hiddenTabs = [],
+  onRestoreTab,
+  savingPagePreferences = false,
   className = "",
   testId = "dashboard-tab-bar",
 }) {
@@ -29,8 +34,10 @@ export default function OverflowTabBar({
   const moreMeasureRef = useRef(null);
   const moreBtnRef = useRef(null);
   const menuPanelRef = useRef(null);
+  const hiddenPagesWrapRef = useRef(null);
   const [visibleCount, setVisibleCount] = useState(tabs.length);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [hiddenMenuOpen, setHiddenMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const [draggingId, setDraggingId] = useState(null);
   const [overId, setOverId] = useState(null);
@@ -39,6 +46,7 @@ export default function OverflowTabBar({
   const canReorder = typeof onReorder === "function";
   const canFavorite = typeof onFavorite === "function";
   const canMove = typeof onMove === "function";
+  const canCustomizePages = typeof onHideTab === "function" && typeof onRestoreTab === "function";
 
   const placeMenu = useCallback(() => {
     const btn = moreBtnRef.current;
@@ -71,6 +79,26 @@ export default function OverflowTabBar({
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!hiddenMenuOpen) return undefined;
+    const onDoc = (event) => {
+      if (!hiddenPagesWrapRef.current?.contains(event.target)) setHiddenMenuOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") setHiddenMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [hiddenMenuOpen]);
+
+  useEffect(() => {
+    if (hiddenTabs.length === 0) setHiddenMenuOpen(false);
+  }, [hiddenTabs.length]);
+
   const recalculate = useCallback(() => {
     const wrap = wrapRef.current;
     const measure = measureRef.current;
@@ -78,7 +106,7 @@ export default function OverflowTabBar({
       setVisibleCount(tabs.length);
       return;
     }
-    const avail = wrap.clientWidth;
+    const avail = Math.max(0, wrap.clientWidth - (canCustomizePages ? 36 : 0));
     const moreW = moreMeasureRef.current?.offsetWidth || 88;
     const buttons = Array.from(measure.querySelectorAll("[data-tab-measure]"));
     if (!buttons.length) {
@@ -105,7 +133,7 @@ export default function OverflowTabBar({
       if (sum <= avail) break;
     }
     setVisibleCount(Math.max(1, count));
-  }, [tabs]);
+  }, [tabs, canCustomizePages]);
 
   useLayoutEffect(() => {
     recalculate();
@@ -232,6 +260,9 @@ export default function OverflowTabBar({
   if (canFavorite) tipParts.push("double-click to pin first");
   if (canMove) tipParts.push("Alt+←/→ to nudge");
   tipParts.push("click to open");
+  if (canCustomizePages && tabs.length > 1) {
+    tipParts.push("right-click, long-press, or Shift+F10 to hide");
+  }
   const tabTitle = tipParts.join(" · ");
 
   return (
@@ -242,7 +273,7 @@ export default function OverflowTabBar({
             <span
               key={t.v}
               data-tab-measure
-              className="px-2.5 sm:px-3 py-2 text-[13px] sm:text-sm font-medium"
+              className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-2 text-[13px] sm:text-sm font-medium"
             >
               {t.l}
             </span>
@@ -256,37 +287,47 @@ export default function OverflowTabBar({
         </div>
       </div>
 
-      <div
-        className="flex items-center gap-1 border-b border-slate-200/80 dark:border-slate-700/80 min-w-0 overflow-visible"
-        role="tablist"
-        aria-label="Dashboard views — drag, double-click, or Alt+arrows to reorder"
-      >
-        {visible.map((t) => (
-          <button
-            key={t.v}
-            type="button"
-            role="tab"
-            aria-selected={t.v === value}
-            data-testid={`tab-${t.v}`}
-            draggable={canReorder}
-            onDragStart={(e) => onDragStart(e, t.v)}
-            onDragEnd={onDragEnd}
-            onDragOver={(e) => onDragOverTab(e, t.v)}
-            onDragLeave={() => {
-              if (overId === t.v) setOverId(null);
-            }}
-            onDrop={(e) => onDropTab(e, t.v)}
-            onClick={() => onTabClick(t.v)}
-            onDoubleClick={(e) => onTabDoubleClick(e, t.v)}
-            onKeyDown={(e) => onTabKeyDown(e, t.v)}
-            title={tabTitle}
-            className={triggerCls(t.v === value, t.v)}
-          >
-            {t.l}
-          </button>
-        ))}
+      <div className="flex items-center gap-1 border-b border-slate-200/80 dark:border-slate-700/80 min-w-0 overflow-visible">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-visible"
+          role="tablist"
+          aria-label="Dashboard views — drag, double-click, or Alt+arrows to reorder; use page options to hide"
+        >
+          {visible.map((t) => (
+            <TabHideContextMenu
+              key={t.v}
+              tabId={t.v}
+              label={t.l}
+              canHide={canCustomizePages && tabs.length > 1}
+              disabled={savingPagePreferences}
+              onHide={onHideTab}
+              className="inline-flex shrink-0 items-center"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={t.v === value}
+                data-testid={`tab-${t.v}`}
+                draggable={canReorder}
+                onDragStart={(e) => onDragStart(e, t.v)}
+                onDragEnd={onDragEnd}
+                onDragOver={(e) => onDragOverTab(e, t.v)}
+                onDragLeave={() => {
+                  if (overId === t.v) setOverId(null);
+                }}
+                onDrop={(e) => onDropTab(e, t.v)}
+                onClick={() => onTabClick(t.v)}
+                onDoubleClick={(e) => onTabDoubleClick(e, t.v)}
+                onKeyDown={(e) => onTabKeyDown(e, t.v)}
+                title={tabTitle}
+                className={triggerCls(t.v === value, t.v)}
+              >
+                {t.l}
+              </button>
+            </TabHideContextMenu>
+          ))}
 
-        {overflow.length > 0 && (
+          {overflow.length > 0 && (
           <div className="relative shrink-0 z-20">
             <button
               ref={moreBtnRef}
@@ -317,43 +358,96 @@ export default function OverflowTabBar({
                 style={{ top: menuPos.top, left: menuPos.left }}
               >
                 {overflow.map((t) => (
-                  <button
+                  <TabHideContextMenu
                     key={t.v}
-                    type="button"
-                    role="menuitem"
-                    data-testid={`tab-more-${t.v}`}
-                    draggable={canReorder}
-                    onDragStart={(e) => onDragStart(e, t.v)}
-                    onDragEnd={onDragEnd}
-                    onDragOver={(e) => onDragOverTab(e, t.v)}
-                    onDrop={(e) => onDropTab(e, t.v)}
-                    onClick={() => {
-                      onTabClick(t.v);
-                      setMenuOpen(false);
-                    }}
-                    onDoubleClick={(e) => {
-                      onTabDoubleClick(e, t.v);
-                      setMenuOpen(false);
-                    }}
-                    onKeyDown={(e) => onTabKeyDown(e, t.v)}
-                    title={tabTitle}
-                    className={`flex w-full items-center px-3 py-2 text-left text-sm ${
-                      canReorder ? "cursor-grab active:cursor-grabbing" : ""
-                    } ${draggingId === t.v ? "opacity-40" : ""} ${
-                      overId === t.v && draggingId && draggingId !== t.v
-                        ? "bg-emerald-50 dark:bg-emerald-950/40"
-                        : ""
-                    } ${
-                      t.v === value
-                        ? "bg-emerald-50 font-semibold text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-                        : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                    }`}
+                    tabId={t.v}
+                    label={t.l}
+                    canHide={canCustomizePages && tabs.length > 1}
+                    disabled={savingPagePreferences}
+                    onHide={onHideTab}
+                    onHideComplete={() => setMenuOpen(false)}
+                    className="flex items-center"
                   >
-                    {t.l}
-                  </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid={`tab-more-${t.v}`}
+                      draggable={canReorder}
+                      onDragStart={(e) => onDragStart(e, t.v)}
+                      onDragEnd={onDragEnd}
+                      onDragOver={(e) => onDragOverTab(e, t.v)}
+                      onDrop={(e) => onDropTab(e, t.v)}
+                      onClick={() => {
+                        onTabClick(t.v);
+                        setMenuOpen(false);
+                      }}
+                      onDoubleClick={(e) => {
+                        onTabDoubleClick(e, t.v);
+                        setMenuOpen(false);
+                      }}
+                      onKeyDown={(e) => onTabKeyDown(e, t.v)}
+                      title={tabTitle}
+                      className={`flex min-w-0 flex-1 items-center px-3 py-2 text-left text-sm ${
+                        canReorder ? "cursor-grab active:cursor-grabbing" : ""
+                      } ${draggingId === t.v ? "opacity-40" : ""} ${
+                        overId === t.v && draggingId && draggingId !== t.v
+                          ? "bg-emerald-50 dark:bg-emerald-950/40"
+                          : ""
+                      } ${
+                        t.v === value
+                          ? "bg-emerald-50 font-semibold text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {t.l}
+                    </button>
+                  </TabHideContextMenu>
                 ))}
               </div>,
               document.body,
+            )}
+          </div>
+          )}
+        </div>
+
+        {canCustomizePages && (
+          <div ref={hiddenPagesWrapRef} className="relative z-30 shrink-0">
+            <button
+              type="button"
+              data-testid="dashboard-add-page"
+              aria-label="Add a hidden dashboard page"
+              aria-expanded={hiddenMenuOpen}
+              title={hiddenTabs.length ? "Restore a hidden dashboard page" : "All available pages are shown"}
+              disabled={savingPagePreferences || hiddenTabs.length === 0}
+              onClick={() => setHiddenMenuOpen((open) => !open)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-emerald-950/40"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            {hiddenMenuOpen && hiddenTabs.length > 0 && (
+              <div
+                role="menu"
+                data-testid="dashboard-hidden-pages-menu"
+                className="absolute right-0 top-full mt-1 min-w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+              >
+                {hiddenTabs.map((tab) => (
+                  <button
+                    key={tab.v}
+                    type="button"
+                    role="menuitem"
+                    data-testid={`dashboard-restore-${tab.v}`}
+                    disabled={savingPagePreferences}
+                    onClick={() => {
+                      onRestoreTab(tab.v);
+                      setHiddenMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <Plus className="h-3.5 w-3.5 text-emerald-600" />
+                    {tab.l}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}

@@ -199,7 +199,7 @@ const POSITIONS_GUIDE = (
     <p>
       This page watches options you <b>sold</b> (qty in red / negative). You earn when the market
       stays away from those strikes. Same-day <b>Exited</b> legs stay listed with realised P&amp;L
-      until Zerodha clears them at end of day.
+      until your broker clears them at end of day.
     </p>
     <p>
       <b>OK</b> — market is still far enough from that sold strike. Fine to leave alone for now.
@@ -216,7 +216,7 @@ const POSITIONS_GUIDE = (
     <p>
       <b>Still to earn</b> — leftover premium on sold options that can still decay into your pocket.
       <b> Profit booked</b> — realised P&amp;L from same-day exits (and partial closes).
-      <b> Day charges</b> — brokerage + STT + GST + exchange fees (Zerodha contract note, read-only).
+      <b> Day charges</b> — brokerage + STT + GST + exchange fees (broker contract note, read-only).
       Trade Excel lives in <b>Journal → Download trades</b> (entry/exit clocks and partials).
     </p>
   </div>
@@ -536,9 +536,17 @@ function AtmDistanceCell({ row }) {
   );
 }
 
+function brokerMessage(message, isMember) {
+  const text = String(message || "");
+  return isMember ? text.replace(/\b(?:zerodha|kite)\b/gi, "broker") : text;
+}
+
 export default function PositionsPanel({
   isKiteMode,
+  isAdmin = false,
   isGuest = false,
+  isMember = false,
+  memberBrokerStatus = null,
   current,
   previous = null,
   vix,
@@ -555,6 +563,7 @@ export default function PositionsPanel({
   onPrivacyModeChange,
   positionsPollMs = 2000,
   onOpenKite,
+  onOpenMemberJournal,
   hasKiteCredentials = null,
   pollEnabled = true,
   deskAiShow = false,
@@ -605,8 +614,9 @@ export default function PositionsPanel({
     const el = [...nodes].find((n) => n.getClientRects().length > 0) || nodes[0];
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
-  const [guestNeedsConnect, setGuestNeedsConnect] = useState(() => !!isGuest);
-  const [guestKiteId, setGuestKiteId] = useState(null);
+  const [guestNeedsConnect, setGuestNeedsConnect] = useState(() => !!isGuest && !memberBrokerStatus?.connected);
+  const [guestKiteId, setGuestKiteId] = useState(() => memberBrokerStatus?.kite_user_id || null);
+  const [guestKiteStatus, setGuestKiteStatus] = useState(memberBrokerStatus);
   const [exitedOpen, setExitedOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(true);
   const [leftoverOpenCount, setLeftoverOpenCount] = useState(0);
@@ -745,13 +755,21 @@ export default function PositionsPanel({
     }
   }, []);
 
+  useEffect(() => {
+    if (!isMember || !memberBrokerStatus) return;
+    setGuestKiteStatus(memberBrokerStatus);
+    setGuestKiteId(memberBrokerStatus.kite_user_id || null);
+    setGuestNeedsConnect(!memberBrokerStatus.connected);
+  }, [isMember, memberBrokerStatus]);
+
   const applyBook = useCallback((data) => {
     if (!data) return;
     if (data.connect_required) {
       setGuestNeedsConnect(true);
       setGuestKiteId(data?.user_kite?.kite_user_id || null);
+      setGuestKiteStatus(data?.user_kite || (isMember ? memberBrokerStatus : null));
       setPositions([]);
-      setError(data.error || "Connect your Zerodha account");
+      setError(data.error || "Connect your broker credentials");
       setErrorHard(false);
       setLastRefresh(new Date().toISOString());
       hasLiveRef.current = false;
@@ -759,7 +777,9 @@ export default function PositionsPanel({
     }
     if (isGuest) {
       setGuestNeedsConnect(false);
-      setGuestKiteId(data?.user_kite?.kite_user_id || null);
+      const brokerStatus = data?.user_kite || (isMember ? memberBrokerStatus : null);
+      setGuestKiteId(brokerStatus?.kite_user_id || null);
+      setGuestKiteStatus(brokerStatus || { connected: true, expired: false });
     }
     const next = data.positions || [];
     setLeftoverOpenCount(Number(data.expiry_leftover_open_count) || 0);
@@ -801,7 +821,7 @@ export default function PositionsPanel({
     }
     setLastRefresh(new Date().toISOString());
     setSecsLeft(Math.max(1, Math.round(pollMs / 1000)));
-  }, [isGuest, pollMs]);
+  }, [isGuest, isMember, memberBrokerStatus, pollMs]);
 
   const settleExpiryLeftovers = useCallback(async () => {
     setSettleBusy(true);
@@ -1341,7 +1361,7 @@ export default function PositionsPanel({
     .join(",")}`;
 
   useEffect(() => {
-    if (!deskAiShow || !deskAiRadar || !oiRiskOpen) {
+    if (!isAdmin || !deskAiShow || !deskAiRadar || !oiRiskOpen) {
       return undefined;
     }
     let cancelled = false;
@@ -1384,7 +1404,7 @@ export default function PositionsPanel({
       cancelled = true;
       clearInterval(id);
     };
-  }, [deskAiShow, deskAiRadar, deskAiAsk, oiRiskOpen, adjustSig, bookVerdict?.band, activeIndex, sellsSnap, current, previous, stats.dayBookedPct, stats.leftover, stats.wallet, stats.bookedToday, pnlToday?.booked_after_charges, rows]);
+  }, [isAdmin, deskAiShow, deskAiRadar, deskAiAsk, oiRiskOpen, adjustSig, bookVerdict?.band, activeIndex, sellsSnap, current, previous, stats.dayBookedPct, stats.leftover, stats.wallet, stats.bookedToday, pnlToday?.booked_after_charges, rows]);
 
   const pinWeeklyDate = useMemo(() => nearestWeeklyExpiry(expiriesMeta), [expiriesMeta]);
 
@@ -1397,6 +1417,9 @@ export default function PositionsPanel({
     { key: "assignmentWatch", label: "Exercise risk" },
     { key: "strikePressure", label: "Strike Pressure" },
   ];
+  const visibleToggleDefs = TOGGLE_DEFS.filter(({ key }) => (
+    isAdmin || !["bookVerdict", "sellIdeas", "decayBook", "deltaHedge"].includes(key)
+  ));
 
   if (!isGuest && !kiteReady) {
     return (
@@ -1438,12 +1461,26 @@ export default function PositionsPanel({
     return (
       <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-6 text-center" data-testid="positions-user-kite-required">
         <PlugZap className="w-8 h-8 mx-auto text-emerald-700 mb-2" />
-        <div className="text-sm font-semibold text-slate-800">Connect your Zerodha</div>
+        <div className="text-sm font-semibold text-slate-800">
+          {isMember
+            ? guestKiteStatus?.expired
+              ? "Today's broker session is stale"
+              : guestKiteStatus?.credentials_configured
+                ? "Today's broker request token is needed"
+                : "Set up your broker account"
+            : "Connect your Zerodha"}
+        </div>
         <div className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
-          Log in with your broker account to load <b>your</b> positions. Charts still use the publisher OI feed.
-          Tokens expire around 06:00 IST — reconnect each morning.
-          If your broker says the user is not enabled for the app, contact the desk owner.
-          {guestKiteId ? ` Last login: ${guestKiteId}.` : ""}
+          {isMember
+            ? guestKiteStatus?.expired
+              ? <>Your saved API key and secret are still encrypted. The daily broker session has expired; add <b>today's request token</b> to refresh your private Positions. You do not need to enter your API credentials again.</>
+              : guestKiteStatus?.credentials_configured
+                ? <>Your app credentials are saved encrypted. Generate a fresh request token each trading day to load <b>your</b> Positions. Shared OI charts continue to use the publisher feed.</>
+                : <>Add your broker app API key and secret once. Then use a fresh request token each trading day to load <b>your</b> Positions.</>
+            : <>Log in with your broker account to load <b>your</b> positions. Charts still use the publisher OI feed.
+                Tokens expire around 06:00 IST — reconnect each morning.
+                If your broker says the user is not enabled for the app, contact the desk owner.
+                {guestKiteId ? ` Last login: ${guestKiteId}.` : ""}</>}
         </div>
         <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
         {typeof onOpenKite === "function" && (
@@ -1451,10 +1488,26 @@ export default function PositionsPanel({
             size="sm"
             className="h-8 rounded-sm bg-emerald-600 hover:bg-emerald-700"
             onClick={onOpenKite}
-            data-testid="btn-positions-connect-zerodha"
+            data-testid={isMember ? "btn-positions-connect-broker" : "btn-positions-connect-zerodha"}
           >
             <PlugZap className="w-3.5 h-3.5 mr-1.5" />
-            Connect Zerodha
+            {isMember
+              ? guestKiteStatus?.credentials_configured
+                ? "Refresh today's broker session"
+                : "Add broker credentials"
+              : "Connect Zerodha"}
+          </Button>
+        )}
+        {isMember && typeof onOpenMemberJournal === "function" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-sm"
+            onClick={onOpenMemberJournal}
+            data-testid="btn-member-trade-journal"
+          >
+            <BookOpen className="w-3.5 h-3.5 mr-1.5" />
+            Private journal
           </Button>
         )}
         </div>
@@ -1522,9 +1575,11 @@ export default function PositionsPanel({
                 </span>
               )}
               <PositionsHedgeStatus hedge={hedgeStatus} />
-              <InfoTip title="Positions · seller guide" testId="positions-guide-tip">
-                {POSITIONS_GUIDE}
-              </InfoTip>
+              {isAdmin && (
+                <InfoTip title="Positions · seller guide" testId="positions-guide-tip">
+                  {POSITIONS_GUIDE}
+                </InfoTip>
+              )}
             </div>
           </div>
           <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -1620,25 +1675,25 @@ export default function PositionsPanel({
               <div className="border-b border-slate-100 px-3 py-2.5">
                 <div className="text-xs font-semibold text-slate-900">Day charges</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  Zerodha virtual contract note ·{" "}
+                  Broker contract note ·{" "}
                   {brokerage?.order_count != null
                     ? `${brokerage.order_count} order${brokerage.order_count === 1 ? "" : "s"}`
                     : "today"}
-                  {brokerage?.book?.source ? ` · via ${brokerage.book.source}` : ""}
+                  {brokerage?.book?.source && !isMember ? ` · via ${brokerage.book.source}` : ""}
                 </div>
               </div>
               {brokerage?.error ? (
-                <div className="px-3 py-3 text-[11px] text-rose-700">{brokerage.error}</div>
+                <div className="px-3 py-3 text-[11px] text-rose-700">{brokerMessage(brokerage.error, isMember)}</div>
               ) : (
                 <div className="px-3 py-2 space-y-1.5">
                   {brokerage?.warning ? (
                     <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-sm px-2 py-1">
-                      {brokerage.warning}
+                      {brokerMessage(brokerage.warning, isMember)}
                     </div>
                   ) : null}
                   {brokerage?.note && !(brokerage?.charges_total > 0) ? (
                     <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-sm px-2 py-1.5">
-                      {brokerage.note}
+                      {brokerMessage(brokerage.note, isMember)}
                       {brokerage?.book?.trades_fetched != null ? (
                         <span className="block mt-0.5 font-mono-data text-slate-400">
                           trades {brokerage.book.trades_fetched} · orders {brokerage.book.orders_fetched ?? "—"}
@@ -1709,14 +1764,17 @@ export default function PositionsPanel({
             <ShieldAlert className="w-3.5 h-3.5 mr-1" />
             Radar
           </Button>
-          {!isGuest && (
+          {(!isGuest || (isMember && typeof onOpenMemberJournal === "function")) && (
           <Button
             size="sm"
             variant="outline"
             className="h-8 rounded-sm bg-white shrink-0 text-slate-700 border-slate-200 hover:bg-slate-50 px-2.5"
-            onClick={() => setJournalOpen(true)}
+            onClick={() => {
+              if (isMember) onOpenMemberJournal?.();
+              else setJournalOpen(true);
+            }}
             data-testid="btn-trade-journal"
-            title="Monthly P&L calendar and session notes"
+            title={isMember ? "Open your private journal calendar" : "Monthly P&L calendar and session notes"}
           >
             <BookOpen className="w-3.5 h-3.5 mr-1" />
             Journal
@@ -1726,16 +1784,28 @@ export default function PositionsPanel({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 rounded-sm bg-white shrink-0 text-slate-700 border-slate-200 hover:bg-slate-50 px-2.5"
+            className={`h-8 rounded-sm shrink-0 px-2.5 ${isMember && guestKiteStatus?.connected && guestKiteId
+              ? "border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+              : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}
             onClick={onOpenKite}
-            data-testid="btn-positions-connect-zerodha-toolbar"
-            title="Your book uses your Zerodha login. OI charts still use the publisher feed."
+            data-testid={isMember ? "btn-positions-connect-broker-toolbar" : "btn-positions-connect-zerodha-toolbar"}
+            title={isMember
+              ? guestKiteStatus?.connected && guestKiteId
+                ? `Connected broker account ${guestKiteId} · manage saved credentials`
+                : "Connect your broker account for today's Positions."
+              : "Your book uses your Zerodha login. OI charts still use the publisher feed."}
           >
             <PlugZap className="w-3.5 h-3.5 mr-1" />
-            {guestKiteId ? "Reconnect Zerodha" : "Connect Zerodha"}
+            {isMember
+              ? guestKiteStatus?.connected && guestKiteId
+                ? guestKiteId
+                : guestKiteStatus?.credentials_configured
+                  ? "Refresh broker session"
+                  : "Connect to broker"
+              : (guestKiteId ? "Reconnect Zerodha" : "Connect Zerodha")}
           </Button>
           )}
-          {(() => {
+          {isAdmin && (() => {
             const brainRiskActive = !!rows.length && (
               (Number(stats.adjustCount) || 0) > 0 ||
               Math.abs(Number(stats.netDelta) || 0) > 18 ||
@@ -1880,7 +1950,7 @@ export default function PositionsPanel({
         </div>
       )}
 
-      {!privacyMode && dayCap.headline && (
+      {isAdmin && !privacyMode && dayCap.headline && (
         <div
           className={`rounded-md border px-3 py-2 text-[12px] leading-snug ${
             dayCap.level === "defend"
@@ -1959,7 +2029,7 @@ export default function PositionsPanel({
               ? "Masked"
               : dayCap.crumbs || dayCap.level === "defend" || dayCap.level === "stopAdds"
                 ? "Margin crumbs — not capital"
-                : "Kite leftover for new trades"
+                : "Broker available margin for new trades"
           }
           tip={(
             <div className="space-y-1.5">
@@ -2070,6 +2140,7 @@ export default function PositionsPanel({
           netDelta={stats.netDelta}
           positionsCount={stats.openCount}
           minutesToExpiry={stats.minMinutes}
+          isAdmin={isAdmin}
         />
           ),
         }}
@@ -2079,13 +2150,13 @@ export default function PositionsPanel({
         <div className="text-[11px] text-rose-800 dark:text-rose-200 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 flex flex-wrap gap-x-4 gap-y-1" data-testid="positions-seller-strip">
           <span>
             Sold options <b>{stats.shortCount}</b>
-            <span> · {stats.adjustCount} too close — check them</span>
+            <span> · {stats.adjustCount} near the configured adjustment threshold</span>
           </span>
           {(() => {
             const b = fundsBreakdown(funds);
             if (!b || (b.available == null && b.used == null)) return null;
             return (
-              <span title="Kite available margin vs used margin">
+              <span title="Broker available margin vs used margin">
                 {b.available != null && (
                   <>Avail <b className="font-mono-data">{privacyMode ? PRIVACY_MASK : `₹ ${fmt(b.available, 0)}`}</b></>
                 )}
@@ -2260,7 +2331,7 @@ export default function PositionsPanel({
                 const tip = id === "tilt" ? (
                   <InfoTip title="Direction tilt" size="xs" testId="delta-col-tip">Does this leg push you to bet up or down? Near 0 is calmer for sellers.</InfoTip>
                 ) : id === "theta" ? (
-                  <InfoTip title="Daily time money (not P&L)" size="xs" testId="theta-col-tip">Estimate of ₹ this leg earns or costs from time passing — capped to premium left so expiry-day maths cannot invent huge fake losses. Your real P&amp;L is the P&amp;L column (matches Kite).</InfoTip>
+                  <InfoTip title="Daily time money (not P&L)" size="xs" testId="theta-col-tip">Estimate of ₹ this leg earns or costs from time passing — capped to premium left so expiry-day maths cannot invent huge fake losses. Your real P&amp;L is the P&amp;L column (matches your broker book).</InfoTip>
                 ) : id === "stillEarn" ? (
                   <InfoTip title="Still to earn" size="xs" testId="prem-left-col-tip">Premium left on a sold option that can still decay into your pocket if the market stays away.</InfoTip>
                 ) : id === "dte" ? (
@@ -2562,7 +2633,7 @@ export default function PositionsPanel({
               Helpful tips (on / off)
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-2">
-              {TOGGLE_DEFS.map(({ key, label }) => (
+              {visibleToggleDefs.map(({ key, label }) => (
                 <label
                   key={key}
                   className="inline-flex items-center gap-1.5 text-[11px] text-slate-700 cursor-pointer select-none"
@@ -2667,7 +2738,7 @@ export default function PositionsPanel({
             </div>
           )}
 
-          {toggles.deltaHedge && deltaHedge.needed && (
+          {isAdmin && toggles.deltaHedge && deltaHedge.needed && (
             <div
               className="rounded-md border border-violet-200 bg-violet-50/50 px-3 py-2.5 space-y-1.5"
               data-testid="positions-delta-hedge"
@@ -2694,7 +2765,7 @@ export default function PositionsPanel({
             </div>
           )}
 
-          {(toggles.sellIdeas || toggles.decayBook) && (
+          {isAdmin && (toggles.sellIdeas || toggles.decayBook) && (
             <div
               className="rounded-md border border-slate-200 bg-slate-50/80 p-3 space-y-2"
               data-testid="positions-sell-suggestions"
@@ -2824,13 +2895,15 @@ export default function PositionsPanel({
         </div>
       )}
 
-      <PositionsBrainPanel
-        open={brainOpen}
-        onClose={() => setBrainOpen(false)}
-        rows={rows}
-        stats={stats}
-        vix={vix}
-      />
+      {isAdmin && (
+        <PositionsBrainPanel
+          open={brainOpen}
+          onClose={() => setBrainOpen(false)}
+          rows={rows}
+          stats={stats}
+          vix={vix}
+        />
+      )}
       <BookRadarPanel open={oiRiskOpen} onClose={closeRadar}>
         <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
           <div>
@@ -2867,7 +2940,7 @@ export default function PositionsPanel({
           </div>
         </div>
         <div className="px-4 pb-4 space-y-3 overflow-y-auto">
-          {deskAiShow && deskAiRadar ? (
+          {isAdmin && deskAiShow && deskAiRadar ? (
             <div
               className="rounded-md border border-violet-300 bg-violet-50 px-2.5 py-2"
               data-testid="radar-market-intel"

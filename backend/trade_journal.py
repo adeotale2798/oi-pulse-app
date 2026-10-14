@@ -586,21 +586,32 @@ def period_stats(
                 day_booked = round(_num(ip.get(want if want != "OTHER" else "OTHER")), 2)
         else:
             day_booked = round(day_pnl(d), 2)
-        if abs(day_booked) > 0.009 or legs:
+        if (
+            abs(day_booked) > 0.009
+            or legs
+            or int(d.get("exited_count") or 0) > 0
+            or int(d.get("partial_count") or 0) > 0
+        ):
             traded_days += 1
             if day_booked > 0:
                 win_days += 1
             elif day_booked < 0:
                 lose_days += 1
         booked += day_booked
-        for leg in legs:
-            rv = _num(leg.get("realised") if leg.get("realised") is not None else leg.get("pnl"))
-            if rv > 0:
-                wins += 1
-            elif rv < 0:
-                losses += 1
-            key = _leg_index_label(leg)
-            by_index[key] = round(by_index.get(key, 0.0) + rv, 2)
+        if legs:
+            for leg in legs:
+                rv = _num(leg.get("realised") if leg.get("realised") is not None else leg.get("pnl"))
+                if rv > 0:
+                    wins += 1
+                elif rv < 0:
+                    losses += 1
+                key = _leg_index_label(leg)
+                by_index[key] = round(by_index.get(key, 0.0) + rv, 2)
+        elif not want:
+            wins += int(d.get("win_trades") or 0)
+            losses += int(d.get("loss_trades") or 0)
+            for key, value in _booked_index_pnl(d).items():
+                by_index[key] = round(by_index.get(key, 0.0) + _num(value), 2)
         if d.get("charges_total") is not None:
             charges += _num(d.get("charges_total"))
             charge_days += 1

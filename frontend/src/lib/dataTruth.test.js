@@ -52,5 +52,8 @@ const regularSessionStale = buildDataTruth({
   now: new Date("2026-08-19T03:32:00.000Z"),
 });
 assert.equal(regularSessionStale.mode, "STALE");
+assert.equal(regularSessionStale.badge, "OI STALE");
+assert.match(regularSessionStale.detail, /Shared publisher OI feed is stale/);
+assert.match(regularSessionStale.detail, /your broker connection is separate/);
 
 console.log("dataTruth.test.js ok");

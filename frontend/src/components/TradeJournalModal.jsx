@@ -22,6 +22,13 @@ import {
   saveJournalDay,
   addJournalScreenshot,
   deleteJournalScreenshot,
+  fetchMemberJournalMonth,
+  fetchMemberJournalYear,
+  fetchMemberJournalDay,
+  fetchMemberJournalPeriod,
+  saveMemberJournalDay,
+  addMemberJournalScreenshot,
+  deleteMemberJournalScreenshot,
 } from "@/lib/api";
 import { toast } from "sonner";
 import { holidayCellLabel, holidayShortName, isHoliday, isJournalSessionDayIST, isSpecialSessionIST, nextTradingDayIST, previousTradingDayIST } from "@/lib/holidays";
@@ -30,6 +37,7 @@ import { HEATMAP_IDS, INDEX_SHORT, DESK_IDS } from "@/lib/universe";
 import { journalSavePayload, resolveJournalSaveDoc } from "@/lib/journalSave";
 import { compactPnl, exactPnl, fmtInr } from "@/lib/journalMoney";
 import { bookedPct, fmtBookedPct, madeAfterCharges, weekEquity } from "@/lib/journalPct";
+import { isSiteWalkthroughPath } from "@/lib/siteWalkthroughApi";
 import InfoTip from "@/components/InfoTip";
 import DownloadTradesButton from "@/components/DownloadTradesButton";
 import TradeCycleArchiveButton from "@/components/TradeCycleArchiveButton";
@@ -195,8 +203,9 @@ function Gauge({ pct }) {
   );
 }
 
-export default function TradeJournalModal({ open, onOpenChange, privacy = false }) {
+export default function TradeJournalModal({ open, onOpenChange, privacy = false, memberMode = false }) {
   const now = useMemo(() => new Date(), []);
+  const walkthroughMode = isSiteWalkthroughPath();
   const [year, setYear] = useState(() => now.getFullYear());
   const [month, setMonth] = useState(() => now.getMonth() + 1);
   const [tab, setTab] = useState("calendar");
@@ -208,6 +217,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
   const [dayDoc, setDayDoc] = useState(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [memberUnavailable, setMemberUnavailable] = useState(false);
   const [tradeCycleSaving, setTradeCycleSaving] = useState(null);
   const [tradeCycleSettingLoading, setTradeCycleSettingLoading] = useState(false);
   const [tradeCycleSettingSaving, setTradeCycleSettingSaving] = useState(false);
@@ -222,7 +232,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
   const [periodData, setPeriodData] = useState(null);
   const [periodLoading, setPeriodLoading] = useState(false);
   useEffect(() => {
-    if (!open) return undefined;
+    // The public walkthrough must not fetch or mutate Admin trade-cycle settings.
+    if (!open || memberMode || walkthroughMode) return undefined;
     let cancelled = false;
     setTradeCycleSettingLoading(true);
     setTradeCycleSettingError("");
@@ -243,10 +254,10 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
         if (!cancelled) setTradeCycleSettingLoading(false);
       });
     return () => { cancelled = true; };
-  }, [open, tradeCycleSettingRetry]);
+  }, [open, tradeCycleSettingRetry, memberMode, walkthroughMode]);
 
   const toggleTradeCycleSaving = async () => {
-    if (tradeCycleSaving === null || tradeCycleSettingSaving) return;
+    if (walkthroughMode || tradeCycleSaving === null || tradeCycleSettingSaving) return;
     const nextValue = !tradeCycleSaving;
     setTradeCycleSettingSaving(true);
     setTradeCycleSettingError("");
@@ -273,23 +284,32 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
   const loadMonth = useCallback(async (y, m) => {
     setLoading(true);
     try {
-      const d = await fetchJournalMonth(y, m);
+      // Keep the Positions presentation shared while preserving member-owned API boundaries.
+      const d = await (memberMode ? fetchMemberJournalMonth : fetchJournalMonth)(y, m);
       setData(d);
     } catch (e) {
+      if (memberMode && e?.response?.status === 403) {
+        setMemberUnavailable(true);
+        return;
+      }
       toast.error(e?.response?.data?.detail || "Could not load journal");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [memberMode]);
 
   const loadYear = useCallback(async (y) => {
     try {
-      const d = await fetchJournalYear(y);
+      const d = await (memberMode ? fetchMemberJournalYear : fetchJournalYear)(y);
       setYearData(d);
     } catch (e) {
+      if (memberMode && e?.response?.status === 403) {
+        setMemberUnavailable(true);
+        return;
+      }
       toast.error(e?.response?.data?.detail || "Could not load year recap");
     }
-  }, []);
+  }, [memberMode]);
 
   useEffect(() => {
     if (!open || archiveView) return;
@@ -306,15 +326,24 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
     if (periodFrom > periodTo) return;
     let cancelled = false;
     setPeriodLoading(true);
-    fetchJournalPeriod(periodFrom, periodTo, periodIndex)
+    (memberMode
+      ? fetchMemberJournalPeriod(periodFrom, periodTo)
+      : fetchJournalPeriod(periodFrom, periodTo, periodIndex))
       .then((d) => {
         if (cancelled) return;
         setPeriodData(d);
       })
-      .catch((e) => { if (!cancelled) toast.error(e?.response?.data?.detail || "Could not load period totals"); })
+      .catch((e) => {
+        if (cancelled) return;
+        if (memberMode && e?.response?.status === 403) {
+          setMemberUnavailable(true);
+          return;
+        }
+        toast.error(e?.response?.data?.detail || "Could not load period totals");
+      })
       .finally(() => { if (!cancelled) setPeriodLoading(false); });
     return () => { cancelled = true; };
-  }, [open, periodFrom, periodTo, periodIndex]);
+  }, [open, periodFrom, periodTo, periodIndex, memberMode]);
 
   const monthKey = `${year}-${String(month).padStart(2, "0")}`;
   const importedMonthDays = useMemo(
@@ -419,6 +448,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
       eod_locked: !!d.eod_locked,
       trade_count: d.trade_count || 0,
       exited_count: d.exited_count || 0,
+      partial_count: d.partial_count || 0,
       win_trades: d.win_trades || 0,
       loss_trades: d.loss_trades || 0,
       winrate: wrn ? (100 * (d.win_trades || 0) / wrn) : null,
@@ -431,7 +461,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
 
   const loadDay = async (iso) => {
     setSelected(iso);
-    const d = await fetchJournalDay(iso);
+    const d = await (memberMode ? fetchMemberJournalDay : fetchJournalDay)(iso);
     applyDayPayload(iso, d);
   };
 
@@ -472,7 +502,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
     if (!payload) return;
     setSaving(true);
     try {
-      await saveJournalDay(payload.day, payload.body);
+      await (memberMode ? saveMemberJournalDay : saveJournalDay)(payload.day, payload.body);
       toast.success("Journal saved");
       await Promise.all([loadMonth(year, month), loadYear(year)]);
       try {
@@ -498,12 +528,14 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
         r.readAsDataURL(file);
       });
       try {
-        const meta = await addJournalScreenshot(dayDoc.date, {
+        const addScreenshot = memberMode ? addMemberJournalScreenshot : addJournalScreenshot;
+        const fetchDay = memberMode ? fetchMemberJournalDay : fetchJournalDay;
+        const meta = await addScreenshot(dayDoc.date, {
           name: file.name,
           mime: file.type,
           data: dataUrl,
         });
-        const d = await fetchJournalDay(dayDoc.date);
+        const d = await fetchDay(dayDoc.date);
         setDayDoc((prev) => ({ ...prev, screenshots: d.screenshots || [...(prev.screenshots || []), meta] }));
       } catch (e) {
         toast.error(e?.response?.data?.detail || "Image rejected (keep under ~450KB)");
@@ -512,7 +544,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
   };
 
   const removeShot = async (id) => {
-    await deleteJournalScreenshot(dayDoc.date, id);
+    const removeScreenshot = memberMode ? deleteMemberJournalScreenshot : deleteJournalScreenshot;
+    await removeScreenshot(dayDoc.date, id);
     setDayDoc((prev) => ({
       ...prev,
       screenshots: (prev.screenshots || []).filter((s) => s.id !== id),
@@ -549,7 +582,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
   }, [yearData, heat]);
   const focused = !!(selected && dayDoc && tab === "calendar");
   const periodStats = periodData?.stats || {};
-  const periodChips = ["ALL", ...DESK_IDS];
+  const periodChips = memberMode ? ["ALL"] : ["ALL", ...DESK_IDS];
   const selectedArchiveDay = archiveView ? localArchive?.byDate?.[selected] : null;
   // Uploaded cycle records remain in this tab's React state and never enter journal APIs.
   const importArchive = (archive) => {
@@ -569,6 +602,28 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
     setDayDoc(null);
   };
 
+  if (memberUnavailable) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pro journal unavailable</DialogTitle>
+            <DialogDescription>
+              A Pro subscription with journal access is required to view or save this private journal.
+            </DialogDescription>
+          </DialogHeader>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="text-left text-sm font-semibold text-emerald-700 hover:underline"
+          >
+            Account settings
+          </button>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -582,14 +637,27 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                 <BookOpen className="w-4 h-4" />
               </span>
               Trade journal
-              <AdminDialogNavigation />
+              {!memberMode ? <AdminDialogNavigation /> : null}
             </DialogTitle>
             <DialogDescription className="text-slate-600">
+              {walkthroughMode ? (
+                <span className="mb-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  Fictional walkthrough data · not live
+                </span>
+              ) : null}
               <span className="hidden sm:inline">
-                Daily booked P&amp;L (full exits and partial closes) is stored from the last Positions auto-refresh and frozen at session close. Brokerage lives in our database — not on Kite.
+                {walkthroughMode
+                  ? "Explore a fictional journal with sample entries, calendar totals, and notes. Walkthrough changes stay in this browser session."
+                  : memberMode
+                  ? "Your private daily P&L summary is captured from your Positions refresh. Notes and screenshots are saved to your member journal; detailed trade cycles are only retained when enabled by the administrator."
+                  : "Daily booked P&L (full exits and partial closes) is stored from the last Positions auto-refresh and frozen at session close. Brokerage lives in our database — not on Kite."}
               </span>
               <span className="sm:hidden text-[12px]">
-                Booked P&amp;L (exits + partials) · tap a day to journal
+                {walkthroughMode
+                  ? "Fictional sample journal · not live"
+                  : memberMode
+                    ? "Your booked P&L · tap a day to journal"
+                    : "Booked P&L (exits + partials) · tap a day to journal"}
               </span>
             </DialogDescription>
           </DialogHeader>
@@ -613,7 +681,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
         </div>
 
         <div className="px-3 sm:px-5 py-3 lg:py-2 space-y-3 flex-1 min-h-0 overflow-y-auto max-lg:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+          {!memberMode && !walkthroughMode ? <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-xs font-semibold text-slate-800">
                 Save my trade cycles
@@ -651,7 +719,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
             >
               <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${tradeCycleSaving ? "translate-x-6" : "translate-x-1"}`} />
             </button>
-          </div>
+          </div> : null}
           {!focused && (
             <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm space-y-2" data-testid="journal-period-panel">
               <div className="grid grid-cols-1 gap-2 min-w-0 sm:flex sm:flex-wrap sm:items-end">
@@ -695,10 +763,10 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                   ))}
                 </div>
                 {periodLoading ? <span className="text-[11px] text-slate-400">Updating…</span> : null}
-                <DownloadTradesButton compact from={periodFrom} to={periodTo} index={periodIndex} />
+                {!memberMode ? <DownloadTradesButton compact from={periodFrom} to={periodTo} index={periodIndex} /> : null}
                 </>
                 )}
-                <TradeCycleArchiveButton onArchiveLoaded={importArchive} />
+                {!memberMode ? <TradeCycleArchiveButton onArchiveLoaded={importArchive} /> : null}
               </div>
               {!archiveView && (
               <>
@@ -710,19 +778,19 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                   </div>
                   {periodStats.booked_pct != null ? (
                     <div className={`text-[11px] font-semibold font-mono-data mt-0.5 ${Number(periodStats.booked_pct) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                      {privacy ? "··" : fmtBookedPct(periodStats.booked_pct, { signed: true })} of wallet after charges
+                      {privacy ? "··" : fmtBookedPct(periodStats.booked_pct, { signed: true })}{memberMode ? " of wallet · charges excluded" : " of wallet after charges"}
                     </div>
                   ) : (
                     <div className="text-[10px] text-slate-400 mt-0.5">% after we store a wallet snapshot</div>
                   )}
                 </div>
                 <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Charges & taxes</div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{memberMode ? "Broker charges" : "Charges & taxes"}</div>
                   <div className="text-[15px] sm:text-lg font-bold font-mono-data text-slate-800 leading-tight">
-                    {privacy ? "••••" : <Money v={periodStats.charges_total} signed={false} />}
+                    {memberMode ? "Not included" : privacy ? "••••" : <Money v={periodStats.charges_total} signed={false} />}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {periodStats.charges_are_all_indices ? "Kite charges are for the whole book, not this index" : "Brokerage + taxes on stored days"}
+                    {memberMode ? "Member summaries store booked P&L only" : periodStats.charges_are_all_indices ? "Kite charges are for the whole book, not this index" : "Brokerage + taxes on stored days"}
                   </div>
                 </div>
                 <div className="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
@@ -735,12 +803,12 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                   </div>
                 </div>
                 <div className="rounded-xl border border-violet-100 bg-violet-50/50 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">After charges</div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{memberMode ? "Booked days" : "After charges"}</div>
                   <div className={`text-[15px] sm:text-lg font-bold font-mono-data leading-tight ${Number(periodStats.booked_after_charges) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                    {privacy ? "••••" : (periodStats.booked_after_charges == null ? "—" : <Money v={periodStats.booked_after_charges} />)}
+                    {memberMode ? (periodStats.trading_days || 0) : privacy ? "••••" : (periodStats.booked_after_charges == null ? "—" : <Money v={periodStats.booked_after_charges} />)}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {periodStats.trading_days || 0} booked days
+                    {memberMode ? "Charges excluded from P&L" : `${periodStats.trading_days || 0} booked days`}
                   </div>
                 </div>
               </div>
@@ -871,7 +939,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                   ) : null}
                   <span className="text-[12px] text-slate-500">{stats.trading_days || 0} days</span>
                   {stats.funds_base ? (
-                    <span className="text-[11px] text-slate-400 font-mono-data" title="Month % is booked after charges ÷ this month’s wallet (opening cash + collateral), not SPAN">
+                    <span className="text-[11px] text-slate-400 font-mono-data" title={memberMode ? "Booked P&L ÷ wallet; charges are not included." : "Month % is booked after charges ÷ this month’s wallet (opening cash + collateral), not SPAN"}>
                       wallet {privacy ? "••••" : fmtInr(stats.funds_base, 0)}
                     </span>
                   ) : null}
@@ -923,7 +991,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                       const decided = (doc?.win_trades || 0) + (doc?.loss_trades || 0);
                       const wr = decided > 0 ? `${Math.round((100 * (doc.win_trades || 0)) / decided)}%` : null;
                       const hasNote = !!(doc?.went_well || doc?.went_wrong || doc?.notes);
-                      const exits = Number(doc?.exited_count || 0);
+                      const exits = Number(doc?.exited_count || 0)
+                        + (memberMode ? Number(doc?.partial_count || 0) : 0);
                       return (
                         <button
                           key={c.iso}
@@ -979,7 +1048,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                                 Booked
                               </div>
                               {pct != null ? (
-                                <div className={`text-[13px] font-bold font-mono-data leading-tight ${tone.amt}`} title={doc.funds_base ? `after charges, of wallet ${fmtInr(doc.funds_base, 0)}` : "after charges ÷ wallet (not SPAN)"}>
+                                <div className={`text-[13px] font-bold font-mono-data leading-tight ${tone.amt}`} title={memberMode ? `Booked P&L ÷ wallet ${doc.funds_base ? fmtInr(doc.funds_base, 0) : "(not recorded)"}; charges excluded` : doc.funds_base ? `after charges, of wallet ${fmtInr(doc.funds_base, 0)}` : "after charges ÷ wallet (not SPAN)"}>
                                   {privacy ? "····" : fmtBookedPct(pct, { signed: true })}
                                 </div>
                               ) : null}
@@ -1133,7 +1202,9 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
               {loading && !focused && <div className="text-xs text-slate-600">Loading calendar…</div>}
               {!focused && !archiveView && (
                 <p className="text-[10px] text-slate-500 leading-snug">
-                  Day % = booked P&amp;L <b>after charges</b> ÷ that morning’s <b>wallet</b> (Kite opening cash + collateral). Not leftover margin, not SPAN on hedges, not leveraged notional. Weekly/monthly % use the first stored wallet of that week/month. Kite Connect does not publish withdrawals — estimated in/out is the gap vs the prior close.
+                  {memberMode
+                    ? <>Day % = booked P&amp;L ÷ the recorded <b>wallet</b>; charges are not included in member summaries. Weekly/monthly % use the first stored wallet of that week/month.</>
+                    : <>Day % = booked P&amp;L <b>after charges</b> ÷ that morning’s <b>wallet</b> (Kite opening cash + collateral). Not leftover margin, not SPAN on hedges, not leveraged notional. Weekly/monthly % use the first stored wallet of that week/month. Kite Connect does not publish withdrawals — estimated in/out is the gap vs the prior close.</>}
                 </p>
               )}
             </>
@@ -1332,6 +1403,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
                   <div className="text-[11px] text-slate-500 mt-0.5" data-testid="journal-after-charges">
                     {privacy
                       ? "after charges ••••"
+                      : memberMode
+                        ? "Broker charges are not included in member summaries"
                       : dayDoc.charges_total != null
                         ? (
                           <>
@@ -1373,12 +1446,16 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false 
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
-                <Stat label="Booked trades" value={(dayDoc.win_trades + dayDoc.loss_trades) || dayDoc.exited_count || 0} />
+                <Stat label="Booked trades" value={(dayDoc.win_trades + dayDoc.loss_trades) || (dayDoc.exited_count + dayDoc.partial_count) || 0} />
                 <Stat label="Winners" value={dayDoc.win_trades} />
                 <Stat label="Losers" value={dayDoc.loss_trades} />
                 <Stat label="Winrate" value={dayDoc.winrate != null ? `${dayDoc.winrate.toFixed(1)}%` : "—"} />
-                <Stat label="Brokerage" value={privacy ? "••••" : <Money v={dayDoc.brokerage} signed={false} />} />
-                <Stat label="All charges" value={privacy ? "••••" : <Money v={dayDoc.charges_total} signed={false} />} />
+                {!memberMode ? (
+                  <>
+                    <Stat label="Brokerage" value={privacy ? "••••" : <Money v={dayDoc.brokerage} signed={false} />} />
+                    <Stat label="All charges" value={privacy ? "••••" : <Money v={dayDoc.charges_total} signed={false} />} />
+                  </>
+                ) : null}
               </div>
 
               {(dayDoc.legs || []).filter((leg) => leg.exited || leg.partial || Math.abs(Number(leg.realised) || 0) > 0.009).length > 0 && (

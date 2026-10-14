@@ -2,6 +2,7 @@ from desk_guide import compact_snapshot, compose_rules_guide, llm_configured, re
 import asyncio
 from datetime import datetime, timezone
 from desk_guide import maybe_guide
+import pytest
 
 
 def test_compact_strips_noise_and_caps_lists():
@@ -330,6 +331,23 @@ def test_guide_request_accepts_provider_freshness_metadata():
     })
     assert request.model_dump()["vix_quote"]["source"] == "kite"
     assert request.model_dump()["gift_quote"]["isProxy"] is True
+
+
+def test_trade_guidance_endpoint_is_admin_only(monkeypatch):
+    from fastapi import HTTPException
+    import server
+
+    async def no_member_session(_request):
+        return False
+
+    monkeypatch.setattr(server, "_member_session_from_request", no_member_session)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(server.post_desk_guide(
+            server.DeskGuideIn(surface="desk"),
+            request=None,
+            role="member",
+        ))
+    assert error.value.status_code == 403
 
 
 def test_skip_llm_even_if_key(monkeypatch):

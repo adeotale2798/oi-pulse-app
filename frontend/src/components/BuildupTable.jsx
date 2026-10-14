@@ -30,7 +30,7 @@ function fmtOI(v) {
   return v.toLocaleString();
 }
 
-export default function BuildupTable({ current, previous, atm, timeframeLabel }) {
+export default function BuildupTable({ current, previous, atm, timeframeLabel, neutralOnly = false }) {
   const rows = useMemo(() => classifyBuildups({ current, previous }), [current, previous]);
   const agg = useMemo(() => aggregateBuildupBias(rows, atm, 3), [rows, atm]);
 
@@ -38,6 +38,45 @@ export default function BuildupTable({ current, previous, atm, timeframeLabel })
     return (
       <div className="text-xs text-slate-400 py-6 text-center">
         Need a previous snapshot to classify build-up. Wait for the next data pull…
+      </div>
+    );
+  }
+
+  if (neutralOnly) {
+    // Members get the measured OI/price deltas without directional classifications or bias.
+    return (
+      <div className="space-y-3" data-testid="buildup-table-neutral">
+        <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[10px] text-slate-600">
+          Observed call/put OI and option-price changes · {timeframeLabel || "current window"}
+        </p>
+        <div className="overflow-auto">
+          <table className="w-full text-xs font-mono-data">
+            <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="px-2 py-2 text-right">Call ΔOI %</th>
+                <th className="px-2 py-2 text-right">Call ΔLTP %</th>
+                <th className="px-2 py-2 text-right">Call OI</th>
+                <th className="bg-slate-100 px-2 py-2 text-center">Strike</th>
+                <th className="px-2 py-2 text-right">Put OI</th>
+                <th className="px-2 py-2 text-right">Put ΔLTP %</th>
+                <th className="px-2 py-2 text-right">Put ΔOI %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.strike} className={`border-b border-slate-100 ${row.strike === atm ? "bg-amber-50" : ""}`}>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{row.ce_oi_pct >= 0 ? "+" : ""}{row.ce_oi_pct.toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{row.ce_ltp_pct >= 0 ? "+" : ""}{row.ce_ltp_pct.toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{fmtOI(row.ce_oi)}</td>
+                  <td className="bg-slate-50 px-2 py-1.5 text-center font-semibold text-slate-900">{row.strike}</td>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{fmtOI(row.pe_oi)}</td>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{row.pe_ltp_pct >= 0 ? "+" : ""}{row.pe_ltp_pct.toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right text-slate-700">{row.pe_oi_pct >= 0 ? "+" : ""}{row.pe_oi_pct.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }

@@ -44,6 +44,31 @@ remove it and restart the backend. This feature does **not** provide passwordles
 access to a live deployment; use a protected staging account for deployed
 testing.
 
+## Local subscription test accounts
+
+To exercise Normal, Premium, and Pro member screens without creating Google
+accounts, set `APP_ENV=development` and configure `LOCAL_DEV_MEMBER_USERS` as a
+JSON array in `backend/.env`:
+
+```env
+LOCAL_DEV_MEMBER_USERS='[{"email":"normal@example.test","password":"change-me","plan":"normal"},{"email":"premium@example.test","password":"change-me","plan":"premium"},{"email":"pro@example.test","password":"change-me","plan":"pro"}]'
+```
+
+Restart the backend and use **Local subscription testing** on `/login`. Test
+accounts use the ordinary member routes and selected plan feature ceilings, but
+do not require Razorpay checkout. Their local-only entitlements are enabled for
+testing even when the membership rollout switch is off. The email list and
+passwords are not returned by the API; only the configured emails are shown to
+a loopback development browser. Sessions for these identities are rejected
+unless both the backend environment and incoming request are local development
+loopback. Test member/session records are written to the configured MongoDB, so
+use an isolated local database and never point this setup at production.
+
+The test password is plain text in the local environment file. Keep
+`backend/.env` untracked and never copy the setting to staging, production, or a
+shared preview. Removing `LOCAL_DEV_MEMBER_USERS` and restarting disables new
+test logins and causes existing test sessions to be refused.
+
 ## Guidance for coding agents
 
 Treat this bypass as an authentication boundary, not a convenience UI toggle.

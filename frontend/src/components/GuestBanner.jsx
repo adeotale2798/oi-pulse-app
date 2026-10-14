@@ -25,7 +25,7 @@ export default function GuestBanner({
       <div className="flex items-center gap-2 min-w-0">
         <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-700" />
         <span className="truncate">
-          {guestName ? <b>{guestName}</b> : "Guest"}
+          <b>{guestName || "Guest"}</b>
           <span className="hidden sm:inline">
             {" — "}
             <b>Guest access via {adminName || "Adeotale"}</b>

@@ -134,7 +134,7 @@ export function notifyMarketIntelReload() {
   window.dispatchEvent(new Event(MI_RELOAD_EVENT));
 }
 
-export const MI_POPUP_LEFT_KEY = "oiMiPopupLeftPx";
+export { MI_POPUP_LEFT_KEY } from "@/lib/carryDock";
 export const MI_POPUP_BOTTOM_KEY = "oiMiPopupBottomPx";
 export const MI_POPUP_MIN_KEY = "oi_mi_popup_minimized";
 

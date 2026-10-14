@@ -146,7 +146,7 @@ describe("site walkthrough market simulation", () => {
     expect(nextWindow.alerts[0].created_at).not.toBe(initial.alerts[0].created_at);
   });
 
-  it("provides a populated, fictional Desk AI brief without reaching live services", async () => {
+  it("provides fictional Desk AI market context without trade guidance or live services", async () => {
     const outside = await read("/api/desk-outside");
     const guide = await read("/api/desk-guide");
     const postedGuide = await siteWalkthroughAdapter({
@@ -164,7 +164,8 @@ describe("site walkthrough market simulation", () => {
     expect(outside.quote_source).toBe("walkthrough sample");
     expect(outside.movers).toHaveLength(4);
     expect(outside.news).toHaveLength(2);
-    expect(guide.guide).toContain("Sample read");
+    expect(guide.guide).toContain("Sample market context only");
+    expect(guide.guide).not.toMatch(/\b(wait|hold|buy|sell|hedge|exit)\b/i);
     expect(guide.evidence_quality.sources).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "Session OI" }),
       expect.objectContaining({ name: "Outside tape" }),
@@ -173,6 +174,40 @@ describe("site walkthrough market simulation", () => {
     expect(postedGuide.data.demo_only).toBe(true);
     expect(disabled.data.desk_ai_show).toBe(false);
     expect(flags.desk_ai_show).toBe(false);
+  });
+
+  it("provides a fictional journal calendar and keeps walkthrough settings local", async () => {
+    const config = await read("/api/config");
+    const settings = await read("/api/settings");
+    const month = await read("/api/journal", { year: 2026, month: 10 });
+    const day = await read("/api/journal/2026-10-05");
+    const period = await read("/api/journal/period", {
+      from: "2026-10-01",
+      to: "2026-10-06",
+    });
+    const year = await read("/api/journal/year/2026");
+
+    expect(config.visible_pages).not.toContain("sell-candidates");
+    expect(config.show_writer_defense).toBe(false);
+    expect(config.show_suggestion).toBe(false);
+    expect(config.show_chart_signals).toBe(false);
+    expect(settings.trade_cycle_saving_enabled).toBe(false);
+    expect(month.days.length).toBeGreaterThan(0);
+    expect(month.days[0]).toMatchObject({
+      empty: false,
+      notes: expect.stringContaining("Fictional walkthrough record"),
+      legs: expect.arrayContaining([expect.objectContaining({ exited: true })]),
+    });
+    expect(day).toMatchObject({
+      date: "2026-10-05",
+      empty: false,
+      notes: expect.stringContaining("Fictional walkthrough record"),
+    });
+    expect(period.stats.trading_days).toBeGreaterThan(0);
+    expect(period.stats.booked_after_charges).not.toBe(0);
+    expect(period.stats.by_index).not.toEqual({});
+    expect(year.heatmap.months[9].trading_days).toBeGreaterThan(0);
+    expect(year.heatmap.month_nets[9]).not.toBe(0);
   });
 
   it("provides four correctly shaped walkthrough market-intelligence notifications", async () => {

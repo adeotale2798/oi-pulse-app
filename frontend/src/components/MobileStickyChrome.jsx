@@ -1,8 +1,9 @@
-import { useMemo, useState, useRef } from "react";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { ChevronLeft, ChevronRight, Plus, RotateCcw } from "lucide-react";
 
 import { DESK_IDS, INDEX_SHORT, INDEX_DOT, usesIndexOverflow } from "@/lib/universe";
 import { pickIndexLtp } from "@/lib/indexQuotes";
+import TabHideContextMenu from "./TabHideContextMenu";
 
 /**
  * Mobile-only sticky context bar.
@@ -25,6 +26,10 @@ export default function MobileStickyChrome({
   onFavorite,
   onMove,
   onResetLayout,
+  onHideTab,
+  hiddenTabs = [],
+  onRestoreTab,
+  savingPagePreferences = false,
   infoTilesOpen,
   onToggleInfoTiles,
   infoTiles,
@@ -32,11 +37,34 @@ export default function MobileStickyChrome({
 }) {
   const [draggingId, setDraggingId] = useState(null);
   const [overId, setOverId] = useState(null);
+  const [hiddenMenuOpen, setHiddenMenuOpen] = useState(false);
+  const hiddenPagesWrapRef = useRef(null);
   const skipClickRef = useRef(false);
 
   const canReorder = typeof onReorder === "function";
   const canFavorite = typeof onFavorite === "function";
   const canMove = typeof onMove === "function";
+  const canCustomizePages = typeof onHideTab === "function" && typeof onRestoreTab === "function";
+
+  useEffect(() => {
+    if (!hiddenMenuOpen) return undefined;
+    const onDoc = (event) => {
+      if (!hiddenPagesWrapRef.current?.contains(event.target)) setHiddenMenuOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") setHiddenMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [hiddenMenuOpen]);
+
+  useEffect(() => {
+    if (hiddenTabs.length === 0) setHiddenMenuOpen(false);
+  }, [hiddenTabs.length]);
 
   const list = useMemo(() => indices.filter(Boolean), [indices]);
 
@@ -115,6 +143,9 @@ export default function MobileStickyChrome({
   if (canFavorite) tipParts.push("double-click to pin first");
   if (canMove) tipParts.push("Alt+←/→ to nudge");
   tipParts.push("click to open");
+  if (canCustomizePages && tabs.length > 1) {
+    tipParts.push("long-press or use Shift+F10 for page options");
+  }
   const tabTitle = tipParts.join(" · ");
   const many = usesIndexOverflow(list);
 
@@ -226,14 +257,22 @@ export default function MobileStickyChrome({
             data-testid="mobile-sticky-tabs"
             className="tabs-scroll flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto"
             role="tablist"
-            aria-label="Dashboard views — drag, double-click, or Alt+arrows to reorder"
+            aria-label="Dashboard views — drag, double-click, or Alt+arrows to reorder; long-press a page for options"
           >
             {tabs.map((t) => {
               const active = t.v === activeTab;
               const isOver = canReorder && overId === t.v && draggingId && draggingId !== t.v;
               return (
-                <button
+                <TabHideContextMenu
                   key={t.v}
+                  tabId={t.v}
+                  label={t.l}
+                  canHide={canCustomizePages && tabs.length > 1}
+                  disabled={savingPagePreferences}
+                  onHide={onHideTab}
+                  className="inline-flex shrink-0 items-stretch"
+                >
+                <button
                   type="button"
                   role="tab"
                   aria-selected={active}
@@ -262,9 +301,51 @@ export default function MobileStickyChrome({
                 >
                   {t.l}
                 </button>
+                </TabHideContextMenu>
               );
             })}
           </div>
+          {canCustomizePages && (
+            <div ref={hiddenPagesWrapRef} className="relative z-30 shrink-0">
+              <button
+                type="button"
+                data-testid="dashboard-add-page-mobile"
+                aria-label="Add a hidden dashboard page"
+                aria-expanded={hiddenMenuOpen}
+                title={hiddenTabs.length ? "Restore a hidden dashboard page" : "All available pages are shown"}
+                disabled={savingPagePreferences || hiddenTabs.length === 0}
+                onClick={() => setHiddenMenuOpen((open) => !open)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-emerald-950/40"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              {hiddenMenuOpen && hiddenTabs.length > 0 && (
+                <div
+                  role="menu"
+                  data-testid="dashboard-hidden-pages-menu-mobile"
+                  className="absolute right-0 top-full mt-1 min-w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {hiddenTabs.map((tab) => (
+                    <button
+                      key={tab.v}
+                      type="button"
+                      role="menuitem"
+                      data-testid={`dashboard-restore-mobile-${tab.v}`}
+                      disabled={savingPagePreferences}
+                      onClick={() => {
+                        onRestoreTab(tab.v);
+                        setHiddenMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <Plus className="h-3.5 w-3.5 text-emerald-600" />
+                      {tab.l}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {typeof onResetLayout === "function" && (
             <button
               type="button"

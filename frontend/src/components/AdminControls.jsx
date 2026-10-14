@@ -353,7 +353,7 @@ export default function AdminControls({
             type="button"
             className="inline-flex flex-row flex-nowrap items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-emerald-800"
             data-testid="admin-public-pages-trigger"
-            title="Guest pages: Positions connect, Sell Candidates"
+            title="Guest pages: Positions connect, Index Risk"
           >
             <Users className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             Public
@@ -382,7 +382,6 @@ export default function AdminControls({
           </p>
           {[
             { id: "positions", label: "Positions · Connect Zerodha" },
-            { id: "sell-candidates", label: "Sell Candidates" },
             { id: "index-events", label: "Index Risk" },
           ].map((p) => (
             <label key={p.id} className="flex items-center justify-between gap-2 text-[12px] text-slate-800">

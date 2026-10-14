@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause } from "lucide-react";
 import BrowserMock from "@/components/landing/BrowserMock";
 
 const SLIDES = [
@@ -9,21 +8,14 @@ const SLIDES = [
   { id: "chain-banknifty", label: "BANK NIFTY Chain", title: "BANK NIFTY · Option Chain" },
   { id: "chain-sensex", label: "SENSEX Chain", title: "SENSEX · Option Chain" },
   { id: "pressure", label: "Strike Pressure", title: "Strike Pressure" },
-  { id: "structure", label: "Market Structure", title: "Market Structure" },
+  { id: "global-markets", label: "Global Markets", title: "Global Markets" },
+  { id: "straddle", label: "Straddle", title: "ATM Straddle" },
+  { id: "events", label: "Market & Global Events", title: "Market & Global Events" },
   { id: "positions", label: "Positions", title: "Positions" },
-  { id: "brain", label: "Position Brain", title: "Position Brain" },
-  { id: "deskai", label: "Desk AI", title: "Desk AI" },
 ];
 
 export default function DemoSlides({ snap }) {
   const [i, setI] = useState(0);
-  const [playing, setPlaying] = useState(true);
-
-  useEffect(() => {
-    if (!playing) return undefined;
-    const t = setInterval(() => setI((x) => (x + 1) % SLIDES.length), 3400);
-    return () => clearInterval(t);
-  }, [playing]);
 
   const slide = SLIDES[i];
   return (
@@ -32,19 +24,14 @@ export default function DemoSlides({ snap }) {
         {SLIDES.map((s, idx) => (
           <button
             key={s.id}
-            onClick={() => { setI(idx); setPlaying(false); }}
+            type="button"
+            aria-pressed={idx === i}
+            onClick={() => setI(idx)}
             className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${idx === i ? "slz-btn-primary" : "border border-slate-200 bg-white text-slate-600 hover:border-emerald-300"}`}
           >
             {s.label}
           </button>
         ))}
-        <button
-          onClick={() => setPlaying((p) => !p)}
-          className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-emerald-300"
-        >
-          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          {playing ? "Pause" : "Play"}
-        </button>
       </div>
 
       <div className="mx-auto max-w-2xl">

@@ -180,10 +180,10 @@ export default function AdminLogin() {
       <div className="admin-login-main relative z-10 mx-auto grid w-full max-w-6xl flex-1 items-center gap-10 px-5 py-8 sm:px-8 lg:grid-cols-[1.04fr_.96fr] lg:gap-14 lg:px-10">
         {/* Live market scene */}
         <div className="relative hidden min-h-[35rem] lg:block">
-          <div className="mb-5 flex items-center gap-2">
+          <div className="mb-5 flex items-center justify-center gap-2">
             <OiPulseLogo className="h-9 w-9" pulse={false} />
             <div>
-              <div className="text-lg font-bold leading-none">Strik<span className="text-emerald-400">lenz</span></div>
+              <div className="text-lg font-bold leading-none"><span className="text-white">Strik</span><span className="text-emerald-400">Lenz</span></div>
               <div className="text-[11px] text-slate-400">Command the desk. Spot bias. Act on OI.</div>
             </div>
           </div>
@@ -252,9 +252,9 @@ export default function AdminLogin() {
 
         {/* Login card */}
         <div className="admin-login-card-shell mx-auto w-full max-w-md">
-          <div className="mb-6 flex items-center gap-2 lg:hidden">
+          <div className="mb-6 flex items-center justify-center gap-2 lg:hidden">
             <OiPulseLogo className="h-9 w-9" pulse={false} />
-            <span className="text-xl font-bold">Strik<span className="text-emerald-400">lenz</span></span>
+            <span className="text-xl font-bold"><span className="text-white">Strik</span><span className="text-emerald-400">Lenz</span></span>
           </div>
           <div
             className={[

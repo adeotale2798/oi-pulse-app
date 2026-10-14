@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { X, TrendingUp, TrendingDown, Filter } from "lucide-react";
+import { X, TrendingUp, TrendingDown, Filter, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import PageBrandTitle from "@/components/PageBrandTitle";
 
@@ -44,18 +44,23 @@ export default function AlertsPanel({
         </div>
       ) : (
         filtered.map((a) => {
-          const bullish = a.direction?.toLowerCase().includes("bullish");
+          const isShift = a.type === "oi_shift";
+          const bullish = !isShift && a.direction?.toLowerCase().includes("bullish");
           return (
             <div
-              key={a.created_at + a.index}
+              key={a.alert_id || a.created_at + a.index}
               data-testid="alert-item"
               className={`border rounded-sm p-2 ${
-                bullish ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"
+                isShift
+                  ? "border-amber-200 bg-amber-50"
+                  : bullish ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"
               }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-semibold">
-                  {bullish ? (
+                  {isShift ? (
+                    <Activity className="w-3 h-3 text-amber-700" />
+                  ) : bullish ? (
                     <TrendingUp className="w-3 h-3 text-emerald-600" />
                   ) : (
                     <TrendingDown className="w-3 h-3 text-rose-600" />
@@ -76,10 +81,28 @@ export default function AlertsPanel({
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] text-slate-700 mt-1">{a.direction}</div>
-              <div className="text-[10px] text-slate-500 font-mono-data mt-1">
-                Price {a.price?.toFixed?.(2)} · ATM {a.atm} · {a.strikes?.length ?? 0} strikes
-              </div>
+              {isShift ? (
+                <>
+                  <div className="mt-1 text-[11px] font-semibold text-amber-900">
+                    OI Shift · {a.side} {a.direction}
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-600 font-mono-data">
+                    {Math.abs(Number(a.value) || 0).toLocaleString("en-IN")} contracts · {a.window} min · ATM {a.atm}
+                  </div>
+                  {a.price != null && (
+                    <div className="mt-1 text-[10px] text-slate-500 font-mono-data">
+                      Price {Number(a.price).toFixed(2)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-[11px] text-slate-700 mt-1">{a.direction}</div>
+                  <div className="text-[10px] text-slate-500 font-mono-data mt-1">
+                    Price {a.price?.toFixed?.(2)} · ATM {a.atm} · {a.strikes?.length ?? 0} strikes
+                  </div>
+                </>
+              )}
             </div>
           );
         })

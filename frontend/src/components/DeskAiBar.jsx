@@ -62,15 +62,17 @@ export default function DeskAiBar({
         return { data: null };
       });
       const oiPolling = isOiPolling(marketStatusRes.data);
-      // Trade memory is scoped to this signed-in caller; unlike the journal and publisher book, guests may use it.
+      // Position-aware Desk AI context, including trade-cycle memory, stays on the Admin desk.
       const [st, outRes, evRes, posRes, extrasRes, journalRes, memRes, marketMemoryRes, ...oiPacks] = await Promise.all([
-        api.get("/desk-guide").catch(() => ({ data: null })),
+        isAdmin ? api.get("/desk-guide").catch(() => ({ data: null })) : Promise.resolve({ data: null }),
         api.get("/desk-outside", { params: activeIndex ? { index: activeIndex } : {} }).catch(() => ({ data: null })),
         api.get(`/events/${focusIndex}`).catch(() => ({ data: null })),
         isAdmin ? api.get("/positions").catch(() => ({ data: null })) : Promise.resolve({ data: null }),
         fetchExtras().catch(() => null),
         isAdmin ? fetchJournalPeriod(daysAgoIST(30, today), today, "ALL").catch(() => null) : Promise.resolve(null),
-        api.get("/desk-memory", { params: { days: 180 } }).catch(() => ({ data: { status: "unavailable" } })),
+        isAdmin
+          ? api.get("/desk-memory", { params: { days: 180 } }).catch(() => ({ data: { status: "unavailable" } }))
+          : Promise.resolve({ data: null }),
         api.get(`/market-memory/${focusIndex}`).catch(() => ({ data: null })),
         ...names.map((idx) => (
           oiPolling
@@ -88,7 +90,9 @@ export default function DeskAiBar({
       setSessionExtras(extrasRes);
       const holidays = upcomingHolidays().slice(0, 6).map((h) => ({ name: h.name, date: h.date }));
       const events = (evRes.data?.events || []).slice(0, 8);
-      const packed = compactBookFromPositions(posRes.data);
+      const packed = isAdmin
+        ? compactBookFromPositions(posRes.data)
+        : { book: null, adjust: null };
       const oi = oiPacks
         .map((data) => summarizeIndexTape(
           data?.current,
@@ -96,7 +100,9 @@ export default function DeskAiBar({
           data?.data_status,
         ))
         .filter(Boolean);
-      const journal = attachDayCapital(compactJournalFromPeriod(journalRes), posRes.data);
+      const journal = isAdmin
+        ? attachDayCapital(compactJournalFromPeriod(journalRes), posRes.data)
+        : null;
       const memory = compactTradeMemory(memRes?.data);
       const vix = extrasRes?.vix?.last ?? extrasRes?.vix?.ltp ?? extrasRes?.vix;
       const focusPack = oiPacks.find((data) => String(data?.current?.index || "") === focusIndex) || oiPacks[0];
@@ -105,7 +111,7 @@ export default function DeskAiBar({
         leftover: journal?.leftover,
         wallet: journal?.wallet,
       });
-      const sells = dayCap.stopSellIdeas
+      const sells = !isAdmin || dayCap.stopSellIdeas
         ? null
         : compactSellIdeas(
           focusIndex,
@@ -114,6 +120,11 @@ export default function DeskAiBar({
           vix != null ? Number(vix) : undefined,
         );
       setIntel({ oi, book: packed.book, adjust: packed.adjust, journal });
+      // Non-admin Desk AI keeps source-backed market context but never receives or renders trade guidance.
+      if (!isAdmin) {
+        setGuide(null);
+        return;
+      }
       const { data } = await api.post("/desk-guide", {
         surface: "desk",
         force: !!force,
@@ -205,7 +216,7 @@ export default function DeskAiBar({
 
   if (!visible) return null;
 
-  const source = guide?.sample ? "sample" : guide?.source === "llm" ? "AI" : "rules";
+  const source = !isAdmin ? "market" : guide?.sample ? "sample" : guide?.source === "llm" ? "AI" : "rules";
   const llmLive = source === "AI";
   const movers = filterCashHeavyMovers(outside?.movers || []);
   const briefing = (outside?.briefing || guide?.guide || "").trim();
@@ -229,15 +240,17 @@ export default function DeskAiBar({
         className={`text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-sm border ${
           source === "sample"
             ? "border-violet-300 bg-violet-50 text-violet-800 dark:bg-violet-950 dark:text-violet-200 dark:border-violet-800"
+            : source === "market"
+            ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-200 dark:border-sky-800"
             : llmLive
             ? "border-emerald-600 bg-emerald-600 text-white"
             : "border-slate-300 bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300"
         }`}
         data-testid="desk-ai-source"
       >
-        {source === "sample" ? "Sample" : llmLive ? "Live GPT" : "Rules"}
+        {source === "sample" ? "Sample" : source === "market" ? "Market data" : llmLive ? "Live GPT" : "Rules"}
       </span>
-      {askAi ? (
+      {askAi && isAdmin ? (
         <button
           type="button"
           onClick={() => run(true)}

@@ -11,15 +11,23 @@ class InstrumentConfigIn(BaseModel):
     session_timeline_enabled: bool | None = None
 
 
-def mount(api_router, *, require_desk_user, require_admin):
+def mount(api_router, *, require_desk_user, require_admin, require_member_feature=None):
     import global_markets
 
     def _db():
         import server
         return server.db
 
+    member_feature = (
+        Depends(require_member_feature("global_markets"))
+        if require_member_feature else True
+    )
+
     @api_router.get("/global-markets/instruments")
-    async def global_market_instruments(_user: str = Depends(require_desk_user)):
+    async def global_market_instruments(
+        _user: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         return {"items": global_markets.instruments()}
 
     @api_router.get("/global-markets/config")
@@ -56,10 +64,16 @@ def mount(api_router, *, require_desk_user, require_admin):
         return await global_markets.test_fmp_connection(_db())
 
     @api_router.get("/global-markets/overview")
-    async def global_market_overview(_user: str = Depends(require_desk_user)):
+    async def global_market_overview(
+        _user: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         return await global_markets.overview(_db())
 
     @api_router.get("/global-markets/status")
-    async def global_market_status(_user: str = Depends(require_desk_user)):
+    async def global_market_status(
+        _user: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
         prefs = await global_markets.load_prefs(_db())
         return {"enabled": prefs.get("enabled") is not False}
