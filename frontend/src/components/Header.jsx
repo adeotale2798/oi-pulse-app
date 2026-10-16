@@ -781,7 +781,7 @@ export default function Header({
             variant="outline"
             size="sm"
             className="rounded-sm min-h-11"
-            onClick={() => window.open("https://striklenz.com/admin/settings", "_blank", "noopener,noreferrer")}
+            onClick={() => window.location.assign("/admin/settings")}
           >
             <Settings2 className="w-4 h-4 mr-1.5" />
             Broker
@@ -1136,7 +1136,7 @@ export default function Header({
                   onSelect={(e) => {
                     e.preventDefault();
                     setAdminMenuOpen(false);
-                    window.location.assign("https://striklenz.com/admin/settings");
+                    window.location.assign("/admin/settings");
                   }}
                 >
                   <Settings2 className="w-4 h-4" />
@@ -1391,7 +1391,7 @@ export default function Header({
             variant="outline"
             size="sm"
             className="rounded-sm"
-            onClick={() => window.open("https://striklenz.com/admin/settings", "_blank", "noopener,noreferrer")}
+            onClick={() => window.location.assign("/admin/settings")}
           >
             <Settings2 className="w-4 h-4 mr-1.5" />
             Broker & Payments

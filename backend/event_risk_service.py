@@ -16,9 +16,10 @@ Everything here is pure logic + Mongo I/O. HTTP glue lives in server.py.
 from __future__ import annotations
 
 import io
+import calendar
 import re
 import uuid
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from market_hours import now_ist
@@ -56,6 +57,8 @@ EVENT_TYPE_ORDER = [
 ]
 
 _EVENT_PRIORITY_MAP = {t: i for i, t in enumerate(EVENT_TYPE_ORDER)}
+NSE_EVENT_REFRESH_DAYS = 30
+NSE_EVENT_API_URL = "https://www.nseindia.com/api/event-calendar"
 
 
 # =====================================================================
@@ -197,7 +200,7 @@ def parse_event_date(raw: Any) -> Optional[date]:
 # =====================================================================
 def parse_weightage(raw: Any) -> Optional[float]:
     """Return weightage as a float percentage (e.g. 11.49). None if missing.
-    Handles inputs like '2.20 %', '2.20', or 0.022 (fraction)."""
+    Handles inputs like '2.20 %', '2.20', or 0.98 without scaling small values."""
     if raw is None:
         return None
     # Detect pandas NaN early
@@ -222,17 +225,13 @@ def parse_weightage(raw: Any) -> Optional[float]:
     s = str(raw).strip()
     if not s or s.upper() in ("NA", "N/A", "-", "--", "NAN", "NONE"):
         return None
-    had_pct = "%" in s
     s = s.replace("%", "").replace(",", "").strip()
     try:
         v = float(s)
         if v != v:
             return None
-        # Only if the string had NO percent sign AND value <= 1 do we treat as
-        # a fraction. When '%' was present, take the value at face value —
-        # so '0.95 %' stays 0.95, and '11.49 %' stays 11.49.
-        if not had_pct and 0 < v < 1:
-            v = v * 100
+        # Constituent uploads provide percentage-point values, and readers
+        # normalize cells to strings. Never infer a fraction from a small value.
         return round(v, 4)
     except Exception:
         return None
@@ -456,6 +455,83 @@ def parse_events(df: pd.DataFrame) -> Tuple[List[Dict[str, Any]], List[str]]:
     return rows, []
 
 
+def _add_months(day: date, months: int) -> date:
+    month_index = day.month - 1 + months
+    year = day.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
+async def fetch_nse_event_calendar_csv(today: Optional[date] = None) -> bytes:
+    """Download the Equity / Next 3 Months CSV exported by NSE's calendar page."""
+    import httpx
+
+    start = today or now_ist().date()
+    end = _add_months(start, 3)
+    headers = {
+        "Accept": "text/csv,application/csv,*/*",
+        "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-event-calendar",
+        "User-Agent": "Mozilla/5.0 (compatible; StrikLenz/1.0)",
+    }
+    async with httpx.AsyncClient(
+        timeout=20.0, headers=headers, follow_redirects=True
+    ) as client:
+        # NSE's download route uses the calendar page's session cookies.
+        page_response = await client.get(headers["Referer"])
+        page_response.raise_for_status()
+        response = await client.get(
+            NSE_EVENT_API_URL,
+            params={
+                "index": "equities",
+                "from_date": start.strftime("%d-%m-%Y"),
+                "to_date": end.strftime("%d-%m-%Y"),
+                "csv": "true",
+            },
+        )
+    response.raise_for_status()
+    if "text/csv" not in response.headers.get("content-type", "").lower():
+        raise ValueError("NSE event-calendar download did not return a CSV file.")
+    if not response.content:
+        raise ValueError("NSE event-calendar download was empty.")
+    return response.content
+
+
+async def refresh_nse_event_calendar(db, today: Optional[date] = None) -> Dict[str, Any]:
+    """Validate the complete NSE CSV export before replacing the stored calendar."""
+
+    csv_bytes = await fetch_nse_event_calendar_csv(today=today)
+    df = read_upload_bytes(csv_bytes, "nse-events.csv")
+    rows, errors = parse_events(df)
+    if errors:
+        raise ValueError(f"NSE event-calendar validation failed: {'; '.join(errors[:3])}")
+    result = await save_events(
+        db,
+        rows,
+        source_filename="NSE Download: Equity events (Next 3 Months)",
+    )
+    return {"refreshed": True, **result}
+
+
+async def refresh_nse_event_calendar_if_due(
+    db, today: Optional[date] = None
+) -> Dict[str, Any]:
+    """Refresh when the last actual upload or NSE fetch is a month old."""
+    meta = await db.settings.find_one({"_id": "nse_events_meta"}) or {}
+    row_count = await db.nse_events.count_documents({})
+    freshness_at = meta.get("uploaded_at")
+    if row_count and freshness_at:
+        try:
+            last_update = datetime.fromisoformat(str(freshness_at).replace("Z", "+00:00"))
+            if last_update.tzinfo is None:
+                last_update = last_update.replace(tzinfo=timezone.utc)
+            current_date = today or now_ist().date()
+            if (current_date - last_update.astimezone(now_ist().tzinfo).date()).days < NSE_EVENT_REFRESH_DAYS:
+                return {"refreshed": False, "reason": "calendar is current"}
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return await refresh_nse_event_calendar(db, today=today)
+
+
 # =====================================================================
 # Joining logic — events for the given index
 # =====================================================================
@@ -615,6 +691,7 @@ async def save_constituents(
         {"$set": {
             "index": index_code,
             "uploaded_at": uploaded_at,
+            "confirmed_at": uploaded_at,
             "source_filename": source_filename,
             "row_count": len(rows),
         }},
@@ -637,6 +714,7 @@ async def save_events(db, rows: List[Dict[str, Any]], source_filename: str = "")
         {"_id": "nse_events_meta"},
         {"$set": {
             "uploaded_at": uploaded_at,
+            "confirmed_at": uploaded_at,
             "source_filename": source_filename,
             "row_count": len(rows),
         }},
@@ -645,13 +723,51 @@ async def save_events(db, rows: List[Dict[str, Any]], source_filename: str = "")
     return {"ok": True, "rows_saved": len(rows), "uploaded_at": uploaded_at}
 
 
+_UPLOAD_CONFIRMATION_TARGETS = {
+    "nifty50": ("index_constituents", {"index": "NIFTY"}, "constituents_meta_NIFTY"),
+    "banknifty": ("index_constituents", {"index": "BANKNIFTY"}, "constituents_meta_BANKNIFTY"),
+    "sensex": ("index_constituents", {"index": "SENSEX"}, "constituents_meta_SENSEX"),
+    "events": ("nse_events", {}, "nse_events_meta"),
+    "holidays": ("nse_holidays", {}, "nse_holidays_meta"),
+}
+
+
+async def confirm_existing_upload(db, upload_type: str) -> Dict[str, Any]:
+    """Refresh one category's admin freshness confirmation without changing its rows."""
+    target = _UPLOAD_CONFIRMATION_TARGETS.get(upload_type)
+    if not target:
+        raise KeyError(f"Unknown upload type '{upload_type}'.")
+
+    collection_name, query, meta_id = target
+    collection = getattr(db, collection_name)
+    row_count = await collection.count_documents(query)
+    if not row_count:
+        raise ValueError(f"No existing {upload_type} data is available to reuse.")
+
+    confirmed_at = datetime.now(timezone.utc).isoformat()
+    await db.settings.update_one(
+        {"_id": meta_id},
+        {"$set": {"confirmed_at": confirmed_at, "row_count": row_count}},
+        upsert=True,
+    )
+    return {
+        "ok": True,
+        "upload_type": upload_type,
+        "confirmed_at": confirmed_at,
+        "row_count": row_count,
+    }
+
+
 async def fetch_upload_meta(db) -> Dict[str, Any]:
-    """Return last-upload stamps for Upload categories.
+    """Return admin freshness metadata for each Upload category.
 
     Includes age_days + stale flags so Admin UI can advise refreshes:
       • NSE events → stale after 15 days
       • Constituents → stale after 30 days
       • NSE holidays → stale after 365 days (annual circular)
+
+    Admin confirmation renews only the advisory age; original uploaded_at stays
+    unchanged and the uploaded rows are never modified by that confirmation.
     """
     keys = {
         "nifty50": ("constituents_meta_NIFTY", 30),
@@ -665,11 +781,13 @@ async def fetch_upload_meta(db) -> Dict[str, Any]:
     for key, (doc_id, stale_after) in keys.items():
         meta = await db.settings.find_one({"_id": doc_id}) or {}
         uploaded_at = meta.get("uploaded_at")
+        confirmed_at = meta.get("confirmed_at")
+        freshness_at = confirmed_at or uploaded_at
         age_days = None
-        never = not uploaded_at
-        if uploaded_at:
+        never = not freshness_at
+        if freshness_at:
             try:
-                ts = datetime.fromisoformat(str(uploaded_at).replace("Z", "+00:00"))
+                ts = datetime.fromisoformat(str(freshness_at).replace("Z", "+00:00"))
                 if ts.tzinfo is None:
                     ts = ts.replace(tzinfo=timezone.utc)
                 age_days = max(0, int((now - ts).total_seconds() // 86400))
@@ -679,6 +797,7 @@ async def fetch_upload_meta(db) -> Dict[str, Any]:
         stale = never or (age_days is not None and age_days >= stale_after)
         out[key] = {
             "uploaded_at": uploaded_at,
+            "confirmed_at": confirmed_at,
             "source_filename": meta.get("source_filename") or None,
             "row_count": meta.get("row_count"),
             "index": meta.get("index"),

@@ -1,5 +1,85 @@
 # Changelog
 
+## V20.54 — 2026-10-17
+
+Fix phone layouts for the Positions warning threshold and Admin Broker & Payments
+settings; open Admin Settings on the current site instead of a hard-coded new tab.
+
+## V20.53 — 2026-10-17
+
+Anchor the automatic monthly NSE event refresh to the last actual manual
+upload or successful automatic fetch; confirming existing rows no longer
+postpones the next scheduled refresh.
+
+## V20.52 — 2026-10-17
+
+Color Index Risk chips, cards, and weight-sensitive summary tiles consistently
+by constituent index share: >5%, 3–5%, 1–3%, <1%, or unavailable. Keep a
+stronger rose accent only for >5% events occurring within seven days.
+
+## V20.51 — 2026-10-17
+
+Bring back soft category color to Index Risk summary cards and event cards so
+the dashboard is easier to scan without returning to saturated fills.
+
+## V20.50 — 2026-10-17
+
+Restore the previous muted colors for dashboard info tiles and page navigation
+after the dark-label pass.
+
+## V20.49 — 2026-10-17
+
+Use high-contrast dark labels for dashboard info tiles and page navigation.
+Remove the duplicate upload-source status panel from Index Risk; upload dates
+and source details remain available in the Admin upload dialog.
+
+## V20.48 — 2026-10-17
+
+Clarify that event weight bands describe index share rather than predicted
+impact, add upcoming-event filters, and show Admins the last successful NSE
+calendar update. Keep manual CSV/XLSX upload prominent and available after an
+NSE fetch failure.
+
+## V20.47 — 2026-10-17
+
+Add an Admin button to fetch and safely replace the NSE event calendar on
+demand. Calm the Index Risk palette by using neutral tiles with muted severity
+accents instead of saturated event-chip fills.
+
+## V20.46 — 2026-10-17
+
+Refresh the NSE Equity event calendar from the same three-month CSV export as
+the page's Download button at most monthly. Validate the download before
+replacing stored rows; retain the manual Admin upload as a fallback and keep
+the last good calendar on fetch or validation failure.
+
+## V20.45 — 2026-10-17
+
+Pair event timing with index-weight bands in Index Risk event chips and cards;
+clarify that the labels are descriptive context, not a calculated trading risk.
+
+## V20.44 — 2026-10-17
+
+Load the Index Impact tile as soon as the selected index changes, with
+distinguishable loading and unavailable states.
+
+## V20.43 — 2026-10-17
+
+Keep Index Risk event-join coverage diagnostics visible only to Admin and omit
+that diagnostic payload for other dashboard users.
+
+## V20.42 — 2026-10-16
+
+Parse small constituent weightages as percentage points across NIFTY,
+BANKNIFTY, and SENSEX so values such as 0.98 remain 0.98%, not 98%.
+
+## V20.41 — 2026-10-16
+
+Show the uploaded SENSEX constituent name in the 7-day event chips. Let Admin
+confirm and continue using any of the five existing upload categories
+independently, without changing stored rows; keep freshness advisories
+admin-only.
+
 ## V20.40 — 2026-10-15
 
 Keep browser autofill fields on the dark Admin login theme. Hide the hidden-page

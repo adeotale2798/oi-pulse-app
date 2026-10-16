@@ -1582,8 +1582,8 @@ export default function PositionsPanel({
               )}
             </div>
           </div>
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-            <div className="positions-panel-warning inline-flex h-8 shrink-0 flex-wrap items-center gap-1 rounded-sm border border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-600" data-testid="positions-warn-at">
+          <div className="positions-panel-actions ml-auto flex min-w-0 max-w-full items-center justify-end gap-2">
+            <div className="positions-panel-warning inline-flex h-8 min-w-0 shrink items-center gap-1 whitespace-nowrap rounded-sm border border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-600" data-testid="positions-warn-at">
               <label title="How early to warn when market nears a sold strike">Warn @</label>
               <input
                 type="number"

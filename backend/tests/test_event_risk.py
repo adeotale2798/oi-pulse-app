@@ -6,6 +6,8 @@ from event_risk_service import (
     event_days_remaining,
     normalize_company_name,
     normalize_symbol,
+    parse_constituents,
+    parse_weightage,
 )
 
 
@@ -50,6 +52,54 @@ def test_classify_financial_results_and_agm():
 def test_normalize_company_name_collapses_ltd():
     assert normalize_company_name("HDFC Bank Limited") == normalize_company_name("HDFC BANK LTD.")
     assert normalize_company_name("HDFC Bank Limited") == "HDFCBANK"
+
+
+def test_constituent_weightage_below_one_percent_is_not_scaled_for_any_index():
+    import pandas as pd
+
+    cases = [
+        (
+            "NIFTY",
+            {
+                "Company Name": "Trent Ltd.",
+                "Symbol": "TRENT",
+                "Industry": "Consumer Services",
+                "ISIN Code": "INE849A01020",
+                "Weightage": "0.98",
+            },
+        ),
+        (
+            "BANKNIFTY",
+            {
+                "Company Name": "Example Bank Ltd.",
+                "Symbol": "EXAMPLE",
+                "Industry": "Bank",
+                "ISIN Code": "INE000A01000",
+                "Weightage": "0.98",
+            },
+        ),
+        (
+            "SENSEX",
+            {
+                "Constituents": "Trent Ltd.",
+                "Symbol": "500251",
+                "Macro-Economic Sector": "Consumer Discretionary",
+                "Weightage": "0.98",
+            },
+        ),
+    ]
+
+    for index_code, row in cases:
+        parsed, errors = parse_constituents(pd.DataFrame([row]), index_code)
+        assert errors == []
+        assert parsed[0]["weightage"] == 0.98
+
+
+def test_parse_weightage_keeps_percentage_points_for_bare_and_percent_values():
+    assert parse_weightage("0.98") == 0.98
+    assert parse_weightage("0.98%") == 0.98
+    assert parse_weightage("1.25") == 1.25
+    assert parse_weightage("98.00") == 98.0
 
 
 def test_event_days_remaining_uses_explicit_today():
@@ -134,4 +184,3 @@ def test_join_does_not_glue_hdfc_to_hdfcbank():
     events = [_e("1", "HDFC", "Housing Development Finance Corporation", "AGM", "2026-09-01")]
     rows = build_index_event_dataset(constituents, events, "NIFTY")
     assert rows == []
-

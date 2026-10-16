@@ -104,6 +104,7 @@ examples, never a member's private alert history.
 | GET | `/public/landing-plan-screenshots/{plan}` | Image payloads for one plan, fetched only when its landing-page details are opened |
 | GET | `/public/landing-plan-preview/{plan}` | Selected entitled features, copy, and sanitized saved data snapshot for one plan; fetched only when its details open |
 | POST | `/admin/platform/landing-plan-preview` | Admin-only explicit capture write; rejects private member data and snapshots larger than 3 MB |
+| POST | `/admin/upload/events/refresh` | Admin-only: fetch, validate, and replace the NSE event calendar from its three-month CSV export |
 | GET | `/auth/google/login-url` | Google OAuth URL; browser validates one-time state before exchange |
 | POST | `/auth/google/exchange` | Verified Google identity → durable member session |
 | POST | `/auth/local-test-login` | Local development only; configured test members, loopback requests only |
@@ -225,8 +226,9 @@ turns it back on.
 | POST | `/admin/upload/events` | Event calendar upload (full replace on success) |
 | POST | `/admin/upload/holidays` | NSE holiday circular (year overlay on success) |
 | GET | `/holidays` | Uploaded holiday rows (`source` upload or builtin) |
-| GET | `/upload/meta` | Last successful upload stamp per category (Nifty / Bank / Sensex / events / holidays) |
-| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps) |
+| POST | `/admin/upload/reuse/{upload_type}` | Admin confirms that one existing data category remains current; stored rows are unchanged |
+| GET | `/upload/meta` | Admin-only upload timestamps and freshness advisories (Nifty / Bank / Sensex / events / holidays) |
+| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps); join-coverage diagnostics are Admin-only |
 
 ### Auth
 `/auth/login`, `/auth/remember-login`, `/auth/logout`, `/auth/change-password`, `/auth/guest`, `/auth/state`, `/auth/public-access`, `/auth/guests*`, `/auth/access-requests*`, `/auth/blocked-ips*`, `/auth/access-request/{id}`.
