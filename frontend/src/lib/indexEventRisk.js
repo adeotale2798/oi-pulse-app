@@ -24,7 +24,7 @@ export function impactTone(upcoming) {
 export function eventDisplayName(e, activeIndex) {
   if (!e) return "";
   if (activeIndex === "SENSEX") {
-    return e.company_name || e.constituents || e.symbol || "";
+    return e.constituents || e.company_name || e.symbol || "";
   }
   return e.symbol || e.company_name || "";
 }
@@ -41,4 +41,36 @@ export function weightageBucket(w) {
   if (w >= 3) return "red";
   if (w >= 1) return "orange";
   return "yellow";
+}
+
+export function eventHighlightBucket(event) {
+  return event?.days_remaining <= 7 && weightageBucket(event?.weightage) === "dark-red"
+    ? "dark-red"
+    : "grey";
+}
+
+export function eventContextLabel(event) {
+  const days = event?.days_remaining;
+  const timing = days === 0
+    ? "Today"
+    : days === 1
+      ? "Tomorrow"
+      : `In ${days} days`;
+  const weightLabel = {
+    "dark-red": "Index weight >5%",
+    red: "Index weight 3–5%",
+    orange: "Index weight 1–3%",
+    yellow: "Index weight <1%",
+    grey: "Index weight unavailable",
+  }[weightageBucket(event?.weightage)];
+  return `${timing} · ${weightLabel}`;
+}
+
+export function filterIndexEvents(events, { withinDays = "all", eventType = "all" } = {}) {
+  return (events || []).filter((event) => {
+    const isUpcoming = event.days_remaining >= 0;
+    const matchesWindow = withinDays === "all" || event.days_remaining <= Number(withinDays);
+    const matchesType = eventType === "all" || event.event_type === eventType;
+    return isUpcoming && matchesWindow && matchesType;
+  });
 }

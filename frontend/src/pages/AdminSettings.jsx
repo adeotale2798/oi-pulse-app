@@ -301,12 +301,12 @@ export default function AdminSettings() {
   return (
     <div className="slz slz-light min-h-screen pb-20">
       <header className="sticky top-0 z-30 slz-glass border-b border-slate-200">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-3.5">
-          <div className="flex items-center gap-2">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-y-2 px-3 py-3 sm:flex-nowrap sm:px-5 sm:py-3.5">
+          <div className="flex min-w-0 items-center gap-2">
             <OiPulseLogo className="h-8 w-8" pulse={false} />
-            <span className="text-lg font-bold text-slate-900">Strik<span className="text-emerald-600">Lenz</span> <span className="text-slate-400">/ Admin Settings</span></span>
+            <span className="text-sm font-bold text-slate-900 sm:text-lg">Strik<span className="text-emerald-600">Lenz</span> <span className="text-slate-400">/ Admin Settings</span></span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <Link to="/dashboard" className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Dashboard</Link>
             <button onClick={save} disabled={saving} className="slz-btn-primary inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
@@ -315,7 +315,7 @@ export default function AdminSettings() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 px-5 pt-8">
+      <main className="mx-auto max-w-5xl space-y-6 px-3 pt-4 sm:px-5 sm:pt-8">
         <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
           <div>
             <h2 className="font-bold text-emerald-950">Member accounts</h2>
@@ -325,7 +325,7 @@ export default function AdminSettings() {
             Open subscriptions
           </Link>
         </section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">Public entry connection</h2>
           <p className="mb-3 mt-1 text-xs text-slate-500">Choose how long the main site waits for its access service before showing the retry message. This setting is only editable by Admin.</p>
           <Field
@@ -344,7 +344,7 @@ export default function AdminSettings() {
             />
           </Field>
         </section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-slate-900">Public landing page</h2>
@@ -377,7 +377,7 @@ export default function AdminSettings() {
             />
           </div>
         </section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">Member rollout controls</h2>
           <p className="mb-3 mt-1 text-xs text-slate-500">These controls are separate from Public guest access. Keep rollout off while testing; active members can remain able to sign in when new sign-ups or sales are paused.</p>
           <div className="divide-y divide-slate-100">
@@ -394,7 +394,7 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">Plan features</h2>
           <p className="mb-5 mt-1 text-xs text-slate-500">Configure each tier independently. MCX, poll cadence, tracked instruments, and publisher credentials remain admin-only and are never member entitlements.</p>
           <div className="grid gap-5 lg:grid-cols-3">
@@ -492,7 +492,7 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">Early-access discount</h2>
           <p className="mb-4 mt-1 text-xs text-slate-500">Applied to the first paid billing period only; future renewals use the configured plan price.</p>
           <div className="grid items-end gap-4 sm:grid-cols-[1fr_220px]">
@@ -506,7 +506,7 @@ export default function AdminSettings() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">New-member preference defaults</h2>
           <p className="mb-4 mt-1 text-xs text-slate-500">Copied when an account is created. Later changes here will not overwrite a member’s saved preferences. These settings do not include poll or MCX controls.</p>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -562,7 +562,7 @@ export default function AdminSettings() {
         </section>
 
         {/* Legacy pricing */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <div className="mb-4 flex items-center gap-2"><IndianRupee className="h-5 w-5 text-emerald-600" /><h2 className="text-lg font-bold text-slate-900">Payment provider</h2></div>
           <p className="mb-3 text-xs text-slate-500">Pricing and provider plan IDs are configured with the paid tiers above. Sales stay unavailable to users until credentials, webhook verification, and every enabled paid plan/cadence are ready.</p>
           <div className={`mb-4 rounded-lg border px-3 py-2 text-xs ${cfg.billing_readiness.ready ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`} role="status">
@@ -580,7 +580,7 @@ export default function AdminSettings() {
         </section>
 
         {/* Google */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-600" /><h2 className="text-lg font-bold text-slate-900">Google Sign-In</h2></div>
             <Toggle label="Google Sign-In" checked={cfg.google.enabled} onChange={(v) => set("google.enabled", v)} />
@@ -602,7 +602,7 @@ export default function AdminSettings() {
         </section>
 
         {/* Razorpay */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2"><KeyRound className="h-5 w-5 text-indigo-600" /><h2 className="text-lg font-bold text-slate-900">Razorpay (Premium payments)</h2></div>
             <Toggle checked={cfg.razorpay.enabled} onChange={(v) => set("razorpay.enabled", v)} />
@@ -619,7 +619,7 @@ export default function AdminSettings() {
         </section>
 
         {/* Brokers */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <div className="mb-4 flex items-center gap-2"><PlugZap className="h-5 w-5 text-emerald-600" /><h2 className="text-lg font-bold text-slate-900">Broker integrations</h2></div>
           <p className="mb-4 text-xs text-slate-400">Enable a broker and paste its OAuth credentials. Zerodha stays managed by the existing integration.</p>
           <div className="space-y-2">

@@ -31,6 +31,8 @@ const MENU_WIDTH = 288;
 
 export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open, onOpenChange }) {
   const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
   const anchorRef = useRef(null);
   const panelRef = useRef(null);
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -47,20 +49,26 @@ export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open
     if (!activeIndex) return undefined;
 
     let cancelled = false;
-    const t = window.setTimeout(() => {
-      api
-        .get(`/events/${activeIndex}`, { timeout: 8000 })
-        .then((r) => {
-          if (!cancelled) setEvents(r.data.events || []);
-        })
-        .catch(() => {
-          if (!cancelled) setEvents([]);
-        });
-    }, 8000);
+    setEvents([]);
+    setLoading(true);
+    setUnavailable(false);
+    api
+      .get(`/events/${activeIndex}`, { timeout: 8000 })
+      .then((r) => {
+        if (!cancelled) setEvents(r.data.events || []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEvents([]);
+          setUnavailable(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(t);
     };
   }, [activeIndex]);
 
@@ -87,9 +95,13 @@ export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open
     onOpenChange(!open);
   };
 
-  const emptyCopy = pastOnly
-    ? `Calendar for ${indexLabel} is in the past`
-    : `There are no upcoming events for ${indexLabel}`;
+  const emptyCopy = loading
+    ? "Loading index events…"
+    : unavailable
+      ? "Index events unavailable"
+      : pastOnly
+        ? `Calendar for ${indexLabel} is in the past`
+        : `There are no upcoming events for ${indexLabel}`;
 
   return (
     <div
@@ -188,9 +200,13 @@ export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open
 
           {upcoming.length === 0 ? (
             <div className="px-3 py-3 text-[11px] text-slate-500 dark:text-slate-400">
-              {pastOnly
-                ? "Joined events for this index are all dated before today. Upload a fresh NSE event calendar in Admin."
-                : `No upcoming constituent events for ${indexLabel}.`}
+              {loading
+                ? "Loading constituent events…"
+                : unavailable
+                  ? "Could not load index events. Try again by changing the selected index."
+                  : pastOnly
+                    ? "Joined events for this index are all dated before today. Upload a fresh NSE event calendar in Admin."
+                    : `No upcoming constituent events for ${indexLabel}.`}
             </div>
           ) : (
           <ul className="max-h-72 overflow-auto divide-y divide-slate-100 dark:divide-slate-700">

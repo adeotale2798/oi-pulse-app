@@ -7334,7 +7334,7 @@ async def upload_events(
     file: UploadFile = File(...),
     _admin: bool = Depends(require_admin),
 ):
-    """Admin-only. Uploads a 1-month NSE event calendar (CSV or XLSX)."""
+    """Admin-only manual replacement for the NSE event calendar (CSV or XLSX)."""
     try:
         raw = await file.read()
     except Exception as e:
@@ -7354,6 +7354,27 @@ async def upload_events(
         "rows_saved": res["rows_saved"],
         "filename": file.filename,
         "uploaded_at": res.get("uploaded_at"),
+    }
+
+
+@api_router.post("/admin/upload/events/refresh")
+async def refresh_events_from_nse(_admin: bool = Depends(require_admin)):
+    """Admin-only immediate refresh from NSE's three-month CSV export."""
+    import httpx
+
+    try:
+        result = await ers.refresh_nse_event_calendar(db)
+    except ValueError as e:
+        logger.warning("NSE event calendar CSV validation failed: %s", e)
+        raise HTTPException(502, "NSE event data could not be validated; saved events were kept.")
+    except httpx.HTTPError as e:
+        logger.warning("NSE event calendar download failed: %s", e)
+        raise HTTPException(502, "Could not refresh events from NSE; saved events were kept.") from e
+    return {
+        "ok": True,
+        "rows_saved": result["rows_saved"],
+        "uploaded_at": result["uploaded_at"],
+        "source_filename": "NSE Download: Equity events (Next 3 Months)",
     }
 
 
@@ -7394,13 +7415,28 @@ async def get_holidays():
 
 
 @api_router.get("/upload/meta")
-async def get_upload_meta():
-    """Last successful upload stamp for each Upload category (public read)."""
+async def get_upload_meta(_admin: bool = Depends(require_admin)):
+    """Last-upload stamps and freshness advisories for the Admin Upload UI."""
     return await ers.fetch_upload_meta(db)
 
 
+@api_router.post("/admin/upload/reuse/{upload_type}")
+async def reuse_existing_upload(
+    upload_type: str,
+    _admin: bool = Depends(require_admin),
+):
+    """Admin confirms that one category's existing uploaded data remains current."""
+    key = (upload_type or "").strip().lower().replace("-", "").replace(" ", "")
+    try:
+        return await ers.confirm_existing_upload(db, key)
+    except KeyError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @api_router.get("/events/{index}")
-async def get_index_events(index: str):
+async def get_index_events(index: str, request: Request):
     """
     Return the joined event list for the given index. Only events whose
     company is a current constituent of that index are returned.
@@ -7414,6 +7450,8 @@ async def get_index_events(index: str):
     events_meta = meta.get("events") or {}
     idx_key = {"NIFTY": "nifty50", "BANKNIFTY": "banknifty", "SENSEX": "sensex"}.get(idx_code)
     constituents_meta = meta.get(idx_key) or {} if idx_key else {}
+    # Coverage diagnostics can identify unmatched names, so expose them only to Admin.
+    is_admin = await _is_admin_request(request)
     return {
         "index": idx_code,
         "count": len(events),
@@ -7422,8 +7460,7 @@ async def get_index_events(index: str):
         "events_source_filename": events_meta.get("source_filename"),
         "constituents_uploaded_at": constituents_meta.get("uploaded_at"),
         "constituents_source_filename": constituents_meta.get("source_filename"),
-        "upload_meta": meta,
-        "join": coverage,
+        "join": coverage if is_admin else None,
     }
 
 
@@ -9849,6 +9886,7 @@ market_intel_task = None
 market_intel_stop = None
 adr_task = None
 adr_stop = None
+event_calendar_task = None
 
 @app.on_event("startup")
 async def _startup():
@@ -10013,9 +10051,22 @@ async def _seed_last_snapshots():
         logger.warning(f"last_snapshot seed skipped: {e}")
 
 
+async def _event_calendar_refresh_loop():
+    """Check daily; the service refreshes only after a month or missing data."""
+    while True:
+        try:
+            result = await ers.refresh_nse_event_calendar_if_due(db)
+            if result.get("refreshed"):
+                logger.info("NSE event calendar refreshed from the three-month Equity CSV export")
+        except Exception as e:
+            # Keep serving the last saved calendar and retry on the next daily check.
+            logger.warning("NSE event calendar refresh failed; keeping saved events: %s", e)
+        await asyncio.sleep(24 * 60 * 60)
+
+
 async def _boot_rest():
     global straddle_sampler_task, poll_watchdog_task, journal_eod_task, member_alert_cleanup_task
-    global market_intel_task, market_intel_stop, adr_task, adr_stop
+    global market_intel_task, market_intel_stop, adr_task, adr_stop, event_calendar_task
     await _ensure_mongo_indexes()
     try:
         await asyncio.wait_for(tracker.load_credentials(), timeout=20)
@@ -10044,6 +10095,7 @@ async def _boot_rest():
     poll_watchdog_task = asyncio.create_task(_market_day_poll_watchdog())
     journal_eod_task = asyncio.create_task(_journal_eod_lock_loop())
     member_alert_cleanup_task = asyncio.create_task(_member_alert_cleanup_loop())
+    event_calendar_task = asyncio.create_task(_event_calendar_refresh_loop())
     try:
         import market_intel as _mi
         market_intel_stop = asyncio.Event()
@@ -10091,6 +10143,7 @@ async def _shutdown():
     for task_name in (
         "straddle_sampler_task", "poll_watchdog_task", "journal_eod_task",
         "member_alert_cleanup_task", "market_intel_task", "adr_task",
+        "event_calendar_task",
     ):
         if task_name == "market_intel_task" and market_intel_stop:
             market_intel_stop.set()
