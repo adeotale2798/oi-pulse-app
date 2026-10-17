@@ -4,6 +4,7 @@ import OiPulseLogo from "@/components/OiPulseLogo";
 import { ABOUT_EVENT, APP_NAME, APP_VERSION_LABEL } from "@/lib/appVersion";
 import { RELEASE_NOTES } from "@/lib/releaseNotes";
 import { api } from "@/lib/api";
+import { brokerSafeText } from "@/lib/brokerCopy";
 
 export default function AboutAppModal() {
   const [open, setOpen] = useState(false);
@@ -51,14 +52,14 @@ export default function AboutAppModal() {
             {isAdmin ? (
               <p>
                 {APP_NAME} is an options <b>open-interest desk</b>, not a generic charting app.
-                The publisher Kite token polls the chain; Mongo stores every tick; the React desk
+                The publisher's broker session polls the chain; Mongo stores every tick; the React desk
                 turns that into change, buildup, alerts, straddles, and a positions book.
               </p>
             ) : (
               <p>
                 {APP_NAME} is an options <b>open-interest desk</b> for NIFTY, SENSEX, and BANKNIFTY.
                 You see who is adding Calls vs Puts, straddle premium, Index Risk, and (if you connect
-                Zerodha) your own positions — not a generic LTP chart.
+                broker) your own positions — not a generic LTP chart.
               </p>
             )}
           </section>
@@ -78,7 +79,7 @@ export default function AboutAppModal() {
               <ul className="list-disc pl-4 space-y-1">
                 <li>Watch Call vs Put open interest change, not only last price.</li>
                 <li>Open Interest, Strike Table, Straddle, Positions, and Index Risk from the tabs / phone dock.</li>
-                <li>Connect Zerodha on Positions for your own book; the OI charts stay on the house feed.</li>
+                <li>Connect your broker on Positions for your own book; the OI charts stay on the house feed.</li>
               </ul>
             )}
           </section>
@@ -96,7 +97,7 @@ export default function AboutAppModal() {
                   </div>
                   <ul className="mt-1.5 list-disc pl-4 space-y-0.5 text-[13px]">
                     {rel.user.map((line) => (
-                      <li key={line}>{line}</li>
+                      <li key={line}>{brokerSafeText(line)}</li>
                     ))}
                   </ul>
                   {isAdmin && rel.admin?.length ? (
@@ -104,7 +105,7 @@ export default function AboutAppModal() {
                       <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Ops / internals</div>
                       <ul className="list-disc pl-4 space-y-0.5 text-[12px] text-slate-600">
                         {rel.admin.map((line) => (
-                          <li key={line}>{line}</li>
+                          <li key={line}>{brokerSafeText(line)}</li>
                         ))}
                       </ul>
                     </div>

@@ -5,6 +5,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Database, Loader2, RefreshCw, Save } fro
 import "@/styles/landing.css";
 import OiPulseLogo from "@/components/OiPulseLogo";
 import { api } from "@/lib/api";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { LANDING_COPY_FIELDS, normalizeLandingCopy } from "@/lib/landingCopy";
 import { PLAN_FEATURE_DETAILS } from "@/components/landing/planFeatureDetails";
 import PlanWalkthrough from "@/components/landing/PlanWalkthrough";
@@ -656,7 +657,7 @@ export default function AdminLandingPage() {
               <CheckOption
                 key={broker.id}
                 checked={config.broker_ids.includes(broker.id)}
-                label={broker.name}
+                label={brokerSafeText(broker.name)}
                 onChange={(value) => updateList("broker_ids", broker.id, value)}
                 disabled={!config.sections.broker_connect}
               />

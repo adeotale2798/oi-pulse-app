@@ -649,7 +649,7 @@ export default function PositionsAnalyzeModal({
           <div className="text-[12px] font-mono-data text-slate-800">{beLines.length ? beLines.map((b) => `${b.level}${b.pct != null ? ` (${b.pct}%)` : ""}`).join(" · ") : "—"}</div>
         </div>
         <p className="text-[10px] leading-relaxed text-slate-500">
-          Left: same book as Kite, B buy / S sell. Centre: P&amp;L now (blue) vs expiry (green); bars are Call/Put OI already on the desk. Target = what-if spot. Date = time left, not a prediction.
+          Left: same broker book, B buy / S sell. Centre: P&amp;L now (blue) vs expiry (green); bars are Call/Put OI already on the desk. Target = what-if spot. Date = time left, not a prediction.
         </p>
       </div>
     </div>

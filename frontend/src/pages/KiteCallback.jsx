@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { completeUserKiteSession } from "@/lib/api";
 import { friendlyKiteConnectError } from "@/lib/kiteConnectError";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { toast } from "sonner";
 import OiPulseLogo from "@/components/OiPulseLogo";
 import { APP_NAME } from "@/lib/appVersion";
@@ -66,7 +67,7 @@ export default function KiteCallback() {
     <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
       <OiPulseLogo className="h-12 w-12" />
       <div className="text-sm font-semibold text-slate-800">{APP_NAME}</div>
-      <p className="text-[13px] text-slate-600 max-w-sm" data-testid="kite-callback-status">{msg}</p>
+      <p className="text-[13px] text-slate-600 max-w-sm" data-testid="kite-callback-status">{brokerSafeText(msg)}</p>
       {failed && (
         <div className="flex flex-wrap justify-center gap-3">
           <button
