@@ -1109,15 +1109,19 @@
   }
 
   .positions-panel-warning {
-    width: 100%;
-    margin-left: 0;
     justify-content: flex-start;
     gap: 6px;
-    padding-top: 7px;
-    border-top: 1px solid #e2e8f0;
+    flex-wrap: nowrap;
   }
 
-  .positions-panel-warning [data-testid="btn-position-meter"] {
+  .positions-panel-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: stretch;
+    gap: 6px;
+  }
+
+  .positions-panel-actions [data-testid="btn-position-meter"] {
     margin-left: auto;
   }
 

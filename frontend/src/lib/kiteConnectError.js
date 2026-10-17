@@ -1,4 +1,6 @@
-/** Map Kite Connect failures into a desk-readable sentence. */
+import { brokerSafeText } from "./brokerCopy";
+
+/** Map broker connection failures into a desk-readable sentence. */
 
 export function extractRequestToken(raw) {
   const s = String(raw || "").trim();
@@ -27,15 +29,13 @@ export function friendlyKiteConnectError(raw) {
   const low = text.toLowerCase();
   if (low.includes("not enabled for the app")) {
     return (
-      "This Zerodha user is not enabled on the Kite Connect app. " +
-      "In developers.kite.tech open the app and add that user_id (or publish the app). " +
-      "Until then only the app owner can Connect."
+      "This broker account is not enabled for the configured app. " +
+      "Ask the desk administrator to check the account's access."
     );
   }
   if (low.includes("checksum")) {
     return (
-      "API key and API secret do not match (Kite checksum failed). " +
-      "Re-save the secret from developers.kite.tech for this exact API key, then login again."
+      "The API key and secret do not match. Check the saved broker app credentials, then try again."
     );
   }
   if (
@@ -45,8 +45,8 @@ export function friendlyKiteConnectError(raw) {
     || (low.includes("token") && (low.includes("invalid") || low.includes("expired") || low.includes("used")))
   ) {
     return (
-      "This request_token was already used or expired. Open Kite login again and paste the new code immediately — it works only once."
+      "This request token was already used or expired. Start a new broker login and paste the new code immediately — it works only once."
     );
   }
-  return text || "Kite login failed";
+  return brokerSafeText(text) || "Broker login failed";
 }

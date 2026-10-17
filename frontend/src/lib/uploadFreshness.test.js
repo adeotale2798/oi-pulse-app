@@ -2,6 +2,7 @@ import {
   evaluateUploadFreshness,
   isUploadStale,
   uploadAgeDays,
+  uploadFreshnessTimestamp,
   UPLOAD_FRESHNESS,
 } from "./uploadFreshness.js";
 
@@ -25,11 +26,18 @@ assert(isUploadStale("events", "2026-07-26T06:00:00+05:30", now) === false, "eve
 assert(isUploadStale("nifty50", "2026-07-10T06:00:00+05:30", now) === true, "constituents stale at 30");
 assert(isUploadStale("nifty50", "2026-07-11T06:00:00+05:30", now) === false, "constituents fresh at 29");
 assert(isUploadStale("events", null, now) === true, "never uploaded is stale");
+assert(
+  uploadFreshnessTimestamp({
+    uploaded_at: "2026-07-01T00:00:00Z",
+    confirmed_at: "2026-08-08T00:00:00Z",
+  }) === "2026-08-08T00:00:00Z",
+  "confirmation refreshes age without changing upload time",
+);
 
 const rows = evaluateUploadFreshness(
   {
     events: { uploaded_at: "2026-07-20T00:00:00Z" },
-    nifty50: { uploaded_at: "2026-08-01T00:00:00Z" },
+    nifty50: { uploaded_at: "2026-07-01T00:00:00Z", confirmed_at: "2026-08-08T00:00:00Z" },
     banknifty: {},
     sensex: { uploaded_at: "2026-08-08T00:00:00Z" },
   },
@@ -38,5 +46,10 @@ const rows = evaluateUploadFreshness(
 assert(rows.find((r) => r.key === "events")?.stale === true, "eval events");
 assert(rows.find((r) => r.key === "banknifty")?.never === true, "eval never");
 assert(rows.filter((r) => r.stale).length >= 2, "multiple stale");
+assert(rows.find((r) => r.key === "nifty50")?.stale === false, "confirmation keeps existing file fresh");
+assert(
+  rows.find((r) => r.key === "nifty50")?.originalUploadedAt === "2026-07-01T00:00:00Z",
+  "retain original upload timestamp",
+);
 
 console.log("uploadFreshness tests ok");

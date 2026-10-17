@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { loadBookSlot, saveBookSlot } from "@/lib/positionsBookLayout";
 import { api } from "@/lib/api";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { istMinutesOfDay, getPositionsCatchupMinute, getMarketCloseHm, getMarketOpenMinute } from "@/lib/marketTimes";
 import {
   todayIST,
@@ -536,9 +537,8 @@ function AtmDistanceCell({ row }) {
   );
 }
 
-function brokerMessage(message, isMember) {
-  const text = String(message || "");
-  return isMember ? text.replace(/\b(?:zerodha|kite)\b/gi, "broker") : text;
+function brokerMessage(message) {
+  return brokerSafeText(message);
 }
 
 export default function PositionsPanel({
@@ -769,7 +769,7 @@ export default function PositionsPanel({
       setGuestKiteId(data?.user_kite?.kite_user_id || null);
       setGuestKiteStatus(data?.user_kite || (isMember ? memberBrokerStatus : null));
       setPositions([]);
-      setError(data.error || "Connect your broker credentials");
+      setError(brokerMessage(data.error || "Connect your broker credentials"));
       setErrorHard(false);
       setLastRefresh(new Date().toISOString());
       hasLiveRef.current = false;
@@ -792,7 +792,7 @@ export default function PositionsPanel({
       );
     const maintenance =
       data.maintenance === true
-      || /zerodha maintenance|under maintenance|scheduled maintenance/i.test(String(data.error || ""));
+      || /broker maintenance|zerodha maintenance|under maintenance|scheduled maintenance/i.test(String(data.error || ""));
     // Keep last good book on transient broker blips — do not wipe the table.
     if (next.length > 0 || !data.error || hard) {
       setPositions(next);
@@ -809,11 +809,11 @@ export default function PositionsPanel({
       if (data.spot && typeof data.spot === "object") setSpotByIndex(data.spot);
       if (data.oi && typeof data.oi === "object") setOiByIndex(data.oi);
     }
-    if (data.maintenance || /zerodha maintenance|under maintenance|scheduled maintenance/i.test(String(data.error || ""))) {
-      setError(data.error || "Broker maintenance");
+    if (data.maintenance || /broker maintenance|zerodha maintenance|under maintenance|scheduled maintenance/i.test(String(data.error || ""))) {
+      setError(brokerMessage(data.error || "Broker maintenance"));
       setErrorHard(false);
     } else if (data.error) {
-      setError(data.error);
+      setError(brokerMessage(data.error));
       setErrorHard(hard && !maintenance);
     } else {
       setError(null);
@@ -1468,7 +1468,7 @@ export default function PositionsPanel({
               : guestKiteStatus?.credentials_configured
                 ? "Today's broker request token is needed"
                 : "Set up your broker account"
-            : "Connect your Zerodha"}
+            : "Connect your broker"}
         </div>
         <div className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
           {isMember
@@ -1495,7 +1495,7 @@ export default function PositionsPanel({
               ? guestKiteStatus?.credentials_configured
                 ? "Refresh today's broker session"
                 : "Add broker credentials"
-              : "Connect Zerodha"}
+              : "Connect broker"}
           </Button>
         )}
         {isMember && typeof onOpenMemberJournal === "function" && (
@@ -1582,8 +1582,8 @@ export default function PositionsPanel({
               )}
             </div>
           </div>
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-            <div className="positions-panel-warning inline-flex h-8 shrink-0 flex-wrap items-center gap-1 rounded-sm border border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-600" data-testid="positions-warn-at">
+          <div className="positions-panel-actions ml-auto flex min-w-0 max-w-full items-center justify-end gap-2">
+            <div className="positions-panel-warning inline-flex h-8 min-w-0 shrink items-center gap-1 whitespace-nowrap rounded-sm border border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-600" data-testid="positions-warn-at">
               <label title="How early to warn when market nears a sold strike">Warn @</label>
               <input
                 type="number"
@@ -1683,17 +1683,17 @@ export default function PositionsPanel({
                 </div>
               </div>
               {brokerage?.error ? (
-                <div className="px-3 py-3 text-[11px] text-rose-700">{brokerMessage(brokerage.error, isMember)}</div>
+                <div className="px-3 py-3 text-[11px] text-rose-700">{brokerMessage(brokerage.error)}</div>
               ) : (
                 <div className="px-3 py-2 space-y-1.5">
                   {brokerage?.warning ? (
                     <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-sm px-2 py-1">
-                      {brokerMessage(brokerage.warning, isMember)}
+                      {brokerMessage(brokerage.warning)}
                     </div>
                   ) : null}
                   {brokerage?.note && !(brokerage?.charges_total > 0) ? (
                     <div className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-sm px-2 py-1.5">
-                      {brokerMessage(brokerage.note, isMember)}
+                      {brokerMessage(brokerage.note)}
                       {brokerage?.book?.trades_fetched != null ? (
                         <span className="block mt-0.5 font-mono-data text-slate-400">
                           trades {brokerage.book.trades_fetched} · orders {brokerage.book.orders_fetched ?? "—"}
@@ -1793,7 +1793,7 @@ export default function PositionsPanel({
               ? guestKiteStatus?.connected && guestKiteId
                 ? `Connected broker account ${guestKiteId} · manage saved credentials`
                 : "Connect your broker account for today's Positions."
-              : "Your book uses your Zerodha login. OI charts still use the publisher feed."}
+              : "Your book uses your broker login. OI charts still use the publisher feed."}
           >
             <PlugZap className="w-3.5 h-3.5 mr-1" />
             {isMember
@@ -1802,7 +1802,7 @@ export default function PositionsPanel({
                 : guestKiteStatus?.credentials_configured
                   ? "Refresh broker session"
                   : "Connect to broker"
-              : (guestKiteId ? "Reconnect Zerodha" : "Connect Zerodha")}
+              : (guestKiteId ? "Reconnect broker" : "Connect broker")}
           </Button>
           )}
           {isAdmin && (() => {
@@ -1918,10 +1918,10 @@ export default function PositionsPanel({
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1 min-w-0">
             {errorHard
-              ? error
-              : /zerodha maintenance|under maintenance/i.test(String(error || ""))
-                ? error
-                : `Temporary broker hiccup — keeping last book. ${error}`}
+              ? brokerMessage(error)
+              : /broker maintenance|zerodha maintenance|under maintenance/i.test(String(error || ""))
+                ? brokerMessage(error)
+                : `Temporary broker hiccup — keeping last book. ${brokerMessage(error)}`}
           </span>
           {errorHard && typeof onOpenKite === "function" && (
             <Button

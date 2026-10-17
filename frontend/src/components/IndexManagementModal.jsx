@@ -62,7 +62,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
       setResults(data.results || []);
       if (data.synced_at) setSyncedAt(data.synced_at);
     } catch (e) {
-      toast.error(apiDetail(e, "Search failed — is Kite connected?"));
+      toast.error(apiDetail(e, "Search failed — is the broker connected?"));
     } finally {
       setSearching(false);
     }
@@ -72,7 +72,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
     setBusy(true);
     try {
       const { data } = await api.post("/admin/indices/sync", null, { timeout: INDEX_ADMIN_TIMEOUT_MS });
-      toast.success(`Synced ${data.count || 0} underlyings from Kite`);
+      toast.success(`Synced ${data.count || 0} underlyings from the broker`);
       await loadList();
       if (q) await search();
     } catch (e) {
@@ -152,7 +152,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
             <AdminDialogNavigation />
           </DialogTitle>
           <DialogDescription className="text-[11px] text-slate-500">
-            Discover Kite F&amp;O names, then Enable or Disable. NIFTY / SENSEX / BANKNIFTY stay on the desk.
+            Discover broker F&amp;O instruments, then Enable or Disable. NIFTY / SENSEX / BANKNIFTY stay on the desk.
             {mcxOn
               ? " MCX on: Enable Crude/Gold/Silver/NG to poll that name only."
               : " MCX off: no commodity OI, quotes, or chips."}
@@ -188,7 +188,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
           <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={search} disabled={searching}>
             Search
           </Button>
-          <Button size="sm" variant="outline" className="h-8" onClick={sync} disabled={busy} title="Refresh Kite dump">
+          <Button size="sm" variant="outline" className="h-8" onClick={sync} disabled={busy} title="Refresh broker instruments">
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
         </div>
@@ -233,7 +233,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
               <div className="space-y-2">
                 {mcxOn ? (
                   <>
-                <p className="text-[12px] text-slate-400">Search Kite names, or Enable an MCX major:</p>
+                <p className="text-[12px] text-slate-400">Search broker instruments, or Enable an MCX major:</p>
                 <div className="flex flex-wrap gap-1.5">
                   {MCX_MAJORS.map((m) => (
                     <button
@@ -250,7 +250,7 @@ export default function IndexManagementModal({ open, onOpenChange, onChanged }) 
                 </div>
                   </>
                 ) : (
-                  <p className="text-[12px] text-slate-400">Search a Kite F&amp;O name. Turn MCX on above to add Gold / Crude / Silver / NG.</p>
+                  <p className="text-[12px] text-slate-400">Search a broker F&amp;O instrument. Turn MCX on above to add Gold / Crude / Silver / NG.</p>
                 )}
               </div>
             ) : (

@@ -251,10 +251,10 @@ export default function AdminSubscriptions() {
                     </button>
                     <p className="mt-1 text-xs text-slate-500">
                       {member.linked_kite_user_id
-                        ? `Locked Zerodha identity: ${member.linked_kite_user_id}${kite?.valid_until ? ` · token valid to ${formatDate(kite.valid_until)}` : ""}`
+                        ? `Locked broker account: ${member.linked_kite_user_id}${kite?.valid_until ? ` · token valid to ${formatDate(kite.valid_until)}` : ""}`
                         : kite?.kite_user_id
-                          ? `Connected Kite account: ${kite.kite_user_id}${kite.valid_until ? ` · token valid to ${formatDate(kite.valid_until)}` : ""}`
-                        : "No personal Kite account linked"}
+                          ? `Connected broker account: ${kite.kite_user_id}${kite.valid_until ? ` · token valid to ${formatDate(kite.valid_until)}` : ""}`
+                        : "No personal broker account linked"}
                     </p>
                     {member.subscription?.status && (
                       <p className="mt-1 text-xs text-slate-500">

@@ -151,6 +151,7 @@ async def save_holidays(db, rows: List[Dict[str, Any]], source_filename: str = "
         {"_id": META_ID},
         {"$set": {
             "uploaded_at": uploaded_at,
+            "confirmed_at": uploaded_at,
             "source_filename": source_filename,
             "row_count": len(rows),
         }},

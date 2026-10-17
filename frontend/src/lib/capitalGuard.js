@@ -46,7 +46,7 @@ export function classifyDayCapital({ bookedPct, leftover, wallet } = {}) {
       level,
       crumbs,
       headline: crumbs && !(Number.isFinite(pct) && pct <= DAY_LOSS.stopAdds)
-        ? "Kite leftover is margin crumbs, not capital. Stop new shorts."
+        ? "Broker leftover is margin crumbs, not capital. Stop new shorts."
         : `Day stop (${pctLabel}). No new shorts. Only reduce or flatten.`,
       doLine: crumbs
         ? "Capital: leftover margin is tiny vs wallet — treat the day as done for new risk. Reduce if a short is too close."

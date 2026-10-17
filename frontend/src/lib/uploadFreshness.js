@@ -11,7 +11,7 @@ export const UPLOAD_FRESHNESS = {
     shortLabel: "NSE events",
     staleAfterDays: 15,
     advice:
-      "Refresh the 1-month NSE event calendar about every 15 days so Index Risk does not miss mid-month results / board meetings.",
+      "Fetch the latest three-month NSE calendar or upload its CSV manually. Reusing this file does not extend its event dates.",
   },
   holidays: {
     key: "holidays",
@@ -19,28 +19,28 @@ export const UPLOAD_FRESHNESS = {
     shortLabel: "NSE holidays",
     staleAfterDays: 365,
     advice:
-      "Upload next year’s NSE trading-holiday circular when NSE publishes it. Years in the file replace that year’s built-in dates.",
+      "Upload the latest NSE trading-holiday circular when it is published, or confirm the existing calendar if it remains current.",
   },
   nifty50: {
     key: "nifty50",
     label: "Nifty 50 constituents",
     shortLabel: "Nifty 50",
     staleAfterDays: 30,
-    advice: "Re-upload Nifty 50 constituents about every 30 days after index reconstitution / weightage updates.",
+    advice: "If the current file is still valid, confirm it in Admin → Upload to keep using it; otherwise upload the latest constituents.",
   },
   banknifty: {
     key: "banknifty",
     label: "Bank Nifty constituents",
     shortLabel: "Bank Nifty",
     staleAfterDays: 30,
-    advice: "Re-upload Bank Nifty constituents about every 30 days after index reconstitution / weightage updates.",
+    advice: "If the current file is still valid, confirm it in Admin → Upload to keep using it; otherwise upload the latest constituents.",
   },
   sensex: {
     key: "sensex",
     label: "Sensex constituents",
     shortLabel: "Sensex",
     staleAfterDays: 30,
-    advice: "Re-upload Sensex constituents about every 30 days after index reconstitution / weightage updates.",
+    advice: "If the current file is still valid, confirm it in Admin → Upload to keep using it; otherwise upload the latest constituents.",
   },
 };
 
@@ -59,6 +59,10 @@ export function uploadAgeDays(uploadedAt, now = new Date()) {
   }
 }
 
+export function uploadFreshnessTimestamp(meta) {
+  return meta?.confirmed_at || meta?.uploaded_at || null;
+}
+
 export function isUploadStale(key, uploadedAt, now = new Date()) {
   const rule = UPLOAD_FRESHNESS[key];
   if (!rule) return false;
@@ -74,7 +78,7 @@ export function evaluateUploadFreshness(meta, now = new Date()) {
   return UPLOAD_ORDER.map((key) => {
     const rule = UPLOAD_FRESHNESS[key];
     const row = meta?.[key] || {};
-    const uploadedAt = row.uploaded_at || null;
+    const uploadedAt = uploadFreshnessTimestamp(row);
     const ageDays = uploadAgeDays(uploadedAt, now);
     const never = !uploadedAt;
     const stale = never || (ageDays != null && ageDays >= rule.staleAfterDays);
@@ -85,6 +89,8 @@ export function evaluateUploadFreshness(meta, now = new Date()) {
       staleAfterDays: rule.staleAfterDays,
       advice: rule.advice,
       uploadedAt,
+      originalUploadedAt: row.uploaded_at || null,
+      confirmedAt: row.confirmed_at || null,
       sourceFilename: row.source_filename || null,
       ageDays,
       never,

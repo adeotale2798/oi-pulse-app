@@ -3,10 +3,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import AdminDialogNavigation from "@/components/AdminDialogNavigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { UploadCloud, AlertTriangle, CheckCircle2, FileText, ExternalLink } from "lucide-react";
+import { UploadCloud, AlertTriangle, CheckCircle2, FileText, ExternalLink, RefreshCw } from "lucide-react";
 import { API, api } from "@/lib/api";
 import { toast } from "sonner";
-import { isUploadStale, formatUploadAge, uploadAgeDays } from "@/lib/uploadFreshness";
+import {
+  isUploadStale,
+  formatUploadAge,
+  uploadAgeDays,
+  uploadFreshnessTimestamp,
+} from "@/lib/uploadFreshness";
 
 const UPLOAD_TYPES = [
   {
@@ -35,7 +40,7 @@ const UPLOAD_TYPES = [
   },
   {
     value: "events",
-    label: "1 Month NSE Event Calendar",
+    label: "3 Month NSE Event Calendar",
     endpoint: "/admin/upload/events",
     sourceUrl: "https://www.nseindia.com/companies-listing/corporate-filings-event-calendar",
     sourceTitle: "NSE Event Calendar — download CSV/XLSX",
@@ -69,6 +74,25 @@ function formatLastUploaded(iso) {
   }
 }
 
+function formatLastUpdated(iso) {
+  if (!iso) return "Not updated yet";
+  try {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "Not updated yet";
+    return date.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }) + " IST";
+  } catch {
+    return "Not updated yet";
+  }
+}
+
 /**
  * UploadModal — admin-only. Upload constituents or event calendar.
  */
@@ -80,9 +104,12 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
   const [errors, setErrors] = useState([]);
   const [success, setSuccess] = useState(null);
   const [uploadMeta, setUploadMeta] = useState(null);
+  const [reusing, setReusing] = useState(false);
+  const [refreshingEvents, setRefreshingEvents] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
 
   const reset = () => {
-    setFile(null); setBusy(false); setProgress(0); setErrors([]); setSuccess(null);
+    setFile(null); setBusy(false); setProgress(0); setErrors([]); setSuccess(null); setRefreshError("");
   };
 
   useEffect(() => {
@@ -103,26 +130,87 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
 
   const handleChange = (v) => {
     setUploadType(v);
-    setErrors([]); setSuccess(null);
+    setErrors([]); setSuccess(null); setRefreshError("");
   };
 
   const handleFile = (e) => {
     const f = e.target.files?.[0];
     setFile(f || null);
-    setErrors([]); setSuccess(null);
+    setErrors([]); setSuccess(null); setRefreshError("");
   };
 
   const selected = UPLOAD_TYPES.find((t) => t.value === uploadType);
   const typeMeta = uploadMeta?.[uploadType] || {};
   const lastDate = formatLastUploaded(typeMeta.uploaded_at);
-  const age = uploadAgeDays(typeMeta.uploaded_at);
-  const stale = isUploadStale(uploadType, typeMeta.uploaded_at);
+  const freshnessAt = uploadFreshnessTimestamp(typeMeta);
+  const confirmedDate = typeMeta.confirmed_at !== typeMeta.uploaded_at
+    ? formatLastUploaded(typeMeta.confirmed_at)
+    : null;
+  const age = uploadAgeDays(freshnessAt);
+  const stale = isUploadStale(uploadType, freshnessAt);
+
+  const reuseExisting = async () => {
+    setReusing(true);
+    try {
+      const { data } = await api.post(`/admin/upload/reuse/${uploadType}`);
+      setUploadMeta((current) => ({
+        ...current,
+        [uploadType]: {
+          ...current?.[uploadType],
+          confirmed_at: data.confirmed_at,
+          row_count: data.row_count,
+        },
+      }));
+      toast.success(`${selected.label}: existing data confirmed; no rows changed.`);
+      if (typeof onUploaded === "function") onUploaded(uploadType, data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Could not reuse existing data.");
+    } finally {
+      setReusing(false);
+    }
+  };
+
+  const refreshEventsFromNse = async () => {
+    setRefreshingEvents(true);
+    setErrors([]);
+    setSuccess(null);
+    setRefreshError("");
+    try {
+      const { data } = await api.post("/admin/upload/events/refresh");
+      const uploadedAt = data.uploaded_at || new Date().toISOString();
+      const sourceFilename = data.source_filename || "NSE Download: Equity events (Next 3 Months)";
+      setSuccess({
+        label: selected.label,
+        rows: data.rows_saved,
+        filename: sourceFilename,
+        uploadedAt,
+      });
+      setUploadMeta((current) => ({
+        ...current,
+        events: {
+          ...current?.events,
+          uploaded_at: uploadedAt,
+          confirmed_at: uploadedAt,
+          row_count: data.rows_saved,
+          source_filename: sourceFilename,
+        },
+      }));
+      toast.success(`${selected.label} updated from NSE — ${data.rows_saved} events saved.`);
+      if (typeof onUploaded === "function") onUploaded("events", data);
+    } catch (error) {
+      const message = error?.response?.data?.detail || error?.message || "Could not fetch events from NSE.";
+      setRefreshError(message);
+      toast.error(message);
+    } finally {
+      setRefreshingEvents(false);
+    }
+  };
 
   const submit = async () => {
     if (!file) { toast.error("Please select a CSV or XLSX file first."); return; }
     const meta = selected;
     if (!meta) return;
-    setBusy(true); setProgress(0); setErrors([]); setSuccess(null);
+    setBusy(true); setProgress(0); setErrors([]); setSuccess(null); setRefreshError("");
 
     const fd = new FormData();
     fd.append("file", file);
@@ -157,12 +245,26 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
         setErrors(result.errors);
         toast.error(`Upload failed: ${result.errors.length} validation error(s)`);
       } else if (result?.ok) {
+        const uploadedAt = result.uploaded_at || new Date().toISOString();
+        const sourceFilename = result.filename || file.name;
         setSuccess({
           label: meta.label,
           rows: result.rows_saved,
-          filename: result.filename || file.name,
-          uploadedAt: result.uploaded_at || new Date().toISOString(),
+          filename: sourceFilename,
+          uploadedAt,
         });
+        if (uploadType === "events") {
+          setUploadMeta((current) => ({
+            ...current,
+            events: {
+              ...current?.events,
+              uploaded_at: uploadedAt,
+              confirmed_at: uploadedAt,
+              row_count: result.rows_saved,
+              source_filename: sourceFilename,
+            },
+          }));
+        }
         toast.success(`${meta.label} uploaded — ${result.rows_saved} rows saved.`);
         if (typeof onUploaded === "function") onUploaded(uploadType, result);
       } else {
@@ -209,7 +311,7 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
                 }`}
                 title={
                   typeMeta.source_filename
-                    ? `${typeMeta.source_filename}${age != null ? ` · ${formatUploadAge(age, false)}` : ""}`
+                    ? `${typeMeta.source_filename}${age != null ? ` · ${formatUploadAge(age, !freshnessAt)}` : ""}`
                     : undefined
                 }
               >
@@ -222,13 +324,30 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
               data-testid="upload-type"
               value={uploadType}
               onChange={(e) => handleChange(e.target.value)}
-              disabled={busy}
+              disabled={busy || reusing || refreshingEvents}
               className="mt-1 w-full text-sm border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md px-2 py-2"
             >
               {UPLOAD_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+            {confirmedDate && (
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Existing data confirmed on {confirmedDate}; original upload {lastDate || "date unavailable"}.
+              </p>
+            )}
+            {stale && typeMeta.row_count > 0 && (
+              <Button
+                type="button"
+                data-testid="upload-reuse-current"
+                variant="outline"
+                className="mt-2 w-full rounded-sm"
+                onClick={reuseExisting}
+                disabled={busy || reusing || refreshingEvents}
+              >
+                {reusing ? "Confirming…" : "Reuse current data"}
+              </Button>
+            )}
           </div>
 
           {selected?.sourceUrl && (
@@ -254,6 +373,48 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
             </a>
           )}
 
+          {uploadType === "events" && (
+            <div className="space-y-2">
+              <div
+                data-testid="nse-event-refresh-status"
+                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300"
+              >
+                <div className="font-semibold text-slate-700 dark:text-slate-200">
+                  Last successful calendar update: {formatLastUpdated(typeMeta.uploaded_at)}
+                </div>
+                {typeMeta.row_count != null && (
+                  <div>{typeMeta.row_count} event rows · source: {typeMeta.source_filename || "manual upload"}</div>
+                )}
+              </div>
+              <Button
+                type="button"
+                data-testid="upload-refresh-events"
+                variant="outline"
+                className="w-full justify-center"
+                onClick={refreshEventsFromNse}
+                disabled={busy || reusing || refreshingEvents}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshingEvents ? "animate-spin" : ""}`} />
+                {refreshingEvents ? "Fetching latest events from NSE…" : "Fetch latest events from NSE"}
+              </Button>
+              {refreshError && (
+                <div
+                  role="alert"
+                  data-testid="nse-event-refresh-error"
+                  className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+                >
+                  <span className="font-semibold">NSE fetch failed.</span> The saved event calendar was not changed. Download the CSV above and upload it manually below.
+                  <span className="block mt-0.5">{refreshError}</span>
+                </div>
+              )}
+              {!refreshError && (
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                  If NSE is unavailable, download its CSV above and upload it manually below.
+                </p>
+              )}
+            </div>
+          )}
+
           {selected?.formatHint && (
             <pre
               data-testid="upload-format-hint"
@@ -265,14 +426,14 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
 
           <div>
             <Label className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              File
+              {uploadType === "events" ? "Manual file upload" : "File"}
             </Label>
             <input
               data-testid="upload-file"
               type="file"
               accept=".csv,.xlsx,.xls"
               onChange={handleFile}
-              disabled={busy}
+              disabled={busy || reusing || refreshingEvents}
               className="mt-1 block w-full text-xs text-slate-600 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-slate-100 file:text-slate-700 dark:file:bg-slate-700 dark:file:text-slate-100 hover:file:bg-slate-200"
             />
             {file && (
@@ -332,7 +493,7 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
             variant="outline"
             className="rounded-sm"
             onClick={() => onOpenChange(false)}
-            disabled={busy}
+            disabled={busy || reusing || refreshingEvents}
           >
             Close
           </Button>
@@ -340,7 +501,7 @@ export default function UploadModal({ open, onOpenChange, onUploaded }) {
             data-testid="upload-save"
             className="rounded-sm bg-emerald-600 hover:bg-emerald-700 text-white"
             onClick={submit}
-            disabled={busy || !file}
+            disabled={busy || reusing || refreshingEvents || !file}
           >
             <UploadCloud className="w-4 h-4 mr-1.5" />
             {busy ? "Uploading…" : "Save"}

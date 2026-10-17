@@ -1,3 +1,5 @@
+import { brokerSafeText } from "./brokerCopy";
+
 export const LANDING_COPY_FIELDS = [
   {
     group: "Navigation",
@@ -56,7 +58,7 @@ export const LANDING_COPY_FIELDS = [
     fields: [
       ["pro_eyebrow", "Eyebrow", "Included with StrikLenz Pro"],
       ["pro_title", "Section headline", "Bring your own positions to the desk."],
-      ["pro_description", "Section description", "Connect your own Zerodha account for a private positions book and per-leg P&L, then keep journal notes and neutral risk context beside the shared market desk. Desk AI brings Market Intel, Global Markets, Indian index movers and event context into one consolidated briefing. All screens below use fictional examples; Basic and Premium never need your broker login."],
+      ["pro_description", "Section description", "Connect your own broker account for a private positions book and per-leg P&L, then keep journal notes and neutral risk context beside the shared market desk. Desk AI brings Market Intel, Global Markets, Indian index movers and event context into one consolidated briefing. All screens below use fictional examples; Basic and Premium never need your broker login."],
       ["pro_oi_label", "Analyze preview label", "Analyze"],
       ["pro_oi_description", "Analyze preview description", "Scenario P&L · payoff shape · spot sensitivity"],
       ["pro_market_intel_label", "Market Intel preview label", "Market Intelligence · sample stories"],
@@ -90,7 +92,7 @@ export const LANDING_COPY_FIELDS = [
       ["plan_pro_description", "Pro plan description", "Everything in Premium, with your own Positions workspace, private journal, a neutral overnight risk-factor summary, and Desk AI market context."],
       ["plan_pro_intro", "Pro plan detail intro", "Add your private Positions workspace and journal, plus a neutral risk-factor summary and Desk AI market context."],
       ["plan_pro_note", "Pro plan detail note", "Only your Pro Positions use your own broker account. Desk AI uses market context only; the shared feed remains publisher-owned, and no demo connects to your account."],
-      ["pricing_footer", "Comparison footnote", "Basic and Premium use the shared publisher market feed. Only Pro connects your own Zerodha account for Positions. MCX access is admin-only. Plan features and availability are controlled by the administrator."],
+      ["pricing_footer", "Comparison footnote", "Basic and Premium use the shared publisher market feed. Only Pro connects your own broker account for Positions. MCX access is admin-only. Plan features and availability are controlled by the administrator."],
     ],
   },
   {
@@ -134,10 +136,10 @@ const LEGACY_COPY_DEFAULTS = {
   plan_normal_intro: "Start with the shared OI desk—no broker login or paid subscription required.",
   plan_normal_note: "These modules use the publisher's shared market feed. Your own broker connection is not required for this plan.",
   plan_premium_description: "Everything in Normal, plus personal OI alerts, Market Intel, and Global Markets.",
-  pricing_footer: "Normal and Premium use the shared publisher market feed. Only Pro connects your own Zerodha account for Positions. MCX access is admin-only. Plan features and availability are controlled by the administrator.",
+  pricing_footer: "Normal and Premium use the shared publisher market feed. Only Pro connects your own broker account for Positions. MCX access is admin-only. Plan features and availability are controlled by the administrator.",
   pro_description: [
-    "Connect your own Zerodha account for a private positions book and per-leg P&L, then keep journal notes, booked-day reviews and neutral risk context beside the shared market desk. Desk AI uses shared market evidence only—it does not access, analyze or comment on your positions. All screens below use fictional examples; Normal and Premium never need your broker login.",
-    "Connect your own Zerodha account for a private positions book and per-leg P&L, then keep journal notes and neutral risk context beside the shared market desk. Desk AI brings Market Intel, Global Markets, Indian index movers and event context into one consolidated briefing. All screens below use fictional examples; Normal and Premium never need your broker login.",
+    "Connect your own broker account for a private positions book and per-leg P&L, then keep journal notes, booked-day reviews and neutral risk context beside the shared market desk. Desk AI uses shared market evidence only—it does not access, analyze or comment on your positions. All screens below use fictional examples; Normal and Premium never need your broker login.",
+    "Connect your own broker account for a private positions book and per-leg P&L, then keep journal notes and neutral risk context beside the shared market desk. Desk AI brings Market Intel, Global Markets, Indian index movers and event context into one consolidated briefing. All screens below use fictional examples; Normal and Premium never need your broker login.",
   ],
 };
 
@@ -149,7 +151,7 @@ export function normalizeLandingCopy(raw) {
         ? LEGACY_COPY_DEFAULTS[key]
         : [LEGACY_COPY_DEFAULTS[key]];
       const migratedValue = legacyValues.includes(value) ? fallback : value;
-      return [key, typeof migratedValue === "string" ? migratedValue.slice(0, 800) : fallback];
+      return [key, typeof migratedValue === "string" ? brokerSafeText(migratedValue).slice(0, 800) : fallback];
     }),
   );
 }

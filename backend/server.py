@@ -758,7 +758,7 @@ async def _bind_member_kite_identity(member_id: str, kite_user_id: Optional[str]
         if identity_to_bind != account_id:
             raise HTTPException(
                 403,
-                f"This Google account is already linked to Zerodha account {identity_to_bind}.",
+                f"This Google account is already linked to broker account {identity_to_bind}.",
             )
         return identity_to_bind
     member = await db.members.find_one(
@@ -771,7 +771,7 @@ async def _bind_member_kite_identity(member_id: str, kite_user_id: Optional[str]
             return linked_id
         raise HTTPException(
             403,
-            f"This Google account is already linked to Zerodha account {linked_id}.",
+            f"This Google account is already linked to broker account {linked_id}.",
         )
     raise HTTPException(503, "Could not lock the broker account to this member.")
 
@@ -809,13 +809,13 @@ async def _user_kite_client(guest_sess: Optional[dict]):
     if not key:
         error = (
             "Your broker app credentials are not configured."
-            if member_id else "Publisher Kite app is not configured."
+            if member_id else "Publisher broker app is not configured."
         )
         return None, {**st, "connected": False, "error": error}
     try:
         token = _fernet().decrypt(doc["access_token_enc"].encode()).decode()
     except Exception:
-        return None, {**st, "connected": False, "expired": True, "error": "Stored Kite token could not be read."}
+        return None, {**st, "connected": False, "expired": True, "error": "Stored broker token could not be read."}
     kc = KiteConnect(api_key=key)
     kc.set_access_token(token)
     return kc, st
@@ -852,7 +852,7 @@ def _sanitize_public_error(err: Optional[str]) -> Optional[str]:
         return None
     low = str(err).lower()
     if any(k in low for k in ("token", "api_key", "api key", "secret", "unauthorized", "forbidden", "incorrect", "signature")):
-        return "Kite authentication issue — admin must reconnect"
+        return "Broker authentication issue — admin must reconnect"
     return "Data feed temporarily unavailable"
 
 
@@ -1670,7 +1670,7 @@ async def vault_save(payload: VaultIn, _admin: bool = Depends(require_admin)):
         tracker.mode = "offline"
         tracker.offline_sticky = True
         tracker.last_error = (
-            "API key updated — complete Kite login (request_token) or paste a "
+            "API key updated — complete broker login (request_token) or paste a "
             "fresh access_token to go live."
         )
 
@@ -1750,7 +1750,7 @@ async def clear_vault(_admin: bool = Depends(require_admin)):
         tracker.kite_user_id = None
         tracker.kite_maintenance = None
         tracker.offline_sticky = True
-        tracker.last_error = "Kite signed out — connect again to go live."
+        tracker.last_error = "Broker signed out — connect again to go live."
     return {"ok": True, "mode": "offline"}
 
 
@@ -2139,7 +2139,7 @@ class IndexEnableIn(BaseModel):
 async def _kite_instrument_rows():
     svc = tracker.kite_service if tracker else None
     if not svc:
-        raise HTTPException(503, "Connect Kite to discover instruments")
+        raise HTTPException(503, "Connect your broker to discover instruments")
     try:
         def _rows():
             svc._load_instruments()
@@ -2147,11 +2147,11 @@ async def _kite_instrument_rows():
 
         rows = await asyncio.wait_for(asyncio.to_thread(_rows), timeout=40)
     except Exception as e:
-        raise HTTPException(503, f"Kite instruments unavailable: {e}")
+        raise HTTPException(503, _sanitize_public_error(str(e)) or "Data feed temporarily unavailable")
     if not rows:
         raise HTTPException(
             400,
-            "Kite instrument dump is empty — tap Refresh, wait for the dump, then Enable again",
+            "Broker instrument list is empty — tap Refresh, wait for the data, then Enable again",
         )
     return rows
 
@@ -2814,7 +2814,7 @@ async def get_vrp(index_name: str, days: int = Query(30, ge=5, le=90)):
             "iv": iv_pct,
             "vrp": None,
             "regime": "unknown",
-            "label": "Needs Kite login",
+            "label": "Needs broker login",
             "tone": "slate",
             "series": [],
             "error": "not_in_kite_mode",
@@ -4997,16 +4997,19 @@ def _friendly_kite_connect_error(exc: Exception) -> str:
     raw = str(exc or "")
     low = raw.lower()
     if "not enabled for the app" in low:
-        return (
-            "This Zerodha user is not enabled on the Kite Connect app. "
-            "In developers.kite.tech open the app, add this user_id (or publish the app). "
-            "Until then only the app owner can Connect."
-        )
+        return "This broker account is not enabled for the configured app. Ask the desk administrator to check account access."
     if "token" in low and ("expired" in low or "invalid" in low):
-        return "Kite login expired or was reused. Tap Connect Zerodha and try once more."
+        return "Broker login expired or was reused. Start a new broker login and try once more."
     if "checksum" in low:
-        return "Kite login token was invalid. Tap Connect Zerodha again."
-    return raw or "Kite login failed"
+        return "The broker login token was invalid. Start a new broker login and try again."
+    safe = re.sub(
+        r"https?://(?:developers\.)?kite\.tech\S*|https?://(?:api\.)?kite\.trade\S*|https?://kite\.zerodha\.com\S*|https?://(?:www\.)?zerodha\.com\S*",
+        "broker service",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    safe = re.sub(r"\b(?:zerodha|kite\s*connect|kiteticker|kite)\b", "broker", safe, flags=re.IGNORECASE)
+    return safe or "Broker login failed"
 
 
 # ------------------- Zerodha positions -------------------
@@ -5206,7 +5209,7 @@ async def kite_user_login_url(request: Request, _role: str = Depends(require_des
     else:
         key, secret = await _publisher_api_key_secret()
     if not key or not secret:
-        raise HTTPException(400, "Publisher Kite app is not configured (API key + secret).")
+        raise HTTPException(400, "Publisher broker app is not configured (API key + secret).")
     from kite_callback_origin import kite_spa_origin
     from urllib.parse import urlencode
     redirect_uri = f"{kite_spa_origin(request)}/api/kite/user/callback"
@@ -5221,7 +5224,7 @@ async def kite_user_login_url(request: Request, _role: str = Depends(require_des
 async def kite_user_session(payload: UserKiteSessionIn, request: Request, role: str = Depends(require_desk_user)):
     """Exchange request_token for a per-user access_token. Never writes the publisher OI vault."""
     if role != "guest":
-        raise HTTPException(400, "Admin desk uses Credentials / daily refresh, not guest Kite login.")
+        raise HTTPException(400, "Admin desk uses Credentials / daily refresh, not guest broker login.")
     guest = await _guest_from_request(request)
     if not guest:
         raise HTTPException(401, "Guest session required")
@@ -5239,7 +5242,7 @@ async def kite_user_session(payload: UserKiteSessionIn, request: Request, role: 
     else:
         key, secret = await _publisher_api_key_secret()
     if not key or not secret:
-        raise HTTPException(400, "Publisher Kite app is not configured.")
+        raise HTTPException(400, "Publisher broker app is not configured.")
     try:
         from kiteconnect import KiteConnect
         kc = KiteConnect(api_key=key)
@@ -5271,7 +5274,7 @@ async def kite_user_session(payload: UserKiteSessionIn, request: Request, role: 
 @api_router.post("/kite/user/disconnect")
 async def kite_user_disconnect(request: Request, role: str = Depends(require_desk_user)):
     if role != "guest":
-        raise HTTPException(400, "Admin desk uses Credentials to sign out of Kite.")
+        raise HTTPException(400, "Admin desk uses Credentials to sign out of the broker.")
     guest = await _guest_from_request(request)
     if not guest:
         raise HTTPException(401, "Guest session required")
@@ -5353,9 +5356,9 @@ async def get_positions(
                     )
             else:
                 connect_message = (
-                    "Your Kite login expired around 06:00 IST. Reconnect to load today's book."
+                    "Your broker login expired around 06:00 IST. Reconnect to load today's book."
                     if expired
-                    else "Connect your Zerodha account to load your positions."
+                    else "Connect your broker account to load your positions."
                 )
             return {
                 "mode": "user",
@@ -5377,7 +5380,7 @@ async def get_positions(
                 "mode": getattr(tracker, "mode", None) or "offline",
                 "positions": [],
                 "funds": None,
-                "error": "Kite not connected. Add API key + access token in Credentials.",
+                "error": "Broker not connected. Add the API key and access token in Credentials.",
                 "kite_connected": False,
                 "transient": False,
                 "token_issue": True,
@@ -5389,7 +5392,7 @@ async def get_positions(
                     "mode": tracker.mode,
                     "positions": [],
                     "funds": None,
-                    "error": "Kite is offline. Switch to LIVE (or reconnect) to pull positions.",
+                    "error": "Broker is offline. Switch to LIVE (or reconnect) to pull positions.",
                     "kite_connected": False,
                     "transient": False,
                     "token_issue": False,
@@ -5453,7 +5456,7 @@ async def get_positions(
                     "Today's broker session is stale or was rejected. Add a fresh request token "
                     "to refresh your Positions."
                     if member_book
-                    else "Your Kite login expired or was rejected. Reconnect Zerodha for today's book."
+                    else "Your broker login expired or was rejected. Reconnect your broker for today's book."
                 ),
                 "kite_connected": False,
                 "connect_required": True,
@@ -5475,9 +5478,9 @@ async def get_positions(
         except Exception:
             pass
         maint = tracker.kite_maintenance if isinstance(tracker.kite_maintenance, dict) else None
-        err_out = f"Kite error: {msg}"
+        err_out = f"Broker error: {_friendly_kite_connect_error(Exception(msg))}"
         if maint and maint.get("active") and maint.get("message"):
-            err_out = f"Zerodha maintenance: {maint.get('message')}"
+            err_out = f"Broker service maintenance: {_friendly_kite_connect_error(Exception(maint.get('message')))}"
         if tokenish:
             await _note_token_gap()
         return {
@@ -5879,7 +5882,7 @@ async def get_positions(
             maint = tracker.kite_maintenance if isinstance(tracker.kite_maintenance, dict) else None
             if maint and maint.get("active"):
                 result["maintenance"] = True
-                result["error"] = f"Zerodha maintenance: {maint.get('message') or night.get('message')}"
+                result["error"] = f"Broker service maintenance: {_friendly_kite_connect_error(Exception(maint.get('message') or night.get('message')))}"
                 result["transient"] = True
         except Exception:
             pass
@@ -6904,7 +6907,7 @@ async def get_brokerage_day(request: Request, role: str = Depends(require_desk_u
                 "brokerage": None,
                 "charges_total": None,
                 "order_count": 0,
-                "error": "Connect Zerodha to load charges.",
+                "error": "Connect your broker to load charges.",
                 "connect_required": True,
                 "user_kite": st,
             }
@@ -6915,7 +6918,7 @@ async def get_brokerage_day(request: Request, role: str = Depends(require_desk_u
                 "brokerage": None,
                 "charges_total": None,
                 "order_count": 0,
-                "error": "Kite not connected." if not tracker.kite_service else "Kite is offline.",
+                "error": "Broker not connected." if not tracker.kite_service else "Broker is offline.",
             }
         kite = tracker.kite_service.kite
     else:
@@ -7334,7 +7337,7 @@ async def upload_events(
     file: UploadFile = File(...),
     _admin: bool = Depends(require_admin),
 ):
-    """Admin-only. Uploads a 1-month NSE event calendar (CSV or XLSX)."""
+    """Admin-only manual replacement for the NSE event calendar (CSV or XLSX)."""
     try:
         raw = await file.read()
     except Exception as e:
@@ -7354,6 +7357,27 @@ async def upload_events(
         "rows_saved": res["rows_saved"],
         "filename": file.filename,
         "uploaded_at": res.get("uploaded_at"),
+    }
+
+
+@api_router.post("/admin/upload/events/refresh")
+async def refresh_events_from_nse(_admin: bool = Depends(require_admin)):
+    """Admin-only immediate refresh from NSE's three-month CSV export."""
+    import httpx
+
+    try:
+        result = await ers.refresh_nse_event_calendar(db)
+    except ValueError as e:
+        logger.warning("NSE event calendar CSV validation failed: %s", e)
+        raise HTTPException(502, "NSE event data could not be validated; saved events were kept.")
+    except httpx.HTTPError as e:
+        logger.warning("NSE event calendar download failed: %s", e)
+        raise HTTPException(502, "Could not refresh events from NSE; saved events were kept.") from e
+    return {
+        "ok": True,
+        "rows_saved": result["rows_saved"],
+        "uploaded_at": result["uploaded_at"],
+        "source_filename": "NSE Download: Equity events (Next 3 Months)",
     }
 
 
@@ -7394,13 +7418,28 @@ async def get_holidays():
 
 
 @api_router.get("/upload/meta")
-async def get_upload_meta():
-    """Last successful upload stamp for each Upload category (public read)."""
+async def get_upload_meta(_admin: bool = Depends(require_admin)):
+    """Last-upload stamps and freshness advisories for the Admin Upload UI."""
     return await ers.fetch_upload_meta(db)
 
 
+@api_router.post("/admin/upload/reuse/{upload_type}")
+async def reuse_existing_upload(
+    upload_type: str,
+    _admin: bool = Depends(require_admin),
+):
+    """Admin confirms that one category's existing uploaded data remains current."""
+    key = (upload_type or "").strip().lower().replace("-", "").replace(" ", "")
+    try:
+        return await ers.confirm_existing_upload(db, key)
+    except KeyError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @api_router.get("/events/{index}")
-async def get_index_events(index: str):
+async def get_index_events(index: str, request: Request):
     """
     Return the joined event list for the given index. Only events whose
     company is a current constituent of that index are returned.
@@ -7414,6 +7453,8 @@ async def get_index_events(index: str):
     events_meta = meta.get("events") or {}
     idx_key = {"NIFTY": "nifty50", "BANKNIFTY": "banknifty", "SENSEX": "sensex"}.get(idx_code)
     constituents_meta = meta.get(idx_key) or {} if idx_key else {}
+    # Coverage diagnostics can identify unmatched names, so expose them only to Admin.
+    is_admin = await _is_admin_request(request)
     return {
         "index": idx_code,
         "count": len(events),
@@ -7422,8 +7463,7 @@ async def get_index_events(index: str):
         "events_source_filename": events_meta.get("source_filename"),
         "constituents_uploaded_at": constituents_meta.get("uploaded_at"),
         "constituents_source_filename": constituents_meta.get("source_filename"),
-        "upload_meta": meta,
-        "join": coverage,
+        "join": coverage if is_admin else None,
     }
 
 
@@ -7635,7 +7675,7 @@ PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS = 5
 PUBLIC_ENTRY_AUTH_TIMEOUT_MAX_SECONDS = 60
 
 DEFAULT_BROKERS = [
-    {"id": "zerodha", "name": "Zerodha", "enabled": True, "auth_type": "oauth",
+    {"id": "zerodha", "name": "Broker", "enabled": True, "auth_type": "oauth",
      "capabilities": ["positions", "holdings", "orders", "funds", "pnl", "fno", "oauth"], "note": "Live"},
     {"id": "upstox", "name": "Upstox", "enabled": False, "auth_type": "oauth",
      "capabilities": ["positions", "holdings", "orders", "funds", "pnl", "fno", "oauth"], "note": "Coming soon"},
@@ -9849,6 +9889,7 @@ market_intel_task = None
 market_intel_stop = None
 adr_task = None
 adr_stop = None
+event_calendar_task = None
 
 @app.on_event("startup")
 async def _startup():
@@ -10013,9 +10054,22 @@ async def _seed_last_snapshots():
         logger.warning(f"last_snapshot seed skipped: {e}")
 
 
+async def _event_calendar_refresh_loop():
+    """Check daily; the service refreshes only after a month or missing data."""
+    while True:
+        try:
+            result = await ers.refresh_nse_event_calendar_if_due(db)
+            if result.get("refreshed"):
+                logger.info("NSE event calendar refreshed from the three-month Equity CSV export")
+        except Exception as e:
+            # Keep serving the last saved calendar and retry on the next daily check.
+            logger.warning("NSE event calendar refresh failed; keeping saved events: %s", e)
+        await asyncio.sleep(24 * 60 * 60)
+
+
 async def _boot_rest():
     global straddle_sampler_task, poll_watchdog_task, journal_eod_task, member_alert_cleanup_task
-    global market_intel_task, market_intel_stop, adr_task, adr_stop
+    global market_intel_task, market_intel_stop, adr_task, adr_stop, event_calendar_task
     await _ensure_mongo_indexes()
     try:
         await asyncio.wait_for(tracker.load_credentials(), timeout=20)
@@ -10044,6 +10098,7 @@ async def _boot_rest():
     poll_watchdog_task = asyncio.create_task(_market_day_poll_watchdog())
     journal_eod_task = asyncio.create_task(_journal_eod_lock_loop())
     member_alert_cleanup_task = asyncio.create_task(_member_alert_cleanup_loop())
+    event_calendar_task = asyncio.create_task(_event_calendar_refresh_loop())
     try:
         import market_intel as _mi
         market_intel_stop = asyncio.Event()
@@ -10091,6 +10146,7 @@ async def _shutdown():
     for task_name in (
         "straddle_sampler_task", "poll_watchdog_task", "journal_eod_task",
         "member_alert_cleanup_task", "market_intel_task", "adr_task",
+        "event_calendar_task",
     ):
         if task_name == "market_intel_task" and market_intel_stop:
             market_intel_stop.set()
