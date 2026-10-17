@@ -742,7 +742,7 @@ class CasAutoTrade:
             err,
         )
         with self._lock:
-            kind = "Paper DRY-BUY (no Zerodha fill)" if not live else "Live MARKET BUY"
+            kind = "Paper DRY-BUY (no broker order)" if not live else "Live MARKET BUY"
             bull = float(settings.get("auto_bullish_pts") if settings.get("auto_bullish_pts") is not None else 15)
             bear = float(settings.get("auto_bearish_pts") if settings.get("auto_bearish_pts") is not None else 15)
             recap = (

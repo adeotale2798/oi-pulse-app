@@ -14,10 +14,11 @@ import {
   userKiteStatus,
 } from "@/lib/api";
 import { safeHttpUrl } from "@/lib/safeUrl";
+import { brokerSafeText } from "@/lib/brokerCopy";
 
 function brokerError(error, fallback) {
   const detail = error?.response?.data?.detail;
-  if (typeof detail === "string" && detail && !/\b(?:zerodha|kite)\b/i.test(detail)) return detail;
+  if (typeof detail === "string" && detail) return brokerSafeText(detail);
   if (error?.response?.status === 400) {
     return "The broker did not accept this connection. Check your app credentials and request token, then try again.";
   }
@@ -258,7 +259,7 @@ export default function MemberBrokerConnectModal({ open, onOpenChange, onConnect
         </div>
         {status?.linked_kite_user_id && (
           <p role="status" className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-950">
-            This Google account is permanently linked to Zerodha ID <b>{status.linked_kite_user_id}</b>. Replacing app credentials or daily tokens will not allow a different Zerodha account to connect.
+            This Google account is permanently linked to broker account ID <b>{status.linked_kite_user_id}</b>. Replacing app credentials or daily tokens will not allow a different broker account to connect.
           </p>
         )}
 

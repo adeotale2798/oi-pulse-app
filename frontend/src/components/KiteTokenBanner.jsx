@@ -1,6 +1,7 @@
 import { KeyRound, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isKiteCredentialProblem } from "@/lib/kiteCredentialHealth";
+import { brokerSafeText } from "@/lib/brokerCopy";
 
 /**
  * KiteTokenBanner — visible warning when Kite credentials/token are missing or dead.
@@ -22,7 +23,7 @@ export default function KiteTokenBanner({ status, isAdmin = false, onOpenCreds }
   const detail = !status.has_kite_credentials
     ? "Add API key + access token in Credentials. Access tokens usually expire each morning (~6 AM IST)."
     : status.last_error
-      ? String(status.last_error).slice(0, 160)
+      ? brokerSafeText(status.last_error).slice(0, 160)
       : preOpen
         ? "Fix credentials now so NIFTY / SENSEX are warm at the open."
         : "Reconnect the market feed to resume live snapshots.";

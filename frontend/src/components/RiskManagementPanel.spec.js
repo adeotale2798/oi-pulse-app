@@ -80,11 +80,11 @@ describe("RiskManagementPanel", () => {
     expect(markup).toContain("Need data");
     expect(markup).toContain("Broker quote unavailable");
     expect(markup).toContain("Unavailable");
-    expect(markup).toContain("Kite’s option quote timestamp is not included");
+    expect(markup).toContain("The broker&#x27;s option quote timestamp is not included");
     expect(markup).toContain("Positions data is stale");
     expect(markup).toContain("We can’t estimate the whole book");
     expect(markup).toContain("Guard data unavailable");
-    expect(markup).toContain("Kite available margin");
+    expect(markup).toContain("Broker available margin");
   });
 
   it("labels bought legs as hedges and aligns every expiry package by ascending strike", () => {
@@ -263,7 +263,7 @@ describe("RiskManagementPanel", () => {
         lastRefresh: new Date().toISOString(),
       }),
     );
-    expect(markup).toContain("No open positions in the current Kite book.");
+    expect(markup).toContain("No open positions in the current broker book.");
   });
 
   it("shows unavailable instead of inventing today's P&L or seller decay", () => {

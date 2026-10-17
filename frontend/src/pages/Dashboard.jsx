@@ -74,6 +74,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { fetchOIChange, fetchAlerts, clearAlerts, fetchStatus, fetchVRP, fetchTickers, fetchConfig, invalidateConfigCache, api, completeUserKiteSession, userKiteLoginUrl, userKiteStatus, prefetchStraddleHistory } from "@/lib/api";
 import { friendlyKiteConnectError } from "@/lib/kiteConnectError";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { safeHttpUrl } from "@/lib/safeUrl";
 import MemberBrokerConnectModal from "@/components/MemberBrokerConnectModal";
 import { applyMarketHoursFromStatus, getMarketOpenMinute, getMarketCloseMinute, nseCashSessionLive, isMarketQuiescent, EVENT_WARNING_MINUTE, istMinutesOfDay } from "@/lib/marketTimes";
@@ -765,11 +766,11 @@ export default function Dashboard({ demoMode = false }) {
       const data = await userKiteLoginUrl();
       const href = safeHttpUrl(data?.login_url);
       if (href) window.location.assign(href);
-      else toast.error(authState.is_member ? "Broker login link unavailable" : "Kite login URL unavailable");
+      else toast.error("Broker login link unavailable");
     } catch (e) {
       const detail = e?.response?.data?.detail;
-      const message = detail || (authState.is_member ? "Could not start broker connection" : "Could not start Kite login");
-      toast.error(authState.is_member ? String(message).replace(/\b(?:zerodha|kite)\b/gi, "broker") : message);
+      const message = detail || "Could not start broker connection";
+      toast.error(brokerSafeText(message));
     }
   };
   const openKiteCreds = authState.is_admin ? () => setCredsOpen(true) : startUserKite;
@@ -1142,7 +1143,7 @@ export default function Dashboard({ demoMode = false }) {
       try {
         const data = await completeUserKiteSession(token);
         if (cancelled) return;
-        toast.success(`Zerodha connected${data?.kite_user_id ? ` · ${data.kite_user_id}` : ""}`);
+        toast.success(`Broker connected${data?.kite_user_id ? ` · ${data.kite_user_id}` : ""}`);
         qs.delete("request_token");
         qs.delete("status");
         qs.delete("action");
@@ -1153,7 +1154,7 @@ export default function Dashboard({ demoMode = false }) {
         refreshPositionsBook().catch(() => {});
         await Promise.allSettled([loadStatus(), refreshMemberBrokerStatus()]);
       } catch (e) {
-        if (!cancelled) toast.error(friendlyKiteConnectError(e?.response?.data?.detail || e.message || "Could not complete Kite login"));
+        if (!cancelled) toast.error(friendlyKiteConnectError(e?.response?.data?.detail || e.message || "Could not complete broker login"));
       }
     })();
     return () => { cancelled = true; };

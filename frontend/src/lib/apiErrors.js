@@ -27,11 +27,12 @@ export function apiDetail(e, fallback = "Request failed") {
     return fallback || "Request timed out — tap Refresh and try again";
   }
   const d = e?.response?.data?.detail;
-  if (typeof d === "string" && d.trim()) return d;
+  if (typeof d === "string" && d.trim()) return brokerSafeText(d);
   if (Array.isArray(d)) {
     const bits = d.map((x) => (typeof x === "string" ? x : x?.msg || x?.detail)).filter(Boolean);
-    if (bits.length) return bits.join("; ");
+    if (bits.length) return brokerSafeText(bits.join("; "));
   }
-  if (d && typeof d === "object" && d.msg) return String(d.msg);
-  return e?.message || fallback;
+  if (d && typeof d === "object" && d.msg) return brokerSafeText(d.msg);
+  return brokerSafeText(e?.message || fallback);
 }
+import { brokerSafeText } from "./brokerCopy";

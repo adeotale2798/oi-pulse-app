@@ -1,5 +1,25 @@
 # Changelog
 
+## V20.58 — 2026-10-17
+
+Make the Admin Tech Stack view easier to understand with a plain-language
+architecture overview, a data-flow sketch, and descriptions of each layer.
+
+## V20.57 — 2026-10-17
+
+Add an Admin API Config & Stack dialog with tile navigation between the existing
+API Configuration view and an in-app technology stack overview.
+
+## V20.56 — 2026-10-17
+
+Use provider-neutral broker wording across the user interface, public API
+messages, and stack inventory while preserving the existing broker integration.
+
+## V20.55 — 2026-10-17
+
+Document the verified application stack, dependency versions, integrations,
+runtime requirements, and deployment tooling in `STACK.md`.
+
 ## V20.54 — 2026-10-17
 
 Fix phone layouts for the Positions warning threshold and Admin Broker & Payments

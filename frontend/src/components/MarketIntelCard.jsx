@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, GripVertical } from "lucide-react";
 import { buildSessionBrief, findEvidenceConflicts, firstSentence, formatEvidenceAsOf, formatSessionDate, loadDeskAiTileOrder, nudgeDeskAiTile, parseGuideSections, reorderDeskAiTiles } from "@/lib/deskAiLayout";
 import { filterCashHeavyMovers } from "@/lib/deskFocus";
 import { fmtOiLakh } from "@/lib/deskAiTape";
+import { brokerSafeText } from "@/lib/brokerCopy";
 
 const SCENARIO_LABELS = {
   baseCase: "Base case",
@@ -122,8 +123,8 @@ export default function MarketIntelCard({
   const sessionBrief = buildSessionBrief({ market, extras, outside, oi, journal });
   const evidenceConflicts = findEvidenceConflicts({ extras, outside });
   const quoteHint = outside?.quote_source && outside.quote_source !== "none"
-    ? `prices from ${outside.quote_source}`
-    : "cash quotes wait on Kite — OI tape still live";
+    ? `prices from ${brokerSafeText(outside.quote_source)}`
+    : "cash quotes wait on the broker feed — OI tape still live";
 
   const nodes = useMemo(() => {
     const news = outside?.news || [];
@@ -207,11 +208,11 @@ export default function MarketIntelCard({
           })}
         </ul>
       ) : empty(
-        outside?.briefing
-        || outside?.note
-        || (Number(outside?.heavy_count) > 0
-          ? "Constituents are on file — waiting for live cash quotes (Kite)."
-          : "Upload Nifty 50 / Bank Nifty constituents in Admin → Upload, then wait for a live quote."),
+        brokerSafeText(outside?.briefing
+          || outside?.note
+          || (Number(outside?.heavy_count) > 0
+            ? "Constituents are on file — waiting for live cash quotes (broker feed)."
+            : "Upload Nifty 50 / Bank Nifty constituents in Admin → Upload, then wait for a live quote.")),
       ),
       breadth: breadthRows.length ? (
         <ul className="space-y-1">

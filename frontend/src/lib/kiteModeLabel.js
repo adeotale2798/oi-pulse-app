@@ -1,5 +1,5 @@
 /**
- * Shared kite / market mode badge copy.
+ * Shared broker / market mode badge copy.
  * Prefer inclusive "markets" language — desk tracks NSE (NIFTY/BANK) and BSE (SENSEX).
  */
 export function kiteModeBadge(mode, marketOpen) {
@@ -9,7 +9,7 @@ export function kiteModeBadge(mode, marketOpen) {
       short: "OFFLINE",
       tone: "offline",
       title:
-        "OFFLINE — no Kite credentials. Connect via Kite API to pull live OI.",
+        "OFFLINE — no broker credentials. Connect your broker feed to pull live OI.",
     };
   }
   if (marketOpen) {
@@ -18,7 +18,7 @@ export function kiteModeBadge(mode, marketOpen) {
       short: "LIVE",
       tone: "live",
       title:
-        "MARKETS LIVE — Kite connected and the cash/F&O session is open (NSE + BSE indices). OI polls while the session is open.",
+        "MARKETS LIVE — broker connected and the cash/F&O session is open (NSE + BSE indices). OI polls while the session is open.",
     };
   }
   return {
@@ -26,7 +26,7 @@ export function kiteModeBadge(mode, marketOpen) {
     short: "CLOSED",
     tone: "closed",
     title:
-      "MARKETS CLOSED — Kite is connected, but the cash/F&O session is closed (after hours / weekend / holiday). Board shows the last session snapshot; OI polling pauses until next open. GIFT NIFTY may still print; India VIX follows NSE hours (09:15–15:40 IST).",
+      "MARKETS CLOSED — broker is connected, but the cash/F&O session is closed (after hours / weekend / holiday). Board shows the last session snapshot; OI polling pauses until next open. GIFT NIFTY may still print; India VIX follows NSE hours (09:15–15:40 IST).",
   };
 }
 

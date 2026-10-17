@@ -650,7 +650,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
                   ? "Explore a fictional journal with sample entries, calendar totals, and notes. Walkthrough changes stay in this browser session."
                   : memberMode
                   ? "Your private daily P&L summary is captured from your Positions refresh. Notes and screenshots are saved to your member journal; detailed trade cycles are only retained when enabled by the administrator."
-                  : "Daily booked P&L (full exits and partial closes) is stored from the last Positions auto-refresh and frozen at session close. Brokerage lives in our database — not on Kite."}
+                  : "Daily booked P&L (full exits and partial closes) is stored from the last Positions auto-refresh and frozen at session close. Brokerage lives in our database — not in the broker feed."}
               </span>
               <span className="sm:hidden text-[12px]">
                 {walkthroughMode
@@ -790,7 +790,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
                     {memberMode ? "Not included" : privacy ? "••••" : <Money v={periodStats.charges_total} signed={false} />}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {memberMode ? "Member summaries store booked P&L only" : periodStats.charges_are_all_indices ? "Kite charges are for the whole book, not this index" : "Brokerage + taxes on stored days"}
+                    {memberMode ? "Member summaries store booked P&L only" : periodStats.charges_are_all_indices ? "Broker charges are for the whole book, not this index" : "Brokerage + taxes on stored days"}
                   </div>
                 </div>
                 <div className="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
@@ -824,8 +824,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
               )}
               </>
               )}
-              {/* Hidden for now: Kite withdrawal/deposit feed is not available.
-                  The estimate logic remains available for future use when Kite exposes a proper ledger. */}
+              {/* Hidden for now: withdrawal/deposit feed is not available.
+                  The estimate logic remains available if a broker ledger becomes available. */}
             </div>
           )}
           {tab === "calendar" && (
@@ -1125,12 +1125,12 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
                         </div>
                       ) : null}
                       {w.inferred_withdrawn >= 1000 ? (
-                        <div className="text-[9px] text-amber-800 leading-tight" title="Kite has no withdrawal API. Estimated from wallet change vs prior close (includes overnight MTM).">
+                        <div className="text-[9px] text-amber-800 leading-tight" title="The broker has no withdrawal API. Estimated from wallet change vs prior close (includes overnight MTM).">
                           est. out {privacy ? "••••" : fmtInr(w.inferred_withdrawn, 0)}
                         </div>
                       ) : null}
                       {w.inferred_deposited >= 1000 ? (
-                        <div className="text-[9px] text-sky-800 leading-tight" title="Kite has no deposit API. Estimated from wallet change vs prior close.">
+                        <div className="text-[9px] text-sky-800 leading-tight" title="The broker has no deposit API. Estimated from wallet change vs prior close.">
                           est. in {privacy ? "••••" : fmtInr(w.inferred_deposited, 0)}
                         </div>
                       ) : null}
@@ -1204,7 +1204,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
                 <p className="text-[10px] text-slate-500 leading-snug">
                   {memberMode
                     ? <>Day % = booked P&amp;L ÷ the recorded <b>wallet</b>; charges are not included in member summaries. Weekly/monthly % use the first stored wallet of that week/month.</>
-                    : <>Day % = booked P&amp;L <b>after charges</b> ÷ that morning’s <b>wallet</b> (Kite opening cash + collateral). Not leftover margin, not SPAN on hedges, not leveraged notional. Weekly/monthly % use the first stored wallet of that week/month. Kite Connect does not publish withdrawals — estimated in/out is the gap vs the prior close.</>}
+                    : <>Day % = booked P&amp;L <b>after charges</b> ÷ that morning’s <b>wallet</b> (opening cash + collateral). Not leftover margin, not SPAN on hedges, not leveraged notional. Weekly/monthly % use the first stored wallet of that week/month. The broker does not publish withdrawals — estimated in/out is the gap vs the prior close.</>}
                 </p>
               )}
             </>
@@ -1395,7 +1395,7 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
                     <div className="text-[11px] text-slate-400 mt-0.5">Wallet % appears after the next Positions snapshot today.</div>
                   )}
                   {Math.abs(Number(dayDoc.inferred_cashflow) || 0) >= 1000 ? (
-                    <div className="text-[11px] text-amber-800 mt-0.5" title="Zerodha Kite Connect has no withdrawal/deposit ledger. This is wallet vs prior close (overnight MTM included).">
+                    <div className="text-[11px] text-amber-800 mt-0.5" title="The broker provides no withdrawal/deposit ledger. This is wallet vs prior close (overnight MTM included).">
                       Est. {Number(dayDoc.inferred_cashflow) < 0 ? "withdrawn" : "deposited"}{" "}
                       {privacy ? "••••" : fmtInr(Math.abs(Number(dayDoc.inferred_cashflow)), 0)} vs prior close
                     </div>

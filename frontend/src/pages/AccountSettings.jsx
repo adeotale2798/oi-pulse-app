@@ -309,7 +309,7 @@ export default function AccountSettings() {
                 ? ` Connected account ${brokerCredentials.kite_user_id}.`
                 : " The daily broker session is not currently connected."}
               {brokerCredentials.linked_kite_user_id
-                ? ` This Google account is locked to Zerodha ID ${brokerCredentials.linked_kite_user_id}.`
+                ? ` This Google account is linked to broker account ID ${brokerCredentials.linked_kite_user_id}.`
                 : ""}
               {" "}These credentials remain stored after a plan lapse until you remove them.
             </p>

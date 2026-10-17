@@ -19,7 +19,7 @@ const TYPE_ROWS = [
   { key: "market_open", label: "Market open ping", hint: "One message at 9:00 AM IST" },
   { key: "market_close", label: "Market close ping", hint: "One message at configured market close (default 15:40 IST)" },
   { key: "daily_digest", label: "Session wrap at 3:15 PM IST", hint: "OI recap + next-session holidays/events. Never your positions." },
-  { key: "kite_token", label: "Kite token issue", hint: "8:45 AM check-in if daily token has expired" },
+  { key: "kite_token", label: "Broker session issue", hint: "8:45 AM check-in if the daily session has expired" },
   { key: "tracker_errors", label: "Tracker errors / stops", hint: "Critical — recommended ON" },
 ];
 
