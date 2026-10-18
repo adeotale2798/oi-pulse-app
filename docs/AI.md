@@ -20,7 +20,7 @@ Deterministic code scores:
 
 - **Heavyweight cash** — uploaded Nifty 50 / Bank Nifty / Sensex constituents (Admin → Upload / Impact Risk) quoted via **Kite**, Yahoo if Kite is down. Weight × move = estimated index impact.
 - **Breakouts / VWAP / gaps**, **breadth**, **sector** participation
-- **News** — public RSS (Google News + ET markets), including India-linked international company coverage. A dedicated Google News feed searches visa / IT, steel, chemical, construction, and related company developments. Material headlines naming companies in the uploaded NIFTY / SENSEX constituent list receive stronger India relevance so they are not discarded by the general-market threshold; routine mentions and unrelated global sector news remain filtered.
+- **News** — public RSS (Google News + ET markets), including India-linked international company coverage. A dedicated Google News feed searches visa / IT, steel, chemical, construction, and related company developments. Material headlines naming companies in uploaded NIFTY, BANKNIFTY, or SENSEX constituent lists receive stronger India relevance so they are not discarded by the general-market threshold; routine mentions and unrelated global sector news remain filtered.
 - **Corporate calendar** — `nse_events` joined onto those same constituents
 - **India VIX** when the poller has it
 - **Admin book context** — Admin-only position risk and capital context. This
@@ -66,6 +66,32 @@ multiplier for summary-only evidence. It is a heuristic ranking value, not a sta
 probability or expected index move. These rules cover common market,
 policy/rate, inflation, crude, rupee, FII-flow, geopolitics, growth,
 corporate-result, and bond-yield language.
+
+The separate **daily Index Risk** view connects current Market Intel stories to
+the uploaded NIFTY, BANKNIFTY, and SENSEX constituent lists. A directly named
+company story uses the combined known constituent share for that index:
+`article importance × min(combined known share ÷ 5%, 1)`. If no matched weight
+is known, exposure remains unassessed rather than guessed; when only some
+matched weights are known, the displayed share is explicitly a minimum and
+missing weights are disclosed. India-linked macro, oil, and geopolitical
+catalysts are mapped to all three indices, with a small heuristic exposure
+adjustment for banking-policy language on BANKNIFTY. The summary keeps the
+decision view to risk level, tentative direction, and the leading headline;
+supporting headlines, source names, publication/receipt times, and scoring
+details are available on demand. This score ranks source-backed event exposure
+only; it is not a forecast, probability, projected index return, or trading instruction. Alongside broad Market Intel coverage, the app creates a targeted
+Google News RSS search for the 12 highest-weight uploaded constituents of each
+index, requiring a company name and a material event term to match. It searches
+the last 48 hours to include weekend results; displayed publication dates help
+identify older updates. The daily view separately compares today's NSE calendar
+entries classified as quarterly results with retained direct-company news.
+It labels result-related coverage found, company news without a result headline,
+or no matching story in the current feed. A missing match is not evidence that
+an earnings announcement did not occur; stale or unavailable calendar data is
+also called out. Admin-configured public sources remain available for additional
+coverage. Public RSS is not guaranteed complete or authoritative.
+High-impact story alerts reuse the existing per-user Market Intel popup and
+notification preferences.
 
 The UI shows a green up arrow for likely market-up news, a red down arrow for
 likely market-down news, amber for mixed, and neutral for unclear; the popup

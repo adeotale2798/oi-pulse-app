@@ -630,6 +630,23 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
               {item.event_type ? (
                 <span className="text-[11px] font-bold uppercase tracking-wide">{formatEventTypeLabel(item.event_type)}</span>
               ) : null}
+              {(item.index_impacts || []).map((impact) => (
+                <span
+                  key={impact.index}
+                  className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-bold ${
+                    impact.risk_level === "HIGH"
+                      ? "border-rose-300 bg-rose-50 text-rose-800"
+                      : impact.risk_level === "ELEVATED"
+                        ? "border-orange-300 bg-orange-50 text-orange-800"
+                        : "border-slate-300 bg-slate-50 text-slate-700"
+                  }`}
+                  title={impact.reason}
+                  data-testid={`mi-popup-index-risk-${impact.index}`}
+                >
+                  {impact.index} {impact.risk_level}
+                  {impact.weightage != null ? ` · ${Number(impact.weightage).toFixed(2)}%` : ""}
+                </span>
+              ))}
               <span className="text-[11px] font-semibold text-rose-900">{n} critical today</span>
             </div>
             <div className="text-base font-semibold leading-snug">{item.title}</div>

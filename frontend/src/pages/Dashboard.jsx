@@ -901,8 +901,16 @@ export default function Dashboard({ demoMode = false }) {
   const notifyMarketNews = useCallback((article, additionalCount = 0) => {
     if (demoMode || !article?.title || !memberCanReceiveMarketIntel) return;
     const band = article.impact_band || "HIGH";
-    const headline = `${article.title}${additionalCount ? ` (+${additionalCount} more)` : ""}`;
-    toast.warning(`Market news · ${band}`, {
+    const indexRisks = (article.index_impacts || [])
+      .filter((impact) => ["HIGH", "ELEVATED"].includes(impact.risk_level))
+      .map((impact) => `${impact.index} ${impact.risk_level}`);
+    const alertBand = indexRisks.some((label) => label.endsWith("HIGH"))
+      ? "HIGH"
+      : indexRisks.length
+        ? "ELEVATED"
+        : band;
+    const headline = `${indexRisks.length ? `Index risk: ${indexRisks.join(", ")} · ` : ""}${article.title}${additionalCount ? ` (+${additionalCount} more)` : ""}`;
+    toast.warning(`${indexRisks.length ? "Index risk" : "Market news"} · ${alertBand}`, {
       description: headline,
       duration: 12000,
       action: {
@@ -912,7 +920,7 @@ export default function Dashboard({ demoMode = false }) {
         },
       },
     });
-    push(`Market news · ${band}`, headline);
+    push(`${indexRisks.length ? "Index risk" : "Market news"} · ${alertBand}`, headline);
   }, [demoMode, memberCanReceiveMarketIntel, push, tabOn]);
 
   useEffect(() => {
@@ -3692,6 +3700,7 @@ export default function Dashboard({ demoMode = false }) {
                         refreshKey={uploadRefreshKey}
                         isAdmin={!!authState.is_admin}
                         allowDismiss={false}
+                        marketIntelEnabled={tabOn("market-intel")}
                       />
                     </TabsContent>
                   )}

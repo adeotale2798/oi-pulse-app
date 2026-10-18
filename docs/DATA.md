@@ -19,8 +19,8 @@ Primary database name comes from `DB_NAME` (env). Key collections:
 | `adr_observations` | Twelve Data quote snapshots (time series; pruned with snapshot retention, latest kept) |
 | `adr_latest` | Last successful observation per ADR (survives a failed poll) |
 | `desk_ai_providers` | Vaulted OpenAI-compatible Desk AI keys (`key_enc`); `_id`/`id` plus `_active` pointer |
-| `mi_sources` | Admin Market Intelligence sources (RSS/API/Firecrawl); secrets encrypted |
-| `mi_articles` | Normalized scored news; rolling calendar-day retention |
+| `mi_sources` | Admin Market Intelligence sources (RSS/API/Firecrawl); secrets encrypted. The ingest worker also maintains three public, index-specific Google News RSS searches for material events affecting the 12 highest-weight uploaded constituents per index, preserving admin-edited URLs and source enablement. |
+| `mi_articles` | Normalized scored news; rolling calendar-day retention. Index exposure and exact-company matches against today's NSE-scheduled quarterly results are calculated on read from these retained clusters, `index_constituents`, and `nse_events`; they are not separately persisted. Missing matches mean no related story was found in the current feed, not that no result was published. |
 | `mi_direction_evaluations` | One news-direction / volatility evaluation per `event_cluster_id`, with first-receipt direction strength and catalyst labels, per-index OI snapshot baselines, and observed 15m / 1h / session-close outcomes; 180-day TTL |
 | `mi_user_prefs` | Per-user MI page/popup preferences |
 | `mi_popup_seen` | Popup ack by `user_id` + `event_cluster_id` |

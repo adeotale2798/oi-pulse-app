@@ -20,10 +20,10 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **Strike Table** | Compact CE/PE grid with optional gamma / institution chips |
 | **Sell Candidates (Admin-only)** | Admin strike-ranking surface; not available to members or guests |
 | **Build-up** | Fresh OI adding vs covering |
-| **Market Intelligence** | Ranked, event-clustered news with separate direction and volatility reads, measured outcomes, and India-linked global company coverage; material news about uploaded NIFTY / SENSEX constituents is retained across sectors such as IT, steel, chemicals, and construction |
+| **Market Intelligence** | News with a simple index risk, tentative direction, and main headline first; shows today's NSE-scheduled constituent results with a precise result-news found / not found match |
 | **Positions** | Live F&O book (admin publisher session, or guest’s own broker) |
 | **Alerts / Activity** | Server reversal alerts + session tape; newly arriving high-impact Market Intel stories also show an in-app alert and, when enabled, a browser notification while the desk is in the background |
-| **Events / Index Risk** | Calendar + event-risk tile (upload stamps stay admin-only) |
+| **Events / Index Risk** | Scheduled constituent calendar plus current Market Intel event exposure for the selected index (upload stamps stay admin-only) |
 | **Straddle** | ATM straddle premium path |
 | **Market Memory** | Recent, recency-weighted reactions around price levels, derived from existing OI snapshots |
 | **CAS Expiry** | Classic 15:28 SELL-both, plus **15:20 Auto Trade** (one ATM BUY). Runbook: [docs/CAS_AUTO_TRADE_15_20.md](docs/CAS_AUTO_TRADE_15_20.md) |
