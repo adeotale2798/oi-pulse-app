@@ -59,6 +59,13 @@ describe("MarketIntelPage direction assessment", () => {
                 volatility_risk_reason: "Policy catalyst may cause repricing.",
                 india_link_reason: "Domestic rates can affect Indian equities.",
                 india_link_status: "DIRECT",
+                index_impacts: [{
+                  index: "BANKNIFTY",
+                  risk_level: "HIGH",
+                  risk_score: 82,
+                  weightage: 14.5,
+                  reason: "HDFC Bank is a high-weight index constituent.",
+                }],
               },
               {
                 event_cluster_id: "negative",
@@ -91,6 +98,52 @@ describe("MarketIntelPage direction assessment", () => {
                 direction_reason: "Headline text has no clear directional catalyst.",
               },
             ],
+          },
+        });
+      }
+      if (url === "/market-intel/index-risk") {
+        return Promise.resolve({
+          data: {
+            indices: [{
+              index: "BANKNIFTY",
+              date: "2026-10-18",
+              status: "READY",
+              risk_level: "HIGH",
+              risk_score: 82,
+              direction: "MIXED",
+              evidence_confidence: "MEDIUM",
+              event_count: 1,
+              events: [{
+                event_cluster_id: "bank-result",
+                title: "HDFC Bank results",
+                article_url: "https://example.test/result",
+                risk_level: "HIGH",
+                risk_score: 82,
+                weightage: 14.5,
+                constituents: ["HDFC Bank"],
+                reason: "High constituent exposure.",
+              }],
+              result_calendar_status: "CURRENT",
+              scheduled_results: [
+                {
+                  symbol: "HDFCBANK",
+                  company_name: "HDFC Bank Limited",
+                  weightage: 25,
+                  news_status: "RESULTS_NEWS_FOUND",
+                  stories: [{
+                    title: "HDFC Bank quarterly results beat estimates",
+                    article_url: "https://example.test/hdfc-results",
+                  }],
+                },
+                {
+                  symbol: "ICICIBANK",
+                  company_name: "ICICI Bank Limited",
+                  weightage: 20,
+                  news_status: "NO_MATCHING_NEWS",
+                  stories: [],
+                },
+              ],
+            }],
           },
         });
       }
@@ -185,6 +238,17 @@ describe("MarketIntelPage direction assessment", () => {
       expect(lastEvent.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
     expect(container.textContent).toContain("Importance 78");
+    expect(container.textContent).toContain("Today at a glance · 2026-10-09");
+    expect(container.textContent).toContain("HDFC Bank results");
+    expect(container.querySelector('[data-testid="mi-index-risk-BANKNIFTY"]')?.textContent).toContain("HIGH RISK");
+    expect(container.querySelector('[data-testid="mi-scheduled-results-BANKNIFTY"]')?.textContent).toContain("Results scheduled · 18 Oct");
+    expect(container.textContent).toContain("14.50% index share");
+    expect(container.textContent).toContain("1/2 with result news");
+    expect(container.textContent).toContain("HDFC Bank quarterly results beat estimates");
+    expect(container.textContent).toContain("No matching news found");
+    expect(container.textContent).toContain("This does not confirm that results were not published.");
+    expect(container.querySelector('[data-testid="mi-index-risk-details"]')?.open).toBe(false);
+    expect(container.querySelector('[data-testid="mi-event-details"]')?.open).toBe(false);
     expect(container.textContent).toContain("Importance 80");
     expect(container.textContent).toContain("Likely market up");
     expect(container.textContent).toContain("Likely market down");
@@ -192,7 +256,7 @@ describe("MarketIntelPage direction assessment", () => {
     expect(container.textContent).toContain("Market direction unclear");
     expect(container.textContent).toContain("Rate-cut language can support equities.");
     expect(container.textContent).toContain("Higher crude can pressure India's import bill.");
-    expect(container.textContent).toContain("not a price forecast");
+    expect(container.textContent).toContain("not a forecast");
     expect(container.textContent).toContain("Independent reads agree");
     expect(container.textContent).toContain("Volatility ELEVATED");
     expect(container.textContent).toContain("Building sample 4/30");

@@ -56,6 +56,65 @@ def test_should_store_skips_low_impact():
     assert should_store_article(50)
     hit, extra = constituent_boost("HDFC Bank results miss estimates", [("hdfc bank", 11.2)])
     assert hit and extra >= 14
+    assert classify_event_type("HDFC, ICICI and Axis Bank results announced") == "corporate"
+    hit, extra = constituent_boost(
+        "HDFC, ICICI and Axis Bank results announced",
+        [("hdfc", 11.2), ("icici", 8.0), ("axis", 6.0)],
+    )
+    assert hit and extra >= 45
+
+
+def test_constituent_news_boost_includes_unique_company_name_tokens(monkeypatch):
+    import asyncio
+    import market_intel as mi
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __aiter__(self):
+            return self._rows()
+
+        async def _rows(self):
+            for row in self.rows:
+                yield row
+
+    class Constituents:
+        def find(self, *_args, **_kwargs):
+            return Cursor([
+                {
+                    "index": "NIFTY",
+                    "symbol": "HDFCBANK",
+                    "company_name": "HDFC Bank Limited",
+                    "weightage": 12.0,
+                },
+                {
+                    "index": "SENSEX",
+                    "symbol": "500180",
+                    "company_name": "HDFC Bank Ltd.",
+                    "weightage": 14.0,
+                },
+                {
+                    "index": "NIFTY",
+                    "symbol": "ICICIBANK",
+                    "company_name": "ICICI Bank Limited",
+                    "weightage": 8.0,
+                },
+            ])
+
+    class Db:
+        index_constituents = Constituents()
+
+    monkeypatch.setattr(mi, "_constit_cache", {"t": 0.0, "terms": []})
+    terms = asyncio.run(mi.load_constituent_terms(Db()))
+
+    assert ("hdfc", 14.0) in terms
+    assert ("icici", 8.0) in terms
+    matched, boost = mi.constituent_boost(
+        "HDFC, ICICI and Axis Bank quarterly results reported",
+        terms,
+    )
+    assert matched and boost >= 45
 
 
 def test_material_global_news_about_index_constituents_is_kept_and_india_relevant():
@@ -519,6 +578,11 @@ def test_ensure_default_sources_seeds_rss_without_overwrite():
                 self.docs[sid].update(upd.get("$set") or {})
             elif upsert:
                 self.docs[sid] = {**(upd.get("$set") or {}), "id": sid}
+        def find(self, _query, _projection):
+            class Cursor:
+                async def to_list(self, length):
+                    return []
+            return Cursor()
 
     class Db:
         def __init__(self):
@@ -529,12 +593,93 @@ def test_ensure_default_sources_seeds_rss_without_overwrite():
     db = Db()
     asyncio.run(ensure_default_sources(db))
     assert db.c.docs["google-news-in"]["enabled"] is True
+    assert "HDFC+Bank" in db.c.docs["google-news-in"]["endpoint"]
+    assert "quarterly+results" in db.c.docs["google-news-in"]["endpoint"]
     assert db.c.docs["google-news-india-company-impact"]["enabled"] is True
     assert "H-1B" in db.c.docs["google-news-india-company-impact"]["endpoint"]
     db.c.docs["google-news-in"]["enabled"] = False
     asyncio.run(ensure_default_sources(db))
     assert db.c.docs["google-news-in"]["enabled"] is False
     assert len(db.c.docs) >= len(RSS_TEMPLATES) + len(PUBLIC_API_CATALOG)
+    db.c.docs["google-news-in"]["endpoint"] = (
+        "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+FOMC+OR+crude+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+    )
+    asyncio.run(ensure_default_sources(db))
+    assert "HDFC+Bank" in db.c.docs["google-news-in"]["endpoint"]
+    assert db.c.docs["google-news-in"]["enabled"] is False
+
+
+def test_default_constituent_news_sources_target_major_companies_and_refresh_safely():
+    import asyncio
+    from urllib.parse import unquote_plus
+    from market_intel import ensure_constituent_news_sources
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+        async def to_list(self, length):
+            return self.rows[:length]
+
+    class Constituents:
+        def __init__(self):
+            self.rows = [
+                {"index": "NIFTY", "company_name": "HDFC Bank Limited", "weightage": 12.0},
+                {"index": "NIFTY", "company_name": "ICICI Bank Limited", "weightage": 8.0},
+                {"index": "NIFTY", "company_name": "Axis Bank Limited", "weightage": 6.0},
+                {"index": "NIFTY", "company_name": "Reliance Industries Limited", "weightage": 10.0},
+                {"index": "BANKNIFTY", "company_name": "HDFC Bank Limited", "weightage": 28.0},
+            ]
+            self.rows.extend(
+                {
+                    "index": "NIFTY",
+                    "company_name": f"Company {number} Limited",
+                    "weightage": number / 10,
+                }
+                for number in range(1, 10)
+            )
+        def find(self, _query, _projection):
+            return Cursor(self.rows)
+
+    class Sources:
+        def __init__(self):
+            self.docs = {}
+        async def find_one(self, query):
+            return self.docs.get(query["id"])
+        async def update_one(self, query, update, upsert=False):
+            if upsert:
+                self.docs[query["id"]] = update["$set"]
+            else:
+                self.docs[query["id"]].update(update["$set"])
+
+    class Db:
+        def __init__(self):
+            self.sources = Sources()
+            self.index_constituents = Constituents()
+        def __getitem__(self, name):
+            return self.index_constituents if name == "index_constituents" else self.sources
+
+    db = Db()
+    asyncio.run(ensure_constituent_news_sources(db))
+    source = db.sources.docs["google-news-constituents-nifty"]
+    query = unquote_plus(source["endpoint"].split("?q=", 1)[1].split("&hl=", 1)[0])
+
+    assert source["enabled"] is True
+    assert "HDFC Bank" in query and "ICICI Bank" in query and "Axis Bank" in query
+    assert "(results OR earnings" in query
+    assert "when:2d" in query
+    assert "last 48 hours" in source["note"]
+    assert "NIFTY major constituents" in source["name"]
+
+    source["enabled"] = False
+    previous_url = source["endpoint"]
+    db.index_constituents.rows[-1]["weightage"] = 30.0
+    asyncio.run(ensure_constituent_news_sources(db))
+    assert source["endpoint"] != previous_url
+    assert source["enabled"] is False
+
+    source["endpoint"] = "https://example.test/custom-feed"
+    asyncio.run(ensure_constituent_news_sources(db))
+    assert source["endpoint"] == "https://example.test/custom-feed"
 
 
 def test_parse_feed_date_valid_invalid_and_missing():

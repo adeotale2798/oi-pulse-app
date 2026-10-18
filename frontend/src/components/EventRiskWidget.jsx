@@ -8,6 +8,8 @@ import {
   filterIndexEvents,
   weightageBucket,
 } from "@/lib/indexEventRisk";
+import { marketIntelPublicationLabel, marketIntelTimeLabel } from "@/lib/marketIntel";
+import ScheduledResultsPanel from "@/components/ScheduledResultsPanel";
 
 const DISMISS_LS_KEY = "oi_event_risk_dismissed";
 
@@ -26,8 +28,8 @@ function saveDismissed(on) {
 }
 
 /**
- * EventRiskWidget — shows upcoming index event risk for the current strategy
- * page (activeIndex). Auto-refetches when activeIndex changes.
+ * EventRiskWidget — combines scheduled events with entitled, source-backed
+ * Market Intel risk for the current strategy page (activeIndex).
  *
  * Event categories use soft color accents for quick scanning; near-term,
  * high-weight events retain the stronger urgency highlight.
@@ -38,6 +40,13 @@ const INDEX_LABEL = {
   BANKNIFTY: "Bank Nifty",
   SENSEX: "Sensex",
 };
+
+function newsDirectionLabel(direction) {
+  if (direction === "SUPPORTIVE") return "Leaning positive";
+  if (direction === "NEGATIVE") return "Leaning negative";
+  if (direction === "MIXED") return "Mixed signals";
+  return "No clear direction";
+}
 
 const BUCKET_STYLES = {
   // Weight bands drive the color so identical stakes look the same across event types.
@@ -112,9 +121,12 @@ export default function EventRiskWidget({
   refreshKey = 0,
   isAdmin = false,
   allowDismiss = true,
+  marketIntelEnabled = false,
 }) {
   const [events, setEvents] = useState([]);
   const [joinInfo, setJoinInfo] = useState(null);
+  const [marketRisk, setMarketRisk] = useState(null);
+  const [marketRiskError, setMarketRiskError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -137,6 +149,28 @@ export default function EventRiskWidget({
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [activeIndex, refreshKey, isAdmin]);
+
+  useEffect(() => {
+    if (!activeIndex || !marketIntelEnabled) {
+      setMarketRisk(null);
+      setMarketRiskError(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api.get("/market-intel/index-risk")
+      .then((r) => {
+        if (cancelled) return;
+        const rows = r.data?.indices || [];
+        setMarketRisk(rows.find((row) => row.index === activeIndex) || null);
+        setMarketRiskError(null);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setMarketRiskError(e?.response?.data?.detail || e.message || "News risk unavailable");
+        }
+      });
+    return () => { cancelled = true; };
+  }, [activeIndex, marketIntelEnabled, refreshKey]);
 
   // ---- Derived data ----
   const upcoming = useMemo(() => events.filter((e) => e.days_remaining >= 0), [events]);
@@ -250,6 +284,95 @@ export default function EventRiskWidget({
           .
         </div>
       )}
+
+      {marketIntelEnabled ? (
+        <div className="border-b border-slate-100 dark:border-slate-800" data-testid="event-risk-news">
+          <div className="px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                Today’s headline risk
+              </span>
+              {marketRisk ? (
+                <>
+                  <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-200">
+                    {marketRisk.index}
+                  </span>
+                  <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${marketRisk.risk_level === "HIGH" ? "border-rose-300 bg-rose-50 text-rose-800" : marketRisk.risk_level === "ELEVATED" ? "border-orange-300 bg-orange-50 text-orange-800" : "border-slate-300 bg-slate-50 text-slate-700"}`}>
+                    {marketRisk.risk_level === "UNAVAILABLE" ? "NO DATA" : `${marketRisk.risk_level} RISK`}
+                  </span>
+                  <span className="text-[10px] font-medium text-slate-700 dark:text-slate-200">
+                    {newsDirectionLabel(marketRisk.direction)}
+                  </span>
+                </>
+              ) : null}
+            </div>
+            {marketRiskError ? (
+              <p className="mt-1 text-[10px] text-rose-700" role="status" data-testid="event-risk-news-error">
+                News risk unavailable: {marketRiskError}
+              </p>
+            ) : marketRisk?.events?.length ? (
+              <>
+                {marketRisk.events[0].article_url ? (
+                  <a href={marketRisk.events[0].article_url} target="_blank" rel="noreferrer" className="mt-1 block text-[11px] font-semibold leading-snug text-slate-800 underline decoration-slate-300 hover:text-emerald-800">
+                    {marketRisk.events[0].title}
+                  </a>
+                ) : (
+                  <p className="mt-1 text-[11px] font-semibold leading-snug text-slate-800">{marketRisk.events[0].title}</p>
+                )}
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  {marketRisk.events[0].weightage != null ? `${Number(marketRisk.events[0].weightage).toFixed(2)}% index share` : marketRisk.events[0].exposure_type === "BROAD_MARKET" ? "Broad market event" : "Index weight unavailable"}
+                  {" · tentative read, not a trade signal"}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Published: {marketRisk.events[0].published_at_known
+                    ? marketIntelPublicationLabel(marketRisk.events[0].published_at, marketRisk.events[0].published_at_precision)
+                    : "date unavailable"}
+                  {marketRisk.events[0].news_freshness === "OLD" ? " · older update" : ""}
+                </p>
+                <details className="mt-1 text-[10px] text-slate-500" data-testid="event-risk-news-details">
+                  <summary className="w-fit cursor-pointer font-medium text-slate-600">See evidence ({marketRisk.event_count || marketRisk.events.length} headlines)</summary>
+                  <p className="mt-1">
+                    Evidence confidence: {String(marketRisk.evidence_confidence || "LOW").toLowerCase()} · showing up to {marketRisk.events.length} top headlines.
+                  </p>
+                  <ul className="mt-1 space-y-1.5">
+                    {marketRisk.events.map((event) => (
+                      <li key={event.event_cluster_id} className="leading-snug">
+                        <span className="font-medium text-slate-700">{event.title}</span>
+                        <span className="block">{event.reason}</span>
+                        <span className="block text-slate-400">
+                          {(event.independent_source_names || []).join(" · ") || "Source not identified"}
+                          {" · Published "}
+                          {event.published_at_known
+                            ? marketIntelPublicationLabel(event.published_at, event.published_at_precision)
+                            : "time not supplied"}
+                          {" · Received "}{marketIntelTimeLabel(event.discovered_at)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </>
+            ) : !marketRiskError ? (
+              <p className="mt-1 text-[10px] text-slate-500">
+                {marketRisk?.status === "NO_DATA"
+                  ? "No major mapped headline found today."
+                  : "Loading or no mapped news risk is available."}
+              </p>
+            ) : null}
+          </div>
+          {marketRisk ? (
+            <div className="px-3 pb-2">
+              <ScheduledResultsPanel
+                results={marketRisk.scheduled_results || []}
+                calendarStatus={marketRisk.result_calendar_status}
+                calendarAsOf={marketRisk.result_calendar_as_of}
+                scheduleDate={marketRisk.date}
+                testId="event-risk-scheduled-results"
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3 border-b border-slate-100 dark:border-slate-800">
         <SummaryCard icon={TrendingUp} label="Upcoming Results" value={summary.results} tone="sky" />

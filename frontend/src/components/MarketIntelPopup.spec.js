@@ -186,6 +186,13 @@ describe("MarketIntelPopup docking", () => {
           volatility_risk: "ELEVATED",
           volatility_risk_reason: "Policy catalyst may cause repricing.",
           india_link_reason: "Domestic rates can affect Indian equities.",
+          index_impacts: [{
+            index: "BANKNIFTY",
+            risk_level: "HIGH",
+            risk_score: 82,
+            weightage: 14.5,
+            reason: "Banking policy exposure.",
+          }],
         }],
       },
     });
@@ -212,6 +219,8 @@ describe("MarketIntelPopup docking", () => {
     expect(container.textContent).toContain("Reuters / Economic Times");
     expect(container.textContent).toContain("During market hours");
     expect(container.textContent).toContain("Volatility ELEVATED");
+    expect(container.querySelector('[data-testid="mi-popup-index-risk-BANKNIFTY"]')?.textContent)
+      .toContain("BANKNIFTY HIGH · 14.50%");
     expect(container.querySelector('[data-testid="mi-popup-seller-note"]')?.textContent)
       .toContain("review short-option exposure");
     expect(container.querySelector('[data-testid="mi-popup-india-link"]')?.textContent)

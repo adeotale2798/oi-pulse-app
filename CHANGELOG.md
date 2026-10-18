@@ -1,5 +1,29 @@
 # Changelog
 
+## V20.62 — 2026-10-18
+
+Compare the NSE calendar’s scheduled constituent results against matched
+Market Intel stories. Show per-company result-news found, company-news-only, or
+no-match status, and warn when the NSE calendar is stale or unavailable.
+
+## V20.61 — 2026-10-18
+
+Add index-specific public Google News searches for the 12 highest-weight
+uploaded constituents per index, targeting results and material company
+events over the last 48 hours; surface the publication date on the lead story.
+
+## V20.60 — 2026-10-18
+
+Simplify the Market Intel decision view: show each index's risk, tentative
+direction, and main headline first, with supporting evidence and technical
+details collapsed until requested.
+
+## V20.59 — 2026-10-18
+
+Connect same-day Market Intel stories to NIFTY, BANKNIFTY, and SENSEX exposure
+using constituent weights; show source-backed daily risk summaries in Market
+Intel and Index Risk, and include index exposure in existing news alerts.
+
 ## V20.58 — 2026-10-17
 
 Make the Admin Tech Stack view easier to understand with a plain-language
