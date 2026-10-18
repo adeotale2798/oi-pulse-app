@@ -3,6 +3,7 @@ import { api, apiDetail } from "@/lib/api";
 import PageBrandTitle from "@/components/PageBrandTitle";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { MarketIntelUserPrefs } from "@/components/DeskAiKeysAdmin";
+import ScheduledResultsPanel from "@/components/ScheduledResultsPanel";
 import { MI_FILTERS, bandClass, directionalBasisLabel, directionalImpactClass, directionalImpactLabel, formatEventTypeLabel, impactScoreLabel, indiaImpactLabel, marketTimingLabel, newsFreshnessLabel, sourceAgreementLabel, marketIntelTimeLabel, marketIntelPublicationLabel, volatilityRiskClass, volatilitySellerNote, MI_RELOAD_EVENT, notifyMarketIntelReload, readMiFeedCache, writeMiFeedCache } from "@/lib/marketIntel";
 import { todayIST } from "@/lib/holidays";
 
@@ -20,6 +21,9 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
   const [refreshing, setRefreshing] = useState(false);
   const [performance, setPerformance] = useState(null);
   const [performanceError, setPerformanceError] = useState(null);
+  const [indexRisk, setIndexRisk] = useState([]);
+  const [indexRiskError, setIndexRiskError] = useState(null);
+  const [indexRiskLoading, setIndexRiskLoading] = useState(false);
   const feedGen = useRef(0);
 
   const loadPrefs = useCallback(() => {
@@ -119,6 +123,24 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
       clearInterval(id);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIndexRiskLoading(true);
+    api.get("/market-intel/index-risk", { params: { date: selectedDate }, timeout: 15000 })
+      .then((r) => {
+        if (cancelled) return;
+        setIndexRisk(r.data?.indices || []);
+        setIndexRiskError(null);
+      })
+      .catch((e) => {
+        if (!cancelled) setIndexRiskError(apiDetail(e, "Index risk is unavailable"));
+      })
+      .finally(() => {
+        if (!cancelled) setIndexRiskLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!configLoaded) return undefined;
@@ -235,6 +257,30 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
           Importance ranks story significance. Direction and volatility are estimates, not a price forecast or live IV readings.
         </p>
       </div>
+      <section className="rounded-md border border-slate-200 bg-slate-50 p-2.5" data-testid="mi-index-risk">
+        <div className="flex flex-wrap items-baseline justify-between gap-1">
+          <h2 className="text-sm font-bold text-slate-800">Today at a glance · {selectedDate}</h2>
+          {indexRiskLoading ? <span className="text-[10px] text-slate-500">Updating…</span> : null}
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Risk shows headline exposure, not a forecast. Direction is only a tentative read.
+        </p>
+        {indexRiskError ? (
+          <p className="mt-2 text-xs text-rose-700" role="status" data-testid="mi-index-risk-error">
+            Index risk unavailable: {indexRiskError}
+          </p>
+        ) : null}
+        {!indexRiskError && indexRisk.length === 0 && indexRiskLoading ? (
+          <p className="mt-2 text-xs text-slate-500">Loading index risk…</p>
+        ) : null}
+        {!indexRiskError && indexRisk.length > 0 ? (
+          <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3" data-testid="mi-index-risk-cards">
+            {indexRisk.map((summary) => (
+              <IndexRiskCard key={summary.index} summary={summary} />
+            ))}
+          </div>
+        ) : null}
+      </section>
       {loading && items.length > 0 ? (
         <div className="text-[10px] text-slate-400" data-testid="mi-loading-inline">Updating…</div>
       ) : null}
@@ -262,10 +308,9 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
           {items.length > 0 && (
             <>
               {items.map((it) => (
-                <article key={it.event_cluster_id || it.id} className="oi-surface-lift oi-3d-stage rounded-md border border-slate-200 bg-white p-3 space-y-1" data-testid="mi-event">
-                  <div className="flex items-center gap-2 flex-wrap">
+                <article key={it.event_cluster_id || it.id} className="oi-surface-lift oi-3d-stage rounded-md border border-slate-200 bg-white p-3 space-y-2" data-testid="mi-event">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-sm border ${bandClass(it.impact_band)}`}>{it.impact_band || "—"}</span>
-                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-sm border ${bandClass(it.impact_band)}`}>{impactScoreLabel(it.impact_score)}</span>
                     <span
                       className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-sm border ${directionalImpactClass(it.market_direction)}`}
                       title={`${directionalBasisLabel(it.direction_basis)} ${it.direction_reason || ""}`}
@@ -275,40 +320,57 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
                       {it.market_direction === "NEGATIVE" ? <ArrowDown aria-hidden="true" className="h-3 w-3" /> : null}
                       {directionalImpactLabel(it.market_direction)}
                     </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-800">{formatEventTypeLabel(it.event_type)}</span>
-                    <span className="text-[10px] text-slate-400 ml-auto">
-                      {(it.independent_source_names || []).slice(0, 3).join(" · ") || it.source_name}
-                      {" · "}{it.independent_source_count ?? it.source_count ?? 1} independent source{(it.independent_source_count ?? it.source_count ?? 1) === 1 ? "" : "s"}
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{formatEventTypeLabel(it.event_type)}</span>
+                    <span className="ml-auto text-[10px] text-slate-500">
+                      {(it.independent_source_names || [it.source_name]).filter(Boolean).slice(0, 1).join("") || "Source not identified"}
                     </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
-                    <span>{sourceAgreementLabel(it.source_direction_agreement)}</span>
-                    <span>{marketTimingLabel(it.market_timing)}</span>
-                    <span>{newsFreshnessLabel(it.news_freshness)}</span>
-                    <span>Published: {it.published_at_known ? marketIntelPublicationLabel(it.published_at, it.published_at_precision) : "time not supplied"}</span>
-                    <span>Received: {marketIntelTimeLabel(it.discovered_at)}</span>
                   </div>
                   <h3 className="text-sm font-semibold text-slate-900 leading-snug">{it.title}</h3>
-                  {it.direction_reason ? <p className="text-[11px] text-slate-600" data-testid="mi-direction-reason">{it.direction_reason}</p> : null}
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-600">
-                    <span>{indiaImpactLabel(it.india_relevance_score)}</span>
-                    <span className={`rounded-sm border px-1.5 py-0.5 font-semibold ${volatilityRiskClass(it.volatility_risk)}`} title={it.volatility_risk_reason || "Text-based catalyst assessment, not live implied volatility."}>
-                      Volatility {it.volatility_risk || "unavailable"}
-                    </span>
-                  </div>
-                  {volatilitySellerNote(it.volatility_risk) ? (
-                    <p className="text-[10px] text-amber-800" data-testid="mi-seller-note">
-                      {volatilitySellerNote(it.volatility_risk)}
-                    </p>
+                  {it.summary ? <p className="text-xs text-slate-600 line-clamp-2">{it.summary}</p> : null}
+                  {it.index_impacts?.length ? (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]" data-testid="mi-index-exposure">
+                      <span className="font-medium text-slate-600">Affects:</span>
+                      {it.index_impacts.map((impact) => (
+                        <span
+                          key={impact.index}
+                          className={`rounded-sm border px-1.5 py-0.5 font-semibold ${indexRiskClass(impact.risk_level)}`}
+                          title={impact.reason}
+                        >
+                          {impact.index} {impact.risk_level}
+                          {impact.weightage != null ? ` · ${Number(impact.weightage).toFixed(2)}%` : ""}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
-                  {it.india_link_reason ? <p className={`text-[11px] ${it.india_link_status === "UNCLEAR" ? "text-slate-500" : "text-slate-600"}`} data-testid="mi-india-link">{it.india_link_reason}</p> : null}
-                  {it.summary ? <p className="text-xs text-slate-600 line-clamp-3">{it.summary}</p> : null}
-                  {Array.isArray(it.potential) && it.potential.length > 0 && (
-                    <ul className="text-[11px] text-slate-700 list-disc pl-4">
-                      {it.potential.map((p) => <li key={p}>{p}</li>)}
-                    </ul>
-                  )}
-                  {it.article_url ? <a className="text-[11px] text-emerald-800 underline" href={it.article_url} target="_blank" rel="noreferrer">Open source</a> : null}
+                  <details className="border-t border-slate-100 pt-1.5 text-[10px] text-slate-500" data-testid="mi-event-details">
+                    <summary className="w-fit cursor-pointer font-medium text-slate-600 hover:text-slate-900">More details</summary>
+                    <div className="mt-2 space-y-1.5">
+                      <div className="flex flex-wrap gap-x-2 gap-y-1">
+                        <span>{impactScoreLabel(it.impact_score)}</span>
+                        <span>{sourceAgreementLabel(it.source_direction_agreement)}</span>
+                        <span>{marketTimingLabel(it.market_timing)}</span>
+                        <span>{newsFreshnessLabel(it.news_freshness)}</span>
+                        <span>{it.independent_source_count ?? it.source_count ?? 1} independent source{(it.independent_source_count ?? it.source_count ?? 1) === 1 ? "" : "s"}</span>
+                        <span>Published: {it.published_at_known ? marketIntelPublicationLabel(it.published_at, it.published_at_precision) : "time not supplied"}</span>
+                        <span>Received: {marketIntelTimeLabel(it.discovered_at)}</span>
+                      </div>
+                      {it.direction_reason ? <p data-testid="mi-direction-reason">{it.direction_reason}</p> : null}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{indiaImpactLabel(it.india_relevance_score)}</span>
+                        <span className={`rounded-sm border px-1.5 py-0.5 font-semibold ${volatilityRiskClass(it.volatility_risk)}`} title={it.volatility_risk_reason || "Text-based catalyst assessment, not live implied volatility."}>
+                          Volatility {it.volatility_risk || "unavailable"}
+                        </span>
+                      </div>
+                      {volatilitySellerNote(it.volatility_risk) ? (
+                        <p className="text-amber-800" data-testid="mi-seller-note">{volatilitySellerNote(it.volatility_risk)}</p>
+                      ) : null}
+                      {it.india_link_reason ? <p className={it.india_link_status === "UNCLEAR" ? "text-slate-500" : ""} data-testid="mi-india-link">{it.india_link_reason}</p> : null}
+                      {Array.isArray(it.potential) && it.potential.length > 0 ? (
+                        <ul className="list-disc pl-4">{it.potential.map((p) => <li key={p}>{p}</li>)}</ul>
+                      ) : null}
+                      {it.article_url ? <a className="text-emerald-800 underline" href={it.article_url} target="_blank" rel="noreferrer">Open source</a> : null}
+                    </div>
+                  </details>
                 </article>
               ))}
             </>
@@ -319,6 +381,105 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
       <MarketIntelOutcomePanels performance={performance} error={performanceError} />
       <MarketIntelUserPrefs prefs={prefs} onChange={patchPrefs} />
     </div>
+  );
+}
+
+function indexRiskClass(level) {
+  if (level === "HIGH") return "border-rose-300 bg-rose-50 text-rose-800";
+  if (level === "ELEVATED") return "border-orange-300 bg-orange-50 text-orange-800";
+  if (level === "MODERATE") return "border-amber-300 bg-amber-50 text-amber-800";
+  if (level === "LOW") return "border-slate-300 bg-white text-slate-600";
+  return "border-slate-200 bg-white text-slate-500";
+}
+
+function indexDirectionLabel(direction) {
+  if (direction === "SUPPORTIVE") return "Leaning positive";
+  if (direction === "NEGATIVE") return "Leaning negative";
+  if (direction === "MIXED") return "Mixed signals";
+  return "No clear direction";
+}
+
+function IndexRiskCard({ summary }) {
+  const events = summary.events || [];
+  const leadEvent = events[0];
+  const scheduledResults = summary.scheduled_results || [];
+  return (
+    <article
+      className="rounded-md border border-slate-200 bg-white p-3"
+      data-testid={`mi-index-risk-${summary.index}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-slate-900">{summary.index}</h3>
+        <span className={`rounded border px-2 py-1 text-[10px] font-bold ${indexRiskClass(summary.risk_level)}`}>
+          {summary.risk_level === "UNAVAILABLE" ? "NO DATA" : `${summary.risk_level} RISK`}
+        </span>
+      </div>
+      <p className="mt-2 text-xs font-semibold text-slate-700">
+        Direction: <span data-testid="mi-index-direction">{indexDirectionLabel(summary.direction)}</span>
+      </p>
+      {leadEvent ? (
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Main headline</p>
+          {leadEvent.article_url ? (
+            <a href={leadEvent.article_url} target="_blank" rel="noreferrer" className="mt-0.5 block text-xs font-semibold leading-snug text-slate-800 underline decoration-slate-300 hover:text-emerald-800 line-clamp-2">
+              {leadEvent.title}
+            </a>
+          ) : (
+            <p className="mt-0.5 text-xs font-semibold leading-snug text-slate-800 line-clamp-2">{leadEvent.title}</p>
+          )}
+          <p className="mt-1 text-[10px] text-slate-500">
+            {leadEvent.constituents?.length ? `${leadEvent.constituents.join(", ")} · ` : ""}
+            {leadEvent.weightage != null ? `${Number(leadEvent.weightage).toFixed(2)}% index share` : leadEvent.exposure_type === "BROAD_MARKET" ? "Broad market event" : "Weight not available"}
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            {leadEvent.published_at_known ? `Published ${marketIntelPublicationLabel(leadEvent.published_at, "DATE")}` : "Publication date unavailable"}
+            {leadEvent.news_freshness === "OLD" ? " · older update" : ""}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500">
+          {summary.status === "NO_DATA" ? "No major mapped headline found." : "No mapped event evidence."}
+        </p>
+      )}
+      <ScheduledResultsPanel
+        results={scheduledResults}
+        calendarStatus={summary.result_calendar_status}
+        calendarAsOf={summary.result_calendar_as_of}
+        scheduleDate={summary.date}
+        testId={`mi-scheduled-results-${summary.index}`}
+      />
+      {events.length ? (
+        <details className="mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-500" data-testid="mi-index-risk-details">
+          <summary className="w-fit cursor-pointer font-medium text-slate-600 hover:text-slate-900">
+            See evidence ({summary.event_count || events.length} headlines)
+          </summary>
+          <p className="mt-2">
+            Evidence confidence: {String(summary.evidence_confidence || "LOW").toLowerCase()} · showing up to {events.length} top headlines.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {events.map((event) => (
+              <li key={event.event_cluster_id} className="leading-snug">
+                {event.article_url ? (
+                  <a href={event.article_url} target="_blank" rel="noreferrer" className="font-medium text-slate-700 underline decoration-slate-300 hover:text-emerald-800">
+                    {event.title}
+                  </a>
+                ) : <span className="font-medium text-slate-700">{event.title}</span>}
+                <p>{event.reason}</p>
+                <p>
+                  {(event.independent_source_names || []).join(" · ") || "Source not identified"}
+                  {" · Published "}
+                  {event.published_at_known
+                    ? marketIntelPublicationLabel(event.published_at, event.published_at_precision)
+                    : "time not supplied"}
+                  {" · Received "}{marketIntelTimeLabel(event.discovered_at)}
+                </p>
+              </li>
+            ))}
+          </ul>
+          {summary.risk_score != null ? <p className="mt-2">Exposure score {summary.risk_score}/100; heuristic, not a probability.</p> : null}
+        </details>
+      ) : null}
+    </article>
   );
 }
 

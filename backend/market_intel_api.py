@@ -64,6 +64,7 @@ class PrefsIn(BaseModel):
 
 def mount(api_router, *, require_admin, require_desk_user, require_member_feature=None):
     import desk_llm
+    import index_risk_engine as ire
     import market_intel as mi
     from desk_llm import encrypt_secret
     refresh_lock = asyncio.Lock()
@@ -306,10 +307,81 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
             except Exception:
                 pass
             raise HTTPException(500, "Market intelligence feed failed")
+        constituents = await ire.load_index_constituents(_db())
+        items = ire.enrich_articles_with_index_impacts(items, constituents)
         for it in items:
             if isinstance(it, dict):
                 it.pop("_id", None)
         return {"items": items, "date": (mi.parse_feed_date(feed_date) or mi.ist_today()).isoformat()}
+
+    @api_router.get("/market-intel/index-risk")
+    async def mi_index_risk(
+        feed_date: Optional[str] = Query(None, alias="date"),
+        role: str = Depends(require_desk_user),
+        _feature=member_feature,
+    ):
+        del role
+        db = _db()
+        if db is None:
+            raise HTTPException(503, "Market Intel event storage unavailable")
+        try:
+            target_date = mi.parse_feed_date(feed_date) or mi.ist_today()
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        try:
+            docs = await db[mi.ART_COL].find(
+                {
+                    **mi.articles_window_query(target_date),
+                    "impact_score": {"$gte": mi.STORE_MIN_IMPACT},
+                },
+                {"_id": 0},
+            ).sort("discovered_at", -1).to_list(200)
+            docs = [doc for doc in docs if mi.item_matches_feed_date(doc, target_date)]
+            articles = [
+                mi.public_article(row)
+                for row in mi.cluster_rows(docs)
+            ]
+            constituents = await ire.load_index_constituents(db)
+            result = ire.build_daily_index_risk(articles, constituents, target_date)
+            import event_risk_service as ers
+
+            raw_events = await db.nse_events.find({}, {"_id": 0}).to_list(length=5000)
+            scheduled_events = {}
+            for index in ire.INDEX_ORDER:
+                index_constituents = [
+                    row for row in constituents
+                    if str(row.get("index") or "").upper() == index
+                ]
+                scheduled_events[index] = ers.build_index_event_dataset(
+                    index_constituents, raw_events, index
+                )
+            upload_meta = await ers.fetch_upload_meta(db)
+            event_meta = upload_meta.get("events") or {}
+            calendar_status = (
+                "NO_DATA" if not raw_events
+                else "STALE" if event_meta.get("stale")
+                else "CURRENT"
+            )
+            return ire.attach_scheduled_results(
+                result,
+                scheduled_events,
+                calendar_status=calendar_status,
+                calendar_as_of=event_meta.get("confirmed_at") or event_meta.get("uploaded_at"),
+            )
+        except Exception as exc:
+            logger = __import__("logging").getLogger("market_intel")
+            logger.exception("market-intel index risk failed")
+            try:
+                from error_log import record_error
+                await record_error(
+                    source="api",
+                    message=str(exc)[:300],
+                    path="/api/market-intel/index-risk",
+                    kind=type(exc).__name__,
+                )
+            except Exception:
+                pass
+            raise HTTPException(500, "Market intelligence index risk unavailable") from exc
 
     @api_router.get("/market-intel/performance")
     async def mi_performance(
@@ -337,6 +409,8 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
         items = await mi.popup_candidates(
             _db(), uid, prefs, global_on, is_admin=(role == "admin")
         )
+        constituents = await ire.load_index_constituents(_db())
+        items = ire.enrich_articles_with_index_impacts(items, constituents)
         keys = (
             "title", "impact_score", "india_relevance_score", "event_type",
             "summary", "potential", "event_cluster_id", "source_name", "impact_band",
@@ -346,6 +420,7 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
             "published_age_minutes", "arrival_delay_minutes", "independent_source_count",
             "independent_source_names", "source_direction_agreement", "discovered_at",
             "published_at_known", "published_at_precision",
+            "index_impacts",
         )
         return {
             "items": [{k: it.get(k) for k in keys} for it in items],

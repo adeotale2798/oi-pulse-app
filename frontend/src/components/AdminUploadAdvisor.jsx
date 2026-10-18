@@ -20,8 +20,7 @@ function todayIST() {
 }
 
 /**
- * Admin-only advisor: nudge to refresh NSE events (~15d) and constituents (~30d)
- * before Index Risk goes stale. Guests never see this.
+ * Admin-only advisor for all uploaded data categories. Subscribers never see it.
  */
 export default function AdminUploadAdvisor({
   isAdmin = false,
@@ -84,29 +83,16 @@ export default function AdminUploadAdvisor({
       /* ignore */
     }
 
-    const eventsStale = staleItems.find((x) => x.key === "events");
-    const constStale = staleItems.filter((x) => x.key !== "events");
-    const title = eventsStale
-      ? "Update NSE event calendar"
-      : "Refresh index constituents";
-    const bits = [];
-    if (eventsStale) {
-      bits.push(
-        `NSE events: ${formatUploadAge(eventsStale.ageDays, eventsStale.never)} (refresh every ${eventsStale.staleAfterDays}d).`,
-      );
-    }
-    if (constStale.length) {
-      bits.push(
-        `Constituents: ${constStale.map((x) => x.shortLabel).join(", ")} overdue (refresh every 30d).`,
-      );
-    }
-    toast.message(title, {
+    const summary = staleItems
+      .map((item) => `${item.shortLabel}: ${formatUploadAge(item.ageDays, item.never)}`)
+      .join(" · ");
+    toast.message("Review uploaded data", {
       id: "admin-upload-advisor",
-      description: bits.join(" "),
+      description: summary,
       duration: 14_000,
       action: onOpenUpload
         ? {
-            label: "Upload",
+            label: "Review",
             onClick: () => onOpenUpload(),
           }
         : undefined,
@@ -162,7 +148,7 @@ export default function AdminUploadAdvisor({
               </button>
             )}
             <span className="text-[10px] opacity-70">
-              Guests never see this reminder.
+              Subscribers never see this reminder.
             </span>
           </div>
         </div>

@@ -30,7 +30,7 @@ export default function GuestBanner({
             {" — "}
             <b>Guest access via {adminName || "Adeotale"}</b>
             {" · "}
-            OI charts use the publisher feed. Your positions need your own Zerodha login.
+            OI charts use the publisher feed. Your positions need your own broker login.
           </span>
           <span className="sm:hidden text-amber-800/90"> · Guest · your broker for Positions</span>
         </span>
@@ -44,7 +44,7 @@ export default function GuestBanner({
             data-testid="guest-banner-connect-kite"
           >
             <PlugZap className="w-3 h-3" />
-            Connect Zerodha
+            Connect broker
           </button>
         )}
         <button

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { isMarketQuiescent } from "@/lib/marketTimes";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -53,10 +54,10 @@ const GUIDE = (
       <b>15:28 Expiry</b> sells Call + Put when the CAS print appears.
     </p>
     <p>
-      <b>Paper</b> — live Kite NIFTY + live NSE prints, but the MARKET is a dry-run
+      <b>Paper</b> — live broker NIFTY + live NSE prints, but the MARKET is a dry-run
       (no fill on your account). Use Auto Trade Paper in the cash session to
       check 15:20 before switching Live.
-      <b> Live</b> — real Zerodha MARKET orders (admin only). Do not run both Live.
+      <b> Live</b> — real broker MARKET orders (admin only). Do not run both Live.
     </p>
     <p>
       <b>Debug</b> — classic Activate anytime (even after hours). With Paper, windows
@@ -358,7 +359,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
     if (!isAdmin) return;
     if (on) {
       const ok = window.confirm(
-        "Switch to LIVE?\n\nActivate will place real MARKET sells on Zerodha.\nUse Paper to practise safely."
+        "Switch to LIVE?\n\nActivate will place real MARKET sells through your broker.\nUse Paper to practise safely."
       );
       if (!ok) return;
     }
@@ -510,7 +511,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
           className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 flex flex-wrap items-center gap-2"
           data-testid="cas-error"
         >
-          <span className="flex-1 min-w-0">{error}</span>
+          <span className="flex-1 min-w-0">{brokerSafeText(error)}</span>
           {typeof onOpenKite === "function" && /kite|token|auth|credential|session/i.test(String(error)) && (
             <Button
               size="sm"
@@ -838,10 +839,10 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
                   15:20 Auto Trade — BUY one ATM
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed max-w-prose">
-                  Separate from 15:28 expiry sells. NIFTY only: freeze live Kite NIFTY ~15:19:30, lock that
+                  Separate from 15:28 expiry sells. NIFTY only: freeze live broker NIFTY ~15:19:30, lock that
                   ATM, then one MARKET <b>BUY</b> of CE or PE if the first 15:20 NSE <b>Indicative Close</b>{" "}
                   (homepage JSON, not leftover previous close) is ±15 pts.
-                  <b>Paper</b> uses that same live tape and prints a <b>DRY-BUY</b> id (no Zerodha fill) so you
+                  <b>Paper</b> uses that same live tape and prints a <b>DRY-BUY</b> id (no broker order) so you
                   can watch a real session before Live. You exit in Positions. Lots below are{" "}
                   <b>this arm only</b> (not expiry lots).
                 </p>
@@ -961,7 +962,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
                   <b>Leave Paper on now</b> (09:15–15:30 IST). Switching to Paper starts NSE cookie
                   warmup and ATM preview immediately. Status should be <b>WATCHING</b> until ~15:19:30
                   freeze, then <b>ARMED</b>, then one DRY-BUY at the first sane 15:20 print. Nothing
-                  hits Zerodha. The test log below stores that DRY-BUY.
+                  reaches your broker. The test log below stores that DRY-BUY.
                 </li>
                 <li>
                   Watch <b>NSE live</b> below — first pull and every change show there. Errors stay in
@@ -1018,7 +1019,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
                 </Button>
                 <p className="text-[10px] text-slate-500 max-w-md leading-snug">
                   Number = fake NSE indicative. Example: if frozen NIFTY is 23980, enter 24007 to
-                  rehearse a +27 CE. Needs Kite connected. Before 15:20 = rehearsal only.
+                  rehearse a +27 CE. Needs the broker connected. Before 15:20 = rehearsal only.
                 </p>
               </div>
             )}
@@ -1077,7 +1078,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
                   >
                     Backend egress IP to whitelist: <b>{readiness.egress_ip}</b>
                     <span className="block text-[10px] text-slate-500 font-sans mt-0.5">
-                      This is the server that calls Zerodha (Emergent host if API is there) — not your
+                      This is the server that calls your broker (Emergent host if API is there) — not your
                       computer&apos;s IP unless you run the backend locally.
                     </span>
                   </p>
@@ -1287,7 +1288,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
         <div className="rounded-md border border-slate-200 bg-white p-4 space-y-3" data-testid="cas-backtest">
           <div className="text-xs text-slate-600 leading-relaxed">
             Replays past expiry days with the <b>same strike + sell logic</b>. No live orders.
-            Uses Kite history when connected; otherwise estimates premiums.
+            Uses broker history when connected; otherwise estimates premiums.
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -1545,7 +1546,7 @@ function AutoTapeStrip({ auto, autoLots }) {
         {!auto.nse_fetched_at && !err && !executed && (
           <p className="text-slate-500">
             {closed
-              ? `IST ${clock} — cash NSE scrape is quiet overnight (retries every 30s). Leave Paper on; the live print appears here from 09:15 IST. Inject still works if Kite is connected.`
+              ? `IST ${clock} — cash NSE scrape is quiet overnight (retries every 30s). Leave Paper on; the live print appears here from 09:15 IST. Inject still works if the broker is connected.`
               : "Waiting for the first NSE JSON pull. Leave Paper on. First indicative and later changes show in NSE live."}
           </p>
         )}
@@ -1609,12 +1610,12 @@ function AutoTapeStrip({ auto, autoLots }) {
           data-testid="cas-auto-test-log"
         >
           <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-            Paper / test log (not a Zerodha fill)
+            Paper / test log (no broker order)
           </div>
           <ul className="space-y-1">
             {auto.test_log.slice().reverse().slice(0, 8).map((row, i) => (
               <li key={`${row.at || i}-${row.order_id || row.kind}`} className="font-mono-data text-slate-800">
-                {row.kind || row.status}
+                {brokerSafeText(row.kind || row.status)}
                 {row.paper ? " · PAPER" : row.live_kite ? " · LIVE" : ""}
                 {row.opt_type ? ` · ${row.opt_type}` : ""}
                 {row.tradingsymbol ? ` · ${row.tradingsymbol}` : ""}

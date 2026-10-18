@@ -35,6 +35,17 @@ def test_kite_login_url_advertises_server_callback_redirect(monkeypatch):
     assert result["redirect_uri"] == "https://striklenz.com/api/kite/user/callback"
     assert result["redirect_uri"] in result["hint"]
     assert "test-api-secret" not in str(result)
+    assert "Kite" not in result["hint"]
+    assert "Zerodha" not in result["hint"]
+
+
+def test_public_broker_errors_hide_provider_names():
+    assert server._friendly_kite_connect_error(
+        RuntimeError("Kite Connect request failed at https://api.kite.trade/quote")
+    ) == "broker request failed at broker service"
+    assert server._sanitize_public_error("Kite token expired") == (
+        "Broker authentication issue — admin must reconnect"
+    )
 
 
 def test_kite_callback_bridges_encoded_request_token_to_spa(monkeypatch):

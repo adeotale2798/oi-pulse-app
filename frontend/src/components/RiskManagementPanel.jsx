@@ -11,6 +11,7 @@ import {
   summarizeSellerDecay,
 } from "@/lib/positionsRisk";
 import { DAY_LOSS } from "@/lib/capitalGuard";
+import { brokerSafeText } from "@/lib/brokerCopy";
 
 const SETTINGS_KEY = "oiPositionsRiskSettings_v3";
 const RISK_ORDER = { High: 5, Elevated: 4, "Data unavailable": 3, Normal: 1, Hedge: 0 };
@@ -300,7 +301,7 @@ function DailyCapitalPanel({ dayCapital, bookedPct, leftover, wallet }) {
           <small>Caution {DAY_LOSS.caution}% · stop adds {DAY_LOSS.stopAdds}% · defend {DAY_LOSS.defend}%</small>
         </div>
         <div>
-          <span>Kite available margin</span>
+          <span>Broker available margin</span>
           <strong>{margin == null ? "Unavailable" : `${money(leftover)} · ${number(margin, 2)}% of wallet`}</strong>
           <small>{dayCapital?.crumbs ? "Low-margin guard active; avoid treating leftover as new risk capital." : "Existing low-margin stop: available funds below 0.5% of wallet."}</small>
         </div>
@@ -521,7 +522,7 @@ function SellerPackagePanel({ packages, settings }) {
                       </tbody>
                     </table>
                   </div>
-                  <p>Coverage compares only the same index, expiry, strike and option type. It is a quantity comparison, not proof of a broker strategy or a guarantee of protection. Quantities are Kite units; lot size is not multiplied again.</p>
+                  <p>Coverage compares only the same index, expiry, strike and option type. It is a quantity comparison, not proof of a broker strategy or a guarantee of protection. Quantities are broker units; lot size is not multiplied again.</p>
                 </div>
               </details>
             </article>
@@ -912,9 +913,9 @@ export default function RiskManagementPanel({
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             {dataError
-              ? `Latest broker read failed: ${dataError} `
+              ? `Latest broker read failed: ${brokerSafeText(dataError)} `
               : stale ? "The latest Positions response is too old to assess reliably. " : ""}
-            Last Positions response: {ageLabel(lastRefresh, now)}. Kite’s option quote timestamp is not included in the existing Positions response.
+            Last Positions response: {ageLabel(lastRefresh, now)}. The broker's option quote timestamp is not included in the existing Positions response.
           </span>
         </div>
       )}
@@ -998,7 +999,7 @@ export default function RiskManagementPanel({
       <details className="position-meter-secondary" data-testid="risk-method-details">
         <summary>How alerts are calculated</summary>
         <p>
-          Sold positions are re-priced with bought options grouped by index and expiry; this grouping is not a broker strategy ID. Watch and High compare the worst estimated combined loss with the current close value of the sold options. Bought options are not alerted solely for premium decay. IV and Greeks are model estimates, not direct Kite quotes. Missing or stale inputs prevent a reliable package alert.
+          Sold positions are re-priced with bought options grouped by index and expiry; this grouping is not a broker strategy ID. Watch and High compare the worst estimated combined loss with the current close value of the sold options. Bought options are not alerted solely for premium decay. IV and Greeks are model estimates, not direct broker quotes. Missing or stale inputs prevent a reliable package alert.
         </p>
       </details>
 
@@ -1059,7 +1060,7 @@ export default function RiskManagementPanel({
         <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-center text-[12px] text-slate-500" role="status">Loading open positions…</div>
       ) : openRows.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-center text-[12px] text-slate-600" data-testid="risk-empty">
-          No open positions in the current Kite book.
+          No open positions in the current broker book.
         </div>
       ) : visibleRows.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-6 text-center text-[12px] text-slate-600">No positions match this filter.</div>

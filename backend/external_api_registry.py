@@ -17,7 +17,7 @@ HOSTS = {
     "api.twelvedata.com": ("twelve-data", "Twelve Data", "Market Data", "API key"),
     "financialmodelingprep.com": ("financial-modeling-prep", "Financial Modeling Prep", "Market Data", "API key"),
     "www.nseindia.com": ("nse-india", "NSE India", "Market Data", "Public session"),
-    "api.kite.trade": ("kite-connect", "Kite Connect", "Broker / Market Data", "API key + access token"),
+    "api.kite.trade": ("kite-connect", "Broker API", "Broker / Market Data", "App credentials"),
     "api.telegram.org": ("telegram", "Telegram Bot API", "Notifications", "Bot token"),
     "query1.finance.yahoo.com": ("yahoo-finance", "Yahoo Finance", "Market Data", "Public"),
     "finance.yahoo.com": ("yahoo-finance", "Yahoo Finance", "Market Data", "Public"),
@@ -35,8 +35,8 @@ HOSTS = {
     "api.ipify.org": ("ipify", "ipify", "Network", "Public"),
     "ifconfig.me": ("ifconfig", "ifconfig.me", "Network", "Public"),
     "icanhazip.com": ("icanhazip", "icanhazip.com", "Network", "Public"),
-    "zerodha.com": ("zerodha", "Zerodha", "Broker", "Public"),
-    "kite.zerodha.com": ("kite-login", "Kite Login", "Authentication", "API key"),
+    "zerodha.com": ("zerodha", "Broker API", "Broker", "Public"),
+    "kite.zerodha.com": ("kite-login", "Broker login", "Authentication", "App credentials"),
     "api.openai.com": ("openai", "OpenAI", "AI", "API key"),
     "api.deepseek.com": ("deepseek", "DeepSeek", "AI", "API key"),
     "api.x.ai": ("xai", "xAI Grok", "AI", "API key"),
@@ -51,9 +51,9 @@ MODULE_HINTS = {
     "desk_outside.py": ("Desk Outside", "Fetch market-news context and fallback constituent prices for the desk."),
     "fii_dii_service.py": ("FII / DII", "Fetch official FII and DII flows shown on the desk."),
     "cas_indicative_nse.py": ("CAS Indicative", "Read NSE indicative close data during the closing auction window."),
-    "cas_bridge.py": ("CAS Auto Trade", "Resolve the server public IP for Kite Connect whitelisting."),
+    "cas_bridge.py": ("CAS Auto Trade", "Resolve the server public IP for broker API access."),
     "notifier.py": ("Notifications", "Deliver configured StrikLenz alerts to Telegram."),
-    "kite_maintenance.py": ("Kite Maintenance", "Read Zerodha maintenance bulletins for desk availability."),
+    "kite_maintenance.py": ("Broker Maintenance", "Read broker maintenance bulletins for desk availability."),
     "desk_llm.py": ("Desk AI", "Configure the optional AI provider used by Desk AI."),
     "desk_guide.py": ("Desk AI", "Generate the optional Desk AI market guide."),
 }
@@ -75,7 +75,7 @@ def classify_external_url(raw_url: str) -> Optional[Dict[str, str]]:
         "category": category,
         "auth": auth,
         "endpoint": parsed.path or "/",
-        "host": host,
+        "host": "Broker API" if provider_id in {"kite-connect", "kite-login", "zerodha"} else host,
     }
 
 
@@ -118,7 +118,7 @@ def _kite_rows() -> Iterable[Dict[str, Any]]:
         ("market.instruments.all", "GET", "OI Pulse", "Load the instrument master to resolve option-chain tokens.", "backend/oi_service.py"),
         ("market.quote", "GET", "OI Pulse", "Fetch live OI, LTP and index quotes for the OI desk.", "backend/oi_service.py"),
         ("portfolio.positions", "GET", "Positions", "Fetch the live broker book and P&L for Positions and its risk panels.", "backend/server.py"),
-        ("api.token", "POST", "Kite Authentication", "Exchange the Kite request token for the daily access token.", "backend/server.py"),
+        ("api.token", "POST", "Broker Authentication", "Exchange the broker request token for the daily access token.", "backend/server.py"),
         ("order.place", "POST", "CAS Auto Trade", "Place the configured CAS auto-trade order when that workflow is armed.", "backend/cas_rule_expiry_automation/kite_client.py"),
         ("market.historical", "GET", "CAS Auto Trade", "Read historical candles for the CAS rule/backtest workflow.", "backend/cas_rule_expiry_automation/kite_client.py"),
     ]
@@ -127,8 +127,8 @@ def _kite_rows() -> Iterable[Dict[str, Any]]:
         endpoint = routes.get(route_key)
         if endpoint:
             out.append({
-                "provider_id": "kite-connect", "provider": "Kite Connect", "category": "Broker / Market Data",
-                "auth": "API key + access token", "host": "api.kite.trade", "endpoint": endpoint,
+                "provider_id": "kite-connect", "provider": "Broker API", "category": "Broker / Market Data",
+                "auth": "App credentials", "host": "Broker API", "endpoint": endpoint,
                 "method": method, "module": module, "purpose": purpose, "code_references": [ref], "enabled": True,
             })
     return out

@@ -4,13 +4,14 @@
 
 StrikLenz is a live **NSE open-interest desk** for **NIFTY**, **SENSEX**, and **BANKNIFTY**. It is built for option sellers and OI readers who need strike-level conviction during the cash session — not a generic charting terminal.
 
-Stack: **React (CRA/craco) + FastAPI + MongoDB + Zerodha Kite Connect**.
+Stack: **React (CRA/craco) + FastAPI + MongoDB + broker API integration**.
+See [`STACK.md`](STACK.md) for the full dependency, integration, and tooling inventory.
 
 ---
 
 ## What it does
 
-The publisher Kite token polls the option chain on a cadence you set (15 / 30 / 60s). Every tick is stored in Mongo. The desk then shows:
+The publisher's broker session polls the option chain on a cadence you set (15 / 30 / 60s). Every tick is stored in Mongo. The desk then shows:
 
 | Surface | Why it is there |
 |---------|-----------------|
@@ -19,23 +20,23 @@ The publisher Kite token polls the option chain on a cadence you set (15 / 30 / 
 | **Strike Table** | Compact CE/PE grid with optional gamma / institution chips |
 | **Sell Candidates (Admin-only)** | Admin strike-ranking surface; not available to members or guests |
 | **Build-up** | Fresh OI adding vs covering |
-| **Market Intelligence** | Ranked, event-clustered news with separate direction and volatility reads, measured outcomes, and India-linked global company coverage; material news about uploaded NIFTY / SENSEX constituents is retained across sectors such as IT, steel, chemicals, and construction |
-| **Positions** | Live F&O book (admin publisher token, or guest’s own Kite) |
+| **Market Intelligence** | News with a simple index risk, tentative direction, and main headline first; shows today's NSE-scheduled constituent results with a precise result-news found / not found match |
+| **Positions** | Live F&O book (admin publisher session, or guest’s own broker) |
 | **Alerts / Activity** | Server reversal alerts + session tape; newly arriving high-impact Market Intel stories also show an in-app alert and, when enabled, a browser notification while the desk is in the background |
-| **Events / Index Risk** | Calendar + event-risk tile (upload stamps stay admin-only) |
+| **Events / Index Risk** | Scheduled constituent calendar plus current Market Intel event exposure for the selected index (upload stamps stay admin-only) |
 | **Straddle** | ATM straddle premium path |
 | **Market Memory** | Recent, recency-weighted reactions around price levels, derived from existing OI snapshots |
 | **CAS Expiry** | Classic 15:28 SELL-both, plus **15:20 Auto Trade** (one ATM BUY). Runbook: [docs/CAS_AUTO_TRADE_15_20.md](docs/CAS_AUTO_TRADE_15_20.md) |
 | **Trade journal** | Admin daily P&L journal; Pro users get a separate private notes journal |
 
-Guests never share the publisher positions token. If **Positions** is ticked Public, they **Connect Zerodha** for *their* book. Charts always stay on the publisher OI feed.
+Guests never share the publisher positions token. If **Positions** is ticked Public, they connect their own broker for *their* book. Charts always stay on the publisher OI feed.
 
 ---
 
 ## How it works
 
 ```
-Zerodha Kite (publisher) ──► OITracker poll ──► Mongo oi_snapshots
+Publisher broker session ──► OITracker poll ──► Mongo oi_snapshots
                                       │
                                       ├── alerts + optional Telegram
                                       ├── ATM straddle samples
@@ -43,7 +44,7 @@ Zerodha Kite (publisher) ──► OITracker poll ──► Mongo oi_snapshots
                                                │
 React desk  ◄── /api/config + /api/settings ──┘
    Admin: all ticked Admin pages + admin daily journal
-   Guest: only ticked Public pages + own Kite book
+   Guest: only ticked Public pages + own broker book
    Member: Google account + Basic / Premium / Pro plan entitlements
 ```
 
@@ -70,7 +71,7 @@ long-pressing on touch, or with Shift+F10; use the existing **+** menu to
 restore it. Non-member dashboard layouts are saved in the browser. Shared OI
 remains publisher data; a Pro member's encrypted broker app
 credentials are saved against their Google account. The first successful
-Zerodha login locks that Google account to its Kite user ID; replacing app keys,
+broker login locks that Google account to its broker account ID; replacing app keys,
 removing credentials, or entering a later token cannot switch it to another
 broker identity. They enter a fresh request token each trading day; the saved
 API key and secret remain encrypted and are used only for that member's
@@ -119,7 +120,7 @@ in-app editor. The Admin can also globally show or hide plan **More info**
 walkthrough buttons; hidden plan details are not served by their public data
 endpoints. Optional screenshots support, but do not replace, the functional
 previews. Admin
-Settings → Subscriptions manages plan overrides, suspension, linked Kite
+Settings → Subscriptions manages plan overrides, suspension, linked broker
 identity, and the opt-in to persist Pro trade cycles.
 
 The walkthrough keeps OI Change separate from Open Interest, Strike Table,
@@ -138,7 +139,7 @@ Details: [docs/DATA.md](docs/DATA.md) · APIs: [docs/ABOUT.md](docs/ABOUT.md).
 - **Own poll, own thresholds** — not a delayed vendor OI widget.
 - **Huge-shift popup** on ATM ± 1 when institutions dump OI in a short window.
 - **Writer defense / gamma wall / institutional detector** on the strikes that actually matter.
-- **Two desks, one feed** — publisher OI for everyone; each user can still connect their own Kite book.
+- **Two desks, one feed** — publisher OI for everyone; each user can still connect their own broker book.
 - **Public / Admin page ticks** in Admin configuration so you hide noise from guests *or* from yourself.
 - **Weekend / holiday carry brief** so Friday’s board is not thrown away.
 - **Journal that stores booked P&L in Mongo**, not only in the browser.
@@ -157,8 +158,8 @@ Details: [docs/DATA.md](docs/DATA.md) · APIs: [docs/ABOUT.md](docs/ABOUT.md).
 | Public site walkthrough ON/OFF | **Admin Settings** → Site walkthrough or the dashboard Admin toggle (same saved setting) |
 | Site-wide guest access ON/OFF | Header **Public** switch |
 | Extra guest pages (Positions, Index Risk) | Public icon menu (same flags as settings) |
-| Publisher Kite key / daily token | **Kite API** |
-| Guest Kite | Positions → Connect Zerodha |
+| Publisher broker key / daily token | **Broker API** |
+| Guest broker | Positions → Connect broker |
 | Sounds, local OI thresholds (huge shift, velocity, lots) | Settings (saved in the browser) |
 | Constituents / event CSV | Admin upload — stamps stay admin-only |
 

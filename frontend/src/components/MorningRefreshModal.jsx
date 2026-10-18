@@ -11,7 +11,7 @@ import { safeHttpUrl } from "@/lib/safeUrl";
 /**
  * Morning Refresh Modal
  *
- * Zerodha Kite access tokens expire daily around 6 AM IST. Instead of the full
+ * Broker access tokens expire daily around 6 AM IST. Instead of the full
  * credentials modal, this one-tap flow uses the vault (stored api_key + encrypted
  * api_secret) so the user only needs to paste today's fresh request_token.
  *
@@ -19,8 +19,8 @@ import { safeHttpUrl } from "@/lib/safeUrl";
  *   1) Open modal -> checks GET /api/kite/vault.
  *      - If vault has api_key + api_secret -> ready for one-tap refresh.
  *      - Else -> point user to full CredentialsModal.
- *   2) User clicks "Login to Kite" -> new tab opens Kite OAuth.
- *   3) After Kite redirects back with ?request_token=..., user pastes it.
+ *   2) User clicks "Login to broker" -> new tab opens broker OAuth.
+ *   3) After the broker redirects back with ?request_token=..., user pastes it.
  *   4) Clicks "Refresh Token" -> POST /api/kite/refresh -> LIVE mode restored.
  */
 export default function MorningRefreshModal({ open, onOpenChange, onRefreshed, onNeedFullSetup }) {
@@ -54,7 +54,7 @@ export default function MorningRefreshModal({ open, onOpenChange, onRefreshed, o
 
   const doRefresh = async () => {
     if (!requestToken.trim()) {
-      toast.error("Paste the request_token from the Kite redirect URL first.");
+      toast.error("Paste the request_token from the broker redirect URL first.");
       return;
     }
     setBusy(true);
@@ -78,10 +78,10 @@ export default function MorningRefreshModal({ open, onOpenChange, onRefreshed, o
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RefreshCw className="w-4 h-4" />
-            Morning Kite Refresh
+            Morning Session Refresh
           </DialogTitle>
           <DialogDescription>
-            Kite access tokens expire every trading day ~6 AM IST. One tap to renew.
+            Broker access tokens expire every trading day ~6 AM IST. One tap to renew.
           </DialogDescription>
         </DialogHeader>
 
@@ -125,10 +125,10 @@ export default function MorningRefreshModal({ open, onOpenChange, onRefreshed, o
               className="flex items-center justify-center gap-2 w-full py-3 rounded-sm bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
               data-testid="btn-kite-login"
             >
-              1) Login to Kite <ExternalLink className="w-4 h-4" />
+              1) Login to broker <ExternalLink className="w-4 h-4" />
             </a>
             <div className="text-xs text-slate-500 -mt-1">
-              After Kite login, you&apos;ll land on a URL like
+              After broker login, you&apos;ll land on a URL like
               <code className="mx-1 px-1 bg-slate-100 rounded-sm">https://…?request_token=<b>xxx</b>&…</code>
               Copy that value below.
             </div>

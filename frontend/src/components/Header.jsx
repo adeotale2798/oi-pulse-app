@@ -527,9 +527,9 @@ export default function Header({
       "Fresh Pull resets today's OI board for every ENABLED index.\n\n" +
       "What it does:\n" +
       "• Deletes ALL stored OI snapshots (cannot undo)\n" +
-      "• Pulls one live Kite tick now for each enabled index\n" +
+      "• Pulls one live broker tick now for each enabled index\n" +
       "• Normal polling continues from there\n\n" +
-      "• Live (Kite): real ticks only — history before now cannot be recovered\n" +
+      "• Live broker feed: real ticks only — history before now cannot be recovered\n" +
       "• Offline: wipe only (no fake backfill)\n" +
       "• Disabled indices in Settings are skipped"
     )) return;
@@ -781,7 +781,7 @@ export default function Header({
             variant="outline"
             size="sm"
             className="rounded-sm min-h-11"
-            onClick={() => window.open("https://striklenz.com/admin/settings", "_blank", "noopener,noreferrer")}
+            onClick={() => window.location.assign("/admin/settings")}
           >
             <Settings2 className="w-4 h-4 mr-1.5" />
             Broker
@@ -1136,7 +1136,7 @@ export default function Header({
                   onSelect={(e) => {
                     e.preventDefault();
                     setAdminMenuOpen(false);
-                    window.location.assign("https://striklenz.com/admin/settings");
+                    window.location.assign("/admin/settings");
                   }}
                 >
                   <Settings2 className="w-4 h-4" />
@@ -1202,7 +1202,7 @@ export default function Header({
                   onSelect={(e) => { e.preventDefault(); setAdminMenuOpen(false); onOpenApiConfiguration?.(); }}
                 >
                   <ServerCog className="w-4 h-4" />
-                  API Configuration
+                  API Config &amp; Stack
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   data-testid="menu-open-settings"
@@ -1391,7 +1391,7 @@ export default function Header({
             variant="outline"
             size="sm"
             className="rounded-sm"
-            onClick={() => window.open("https://striklenz.com/admin/settings", "_blank", "noopener,noreferrer")}
+            onClick={() => window.location.assign("/admin/settings")}
           >
             <Settings2 className="w-4 h-4 mr-1.5" />
             Broker & Payments
@@ -1463,7 +1463,7 @@ export default function Header({
           </Button>
           <Button data-testid="btn-tablet-api-configuration" variant="outline" size="sm" className="rounded-sm" onClick={() => openAdminSheet(onOpenApiConfiguration)}>
             <ServerCog className="w-4 h-4 mr-1.5" />
-            API Configuration
+            API Config &amp; Stack
           </Button>
           {showAlertSounds && (
             <Button data-testid="btn-tablet-sounds" variant="outline" size="sm" className="rounded-sm" onClick={onOpenSounds}>
@@ -1823,7 +1823,7 @@ function ExtraTickerCell({ label, data, windows, serverIst, onOpenSessions, open
           <div className="mb-1 font-semibold text-slate-900 dark:text-slate-100">GIFT NIFTY Sessions</div>
           <div className="mb-1.5 text-slate-700 dark:text-slate-200">{giftTooltip}</div>
           <div className="mb-1.5 text-[11px] text-slate-500">
-            Kite: <span className="font-mono">{kiteSymbol || "NSEIX:GIFT NIFTY"}</span>
+            Broker instrument: <span className="font-mono">{kiteSymbol || "NSEIX:GIFT NIFTY"}</span>
             {source ? ` · ${source}` : ""}
             {isProxy ? " · proxy" : ""}
           </div>

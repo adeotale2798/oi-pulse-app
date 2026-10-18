@@ -41,7 +41,7 @@ describe("landing copy", () => {
       hero_eyebrow: "Live options intelligence · NIFTY · BANK NIFTY · SENSEX",
       faq_1_answer: "Premium adds personal in-app OI change and OI shift alerts, alert preferences, Market Intel, and Global Markets. It uses the publisher's shared market feed and does not require a broker login.",
       faq_2_answer: "Pro includes Premium plus your own Positions workspace, a private trade journal, an overnight risk-factor summary, and Desk AI market context. Only Pro's Positions data uses your own broker login; Desk AI does not analyze your positions or provide trade instructions.",
-      pro_description: "Connect your own Zerodha account for a private positions book and per-leg P&L, then keep journal notes, booked-day reviews and neutral risk context beside the shared market desk. Desk AI uses shared market evidence only—it does not access, analyze or comment on your positions. All screens below use fictional examples; Normal and Premium never need your broker login.",
+      pro_description: "Connect your own broker account for a private positions book and per-leg P&L, then keep journal notes, booked-day reviews and neutral risk context beside the shared market desk. Desk AI uses shared market evidence only—it does not access, analyze or comment on your positions. All screens below use fictional examples; Normal and Premium never need your broker login.",
       card_desk_ai_description: "A custom Admin-written Desk AI description.",
     });
 

@@ -417,8 +417,8 @@ export default function OverflowTabBar({
                           : ""
                       } ${
                         t.v === value
-                          ? "bg-emerald-50 font-semibold text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                          ? "bg-emerald-50 font-semibold text-slate-950 dark:bg-emerald-950/40 dark:text-slate-100"
+                          : "text-slate-950 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                       }`}
                     >
                       {t.l}

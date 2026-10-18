@@ -255,7 +255,7 @@ export default function CredentialsModal({ open, onOpenChange, onSaved }) {
         setSaving(false);
         return;
       }
-      toast.success("Kite credentials saved. Switched to LIVE mode.");
+      toast.success("Broker credentials saved. Switched to LIVE mode.");
       setApiKey("");
       setApiSecret("");
       onSaved?.();
@@ -457,7 +457,7 @@ export default function CredentialsModal({ open, onOpenChange, onSaved }) {
                   setSecretStored(false);
                   setVault(null);
                   setStatus(null);
-                  toast.success("Signed out of Kite — desk is offline");
+                  toast.success("Signed out of broker — desk is offline");
                   onSaved?.();
                   onOpenChange?.(false);
                 } catch (e) {

@@ -360,7 +360,7 @@ function PositionMeterPreview() {
         <div className="mt-0.5 text-[7px] text-slate-500">Caution −3% · stop adds −5% · defend −8%</div>
           </div>
           <div>
-        <div className="text-[7px] text-slate-500">Kite available margin</div>
+        <div className="text-[7px] text-slate-500">Broker available margin</div>
         <div className="text-[9px] font-bold text-slate-800">₹39,577 · 1.08% of wallet</div>
         <div className="mt-0.5 text-[7px] leading-3 text-slate-500">Low-margin stop is available below 0.5% of wallet.</div>
           </div>
@@ -449,7 +449,7 @@ function ProShowcase({ snap, copy }) {
 
         <motion.div {...reveal} className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { icon: PlugZap, t: "Connect broker", d: "Your Zerodha account powers your private book" },
+            { icon: PlugZap, t: "Connect broker", d: "Your broker account powers your private book" },
             { icon: LineChart, t: "Position P&L", d: "Review per-leg performance in your workspace" },
             { icon: Gauge, t: "Neutral risk view", d: "See the factors behind your exposure summary" },
             { icon: Bot, t: "Desk AI", d: "One briefing across Market Intel, Global Markets and Indian movers" },
@@ -478,7 +478,7 @@ function Brokers({ brokers, visibleBrokerIds, copy }) {
       <motion.div {...reveal} className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {list.map((b) => (
           <div key={b.id} className={`flex items-center justify-between rounded-2xl border p-4 ${b.enabled ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
-            <span className="font-semibold text-slate-800">{b.name}</span>
+            <span className="font-semibold text-slate-800">{brokerSafeText(b.name)}</span>
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${b.enabled ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"}`}>{b.enabled ? "Live" : "Soon"}</span>
           </div>
         ))}

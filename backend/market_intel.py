@@ -9,13 +9,14 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import logging
+import math
 import re
 import socket
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 from zoneinfo import ZoneInfo
 
 from error_log import record_error, redact
@@ -97,8 +98,8 @@ RSS_TEMPLATES = [
         "id": "google-news-in",
         "name": "Google News (markets, IN)",
         "source_type": "RSS",
-        "endpoint": "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+FOMC+OR+crude+OR+oil+OR+war+OR+conflict+OR+Iran+OR+Russia+OR+Ukraine+OR+China+OR+India+OR+Japan+OR+UAE+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
-        "note": "Public RSS. India markets plus geopolitical and oil-shock headlines.",
+        "endpoint": "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+%22Bank+Nifty%22+OR+%22HDFC+Bank%22+OR+%22ICICI+Bank%22+OR+%22Axis+Bank%22+OR+earnings+OR+%22quarterly+results%22+OR+FOMC+OR+crude+OR+oil+OR+war+OR+conflict+OR+Iran+OR+Russia+OR+Ukraine+OR+China+OR+India+OR+Japan+OR+UAE+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+        "note": "Public RSS. Indian index news, major bank results, macro, geopolitics, and oil-shock headlines.",
     },
     {
         "id": "google-news-india-company-impact",
@@ -430,7 +431,10 @@ def classify_event_type(text: str) -> str:
         r"\bhamas\b", r"\bmilitary\b", r"\bmissile\b", r"\bdrone\b",
     )):
         return "geopolitics"
-    if _hits(t, (r"\bearnings\b", r"\bmerger\b", r"\bceo\b", r"\bipo\b", r"\bdefault\b")):
+    if _hits(t, (
+        r"\bearnings?\b", r"\bresults?\b", r"\bprofits?\b", r"\brevenue\b",
+        r"\bmerger\b", r"\bceo\b", r"\bipo\b", r"\bdefault\b",
+    )):
         return "corporate"
     return "other"
 
@@ -1046,12 +1050,15 @@ async def ensure_default_sources(db) -> None:
     for t in RSS_TEMPLATES:
         existing = await db[SRC_COL].find_one({"id": t["id"]})
         if existing:
-            # Upgrade only our previous Google catalog query; leave any admin
-            # source changes and every enabled/disabled choice untouched.
+            # Upgrade only known older catalog URLs; preserve custom edits and
+            # every enabled/disabled choice.
             if (
                 t["id"] == "google-news-in"
                 and existing.get("is_catalog")
-                and existing.get("endpoint") == "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+FOMC+OR+crude+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+                and existing.get("endpoint") in {
+                    "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+FOMC+OR+crude+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+                    "https://news.google.com/rss/search?q=RBI+OR+Sensex+OR+Nifty+OR+FOMC+OR+crude+OR+oil+OR+war+OR+conflict+OR+Iran+OR+Russia+OR+Ukraine+OR+China+OR+India+OR+Japan+OR+UAE+when:1d&hl=en-IN&gl=IN&ceid=IN:en",
+                }
             ):
                 await db[SRC_COL].update_one(
                     {"id": t["id"]},
@@ -1059,10 +1066,95 @@ async def ensure_default_sources(db) -> None:
                 )
             continue
         await db[SRC_COL].update_one({"id": t["id"]}, {"$set": _catalog_source_doc(t, enabled=True, priority=20)}, upsert=True)
+    await ensure_constituent_news_sources(db)
     for t in PUBLIC_API_CATALOG:
         if await db[SRC_COL].find_one({"id": t["id"]}):
             continue
         await db[SRC_COL].update_one({"id": t["id"]}, {"$set": _catalog_source_doc(t, enabled=True, priority=40)}, upsert=True)
+
+
+async def ensure_constituent_news_sources(db) -> None:
+    """Maintain index-specific Google News searches for high-weight companies."""
+    rows = await db["index_constituents"].find(
+        {"index": {"$in": ["NIFTY", "BANKNIFTY", "SENSEX"]}},
+        {"_id": 0, "index": 1, "company_name": 1, "company": 1, "name": 1, "weightage": 1},
+    ).to_list(length=1000)
+    topics = (
+        "results", "earnings", '"quarterly results"', "profit", "revenue",
+        "guidance", "orders", "contracts", "merger", "acquisition",
+        "regulatory", "fraud", "default",
+    )
+    for index in ("NIFTY", "BANKNIFTY", "SENSEX"):
+        companies: Dict[str, Tuple[str, float]] = {}
+        for row in rows:
+            if str(row.get("index") or "").upper() != index:
+                continue
+            name = str(
+                row.get("company_name") or row.get("company") or row.get("name") or ""
+            ).strip()
+            name = re.sub(r"\s+(?:private\s+)?(?:limited|ltd\.?|pvt\.?)$", "", name, flags=re.I).strip()
+            if not name or len(name) < 3:
+                continue
+            try:
+                weight = float(row.get("weightage") or 0)
+            except (TypeError, ValueError, OverflowError):
+                weight = 0.0
+            if not math.isfinite(weight) or weight <= 0:
+                continue
+            key = re.sub(r"[^a-z0-9]+", "", name.lower())
+            if key not in companies or weight > companies[key][1]:
+                companies[key] = (name, weight)
+
+        top_companies = sorted(
+            companies.values(), key=lambda item: item[1], reverse=True
+        )[:12]
+        if not top_companies:
+            continue
+        # Keep the query targeted: company names and material event terms must
+        # both match, rather than OR-ing either group with unrelated headlines.
+        company_query = " OR ".join(f'"{name}"' for name, _ in top_companies)
+        query = f"({company_query}) ({' OR '.join(topics)}) when:2d"
+        endpoint = (
+            "https://news.google.com/rss/search?q="
+            f"{quote_plus(query)}&hl=en-IN&gl=IN&ceid=IN:en"
+        )
+        source_id = f"google-news-constituents-{index.lower()}"
+        source = {
+            "id": source_id,
+            "name": f"Google News ({index} major constituents)",
+            "source_type": "RSS",
+            "endpoint": endpoint,
+            "note": (
+                f"Automatically targets results and material company events for the "
+                f"12 highest-weight uploaded {index} constituents from the last 48 hours."
+            ),
+            "priority": 15,
+            "max_items": 30,
+        }
+        existing = await db[SRC_COL].find_one({"id": source_id})
+        if existing:
+            # Refresh only a URL that this helper generated; preserve admin edits.
+            if (
+                existing.get("auto_generated_constituent_feed")
+                and existing.get("endpoint") == existing.get("generated_endpoint")
+                and existing.get("endpoint") != endpoint
+            ):
+                    await db[SRC_COL].update_one(
+                        {"id": source_id},
+                        {"$set": {
+                            "endpoint": endpoint,
+                            "generated_endpoint": endpoint,
+                            "note": source["note"],
+                        }},
+                    )
+            continue
+        doc = _catalog_source_doc(source, enabled=True, priority=15)
+        doc["note"] = source["note"]
+        doc["auto_generated_constituent_feed"] = True
+        doc["generated_endpoint"] = endpoint
+        await db[SRC_COL].update_one(
+            {"id": source_id}, {"$set": doc}, upsert=True
+        )
 
 
 async def ensure_indexes(db) -> None:
@@ -1442,6 +1534,7 @@ async def load_constituent_terms(db) -> List[Tuple[str, float]]:
     terms: List[Tuple[str, float]] = []
     if db is not None:
         try:
+            company_tokens: Dict[str, Dict[str, float]] = {}
             async for row in db.index_constituents.find(
                 {}, {"symbol": 1, "company": 1, "company_name": 1, "name": 1, "weightage": 1}
             ):
@@ -1449,10 +1542,34 @@ async def load_constituent_terms(db) -> List[Tuple[str, float]]:
                     w = float(row.get("weightage") or 0)
                 except (TypeError, ValueError):
                     w = 0.0
+                symbol = re.sub(r"[^A-Z0-9]+", "", str(row.get("symbol") or "").upper())
                 for k in ("symbol", "company", "company_name", "name"):
                     s = str(row.get(k) or "").strip().lower()
                     if len(s) >= 3:
                         terms.append((s, w))
+                company_name = str(
+                    row.get("company_name") or row.get("company") or row.get("name") or ""
+                )
+                name_tokens = re.findall(r"[A-Z0-9]+", company_name.upper())
+                company_key = "".join(
+                    token for token in name_tokens
+                    if token not in {"LIMITED", "LTD", "PRIVATE", "PVT", "COMPANY", "CORP"}
+                ) or symbol
+                for token in name_tokens:
+                    if (
+                        company_key
+                        and len(token) >= 4
+                        and token not in {
+                            "AXIS", "BANK", "COMPANY", "FINANCIAL", "INDIA", "INDUSTRIES",
+                            "LIMITED", "LTD", "PRIVATE", "SERVICES",
+                        }
+                    ):
+                        company_tokens.setdefault(token, {})[company_key] = max(
+                            w, company_tokens.get(token, {}).get(company_key, 0.0)
+                        )
+            for token, symbols in company_tokens.items():
+                if len(symbols) == 1:
+                    terms.append((token.lower(), max(symbols.values())))
         except Exception:
             terms = _constit_cache["terms"] or []
     _constit_cache["t"] = now
@@ -1462,10 +1579,18 @@ async def load_constituent_terms(db) -> List[Tuple[str, float]]:
 
 def constituent_boost(text: str, terms: List[Tuple[str, float]]) -> Tuple[bool, int]:
     t = (text or "").lower()
+    normalized_text = re.sub(r"[^a-z0-9]+", "", t)
     best = 0.0
     hit = False
     for name, w in terms:
-        if name and name in t:
+        normalized_name = re.sub(r"[^a-z0-9]+", "", str(name).lower())
+        if not normalized_name:
+            continue
+        if " " not in str(name).strip() and re.fullmatch(r"[a-z0-9]+", str(name).strip()):
+            found = bool(re.search(rf"(?<![a-z0-9]){re.escape(str(name).strip().lower())}(?![a-z0-9])", t))
+        else:
+            found = normalized_name in normalized_text
+        if found:
             hit = True
             if w > best:
                 best = w

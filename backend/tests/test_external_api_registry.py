@@ -5,16 +5,19 @@ from external_api_registry import _source_rows, build_registry, classify_externa
 
 def test_classifies_only_known_external_providers():
     assert classify_external_url("https://api.twelvedata.com/quote?symbol=INFY")["endpoint"] == "/quote"
-    assert classify_external_url("https://api.kite.trade/quote")["provider"] == "Kite Connect"
+    classified = classify_external_url("https://api.kite.trade/quote")
+    assert classified["provider"] == "Broker API"
+    assert classified["host"] == "Broker API"
     assert classify_external_url("https://striklenz.com/api/oi/NIFTY") is None
 
 
 def test_registry_is_source_derived_and_contains_live_integrations():
     registry = asyncio.run(build_registry(None))
     providers = {row["name"]: row for row in registry["providers"]}
-    assert "Kite Connect" in providers
+    broker_api = next(row for row in registry["providers"] if row["id"] == "kite-connect")
+    assert broker_api["name"] == "Broker API"
     assert "Twelve Data" in providers
-    assert any(endpoint["endpoint"] == "/quote" for endpoint in providers["Kite Connect"]["endpoints"])
+    assert any(endpoint["endpoint"] == "/quote" for endpoint in broker_api["endpoints"])
     assert registry["summary"]["endpoints"] >= 1
     assert registry["summary"]["providers"] > 0
     assert registry["summary"]["active"] == 0

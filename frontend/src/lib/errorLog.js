@@ -117,7 +117,7 @@ export function errorSourceLabel(src) {
   const known = {
     market_intel: "Mkt Intel",
     straddle: "Straddle",
-    kite: "Kite",
+    kite: "Broker",
     adr: "Global Markets",
     global_market: "Global Market",
     ui: "UI",

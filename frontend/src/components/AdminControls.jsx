@@ -381,7 +381,7 @@ export default function AdminControls({
               : "New names are saved and enter guest pages immediately. Blocked IPs stay blocked."}
           </p>
           {[
-            { id: "positions", label: "Positions · Connect Zerodha" },
+            { id: "positions", label: "Positions · Connect broker" },
             { id: "index-events", label: "Index Risk" },
           ].map((p) => (
             <label key={p.id} className="flex items-center justify-between gap-2 text-[12px] text-slate-800">

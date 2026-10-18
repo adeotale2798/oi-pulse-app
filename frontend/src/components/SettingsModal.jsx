@@ -632,7 +632,7 @@ export default function SettingsModal({
                     try { window.dispatchEvent(new CustomEvent("oi-admin-open-indices")); } catch (_) {}
                   }}
                 >
-                  Discover more indices from Kite…
+                  Discover more indices from the broker…
                 </button>
               ) : null}
             </div>
@@ -757,9 +757,9 @@ export default function SettingsModal({
                     <span className="text-sm font-medium">Show CAS indicative close (IEP) in the header</span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    IEP is the Kite Quote <code>indicative_close_price</code> under LTP on header index tiles
+                    IEP is the broker quote <code>indicative_close_price</code> under LTP on header index tiles
                     (<code>ticker-*-iep</code>) and as Indicative Close on the sidebar spot. It never replaces LTP.
-                    Default window 15:20–15:30 IST (Kite IEP stops when the cash close settles). Off = no extra Quote calls. Preview now shows that UI at the current time so you can test without waiting for CAS.
+                    Default window 15:20–15:30 IST (broker IEP stops when the cash close settles). Off = no extra Quote calls. Preview now shows that UI at the current time so you can test without waiting for CAS.
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
@@ -975,7 +975,7 @@ export default function SettingsModal({
                 <div className="text-xs text-slate-500">
                   Tick <b>Public</b> to show a page to guests. Tick <b>Admin</b> to keep it on your own desk.
                   They are independent — you can hide a page from yourself without hiding it from guests, and the other way around.
-                  Tick Positions (Public) so guests can Connect Zerodha. Last-upload stamps stay admin-only.
+                  Tick Positions (Public) so guests can connect their broker. Last-upload stamps stay admin-only.
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {DASHBOARD_PAGES.map((page) => {
@@ -994,7 +994,7 @@ export default function SettingsModal({
                       : page.id === "index-events"
                       ? "Optional Index Risk page. Unticking it does not hide the four info tiles (including Index Impact)."
                       : page.id === "positions"
-                        ? "Guests see Connect Zerodha for their own book. Charts stay on your publisher token. Header Today P&L stays admin-only."
+                        ? "Guests connect their own broker for Positions. Charts stay on your publisher feed. Header Today P&L stays admin-only."
                         : page.id === "sell-candidates"
                           ? "Admin-only candidate analysis; unavailable to guests and members."
                           : page.id === "cas"
