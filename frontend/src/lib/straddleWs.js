@@ -45,6 +45,7 @@ export function connectStraddleWS(index, opts = {}, onMessage, onOpen, onClose, 
   let stopped = false;
   let backoff = 1000;
   let started = false;
+  let reconnectTimer = null;
 
   // Avoid connecting during quiescent periods unless explicitly allowed.
   // Instead, watch for market reopen and auto-start when it happens.
@@ -67,21 +68,30 @@ export function connectStraddleWS(index, opts = {}, onMessage, onOpen, onClose, 
             // ignore
           }
         }, 30_000);
-        return {
-          stop: () => { stopped = true; if (watcherId) { clearInterval(watcherId); watcherId = null; } try { ws && ws.close(); } catch (_) {} started = false; },
-          isStarted: () => started,
-        };
+        return { stop, isStarted: () => started };
       }
     } catch (e) {
       // fallthrough
     }
   }
 
+  function scheduleReconnect() {
+    if (stopped || reconnectTimer) return;
+    // Keep retries cancellable so a stopped feed cannot reconnect after unmount.
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (stopped) return;
+      backoff = Math.min(30000, backoff * 1.5);
+      start();
+    }, backoff);
+  }
+
   function start() {
-    stopped = false;
+    if (stopped) return;
     try {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
+        if (stopped) return;
         started = true;
         if (process.env.NODE_ENV !== "production") {
           console.log("[Straddle WS] Connected");
@@ -90,6 +100,7 @@ export function connectStraddleWS(index, opts = {}, onMessage, onOpen, onClose, 
         if (onOpen) onOpen();
       };
       ws.onmessage = (ev) => {
+        if (stopped) return;
         try { const d = JSON.parse(ev.data); if (onMessage) onMessage(d); } catch (e) { console.error("[Straddle WS] Parse error:", e); }
       };
       ws.onclose = () => {
@@ -99,21 +110,25 @@ export function connectStraddleWS(index, opts = {}, onMessage, onOpen, onClose, 
         }
         if (onClose) onClose();
         if (stopped) return;
-        setTimeout(() => { backoff = Math.min(30000, backoff * 1.5); start(); }, backoff);
+        scheduleReconnect();
       };
-      ws.onerror = (err) => { 
+      ws.onerror = (err) => {
         console.error("[Straddle WS] Error:", err);
         try { ws && ws.close(); } catch (_) {} 
       };
     } catch (e) {
       console.error("[Straddle WS] Failed to create WebSocket:", e);
-      if (!stopped) {
-        setTimeout(() => { backoff = Math.min(30000, backoff * 1.5); start(); }, backoff);
-      }
+      scheduleReconnect();
     }
   }
 
-  function stop() { stopped = true; started = false; try { ws && ws.close(); } catch (_) {} if (watcherId) { clearInterval(watcherId); watcherId = null; } }
+  function stop() {
+    stopped = true;
+    started = false;
+    try { ws && ws.close(); } catch (_) {}
+    if (watcherId) { clearInterval(watcherId); watcherId = null; }
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  }
   start();
   return { stop, isStarted: () => started };
 }

@@ -69,6 +69,8 @@ def test_landing_page_copy_is_whitelisted_and_bounded():
         "copy": {
             "hero_title": "  Custom headline  ",
             "faq_0_answer": "A" * 900,
+            "film_title": "  Three plans, one desk  ",
+            "film_description": "B" * 900,
             "pro_positions_label": "PositionMeter preview",
             "pro_desk_ai_label": "Legacy preview label",
             "unlisted_internal_setting": "must not be public",
@@ -78,6 +80,8 @@ def test_landing_page_copy_is_whitelisted_and_bounded():
 
     assert config["copy"]["hero_title"] == "Custom headline"
     assert len(config["copy"]["faq_0_answer"]) == 800
+    assert config["copy"]["film_title"] == "Three plans, one desk"
+    assert len(config["copy"]["film_description"]) == 800
     assert config["copy"]["pro_positions_label"] == "PositionMeter preview"
     assert "pro_desk_ai_label" not in config["copy"]
     assert "unlisted_internal_setting" not in config["copy"]

@@ -51,6 +51,7 @@ flowchart LR
 - Trade Journal archive imports are parsed and held in browser-tab memory; the imported cycle-ledger calendar is visibly separate from saved `trade_journal` P&L and never posts archive contents to the API.
 - HTTP: `frontend/src/lib/api.js` (axios, admin/guest headers).
 - Membership screens: `AccountSettings.jsx` owns member preferences and billing, `MemberJournal.jsx` writes caller-scoped Pro journal rows, and `AdminSubscriptions.jsx` is the admin member-control surface. Admin plan configuration is separate from Public guest access.
+- The public product walkthrough includes a silent, original 24-second motion film and a text transcript. The film uses illustrative visuals only, follows the Basic / Premium / Pro feed and privacy boundaries, and does not read live quotes or member data.
 - Razorpay cancellation is immediate: cancellation, payment failure, and terminal/non-active provider lifecycle events remove paid entitlement and set the member plan to Basic. Admin subscription health derives current accessible plan counts from member records and all-time billing totals from deduplicated `billing_events`.
 - Basic is the public label for the backward-compatible `normal` plan ID. Auth state reports whether a member's assigned plan is enabled; disabled-plan members retain account access but are directed to `/account` and only currently available paid plans.
 - Admin plan pricing supports optional first-period prices per paid-plan cadence. Checkout attaches that cadence's Razorpay offer ID and stores/returns the configured first-period price; Admin must verify in the Razorpay Dashboard that the provider offer is a single-use flat discount equal to regular price minus offer price, with offer failure set to block payment. The provider API does not expose offer terms for this checkout to compare automatically, so the app only verifies the matching ID is present. Later subscription cycles retain the regular Razorpay plan amount.
@@ -138,6 +139,22 @@ INDEX_CONFIG + settings.enabled_indices
         ↓
 OITracker poll → oi_snapshots → OI Change / OI / Straddle / …
 ```
+
+The Straddle chart prefers recent valid WebSocket ticks and continues its
+configured REST tick poll while that stream has not produced fresh data.
+Backend fallback snapshots retain their source timestamps and are rejected
+after the configured source cadence; repeated use of the same OI snapshot does
+not create duplicate Straddle history points. The chart accepts only current,
+in-order, non-outlier live ticks, so rejected socket messages cannot make the
+WebSocket appear healthy or suppress REST fallback.
+Spot quotes are reconciled by source timestamp so a delayed REST snapshot
+cannot replace a newer WebSocket value; live REST quotes can replace stale
+socket values. REST-backed dashboard pollers also run immediately when market
+status transitions from closed to open.
+Spot and Straddle socket owners cancel pending reconnect timers when stopped,
+so a closed or unmounted feed cannot establish a new connection afterward.
+Positions settlement requests are serialized behind an in-flight book refresh,
+and a failed request cannot prevent the queued post-login refresh from retrying.
 
 NIFTY / SENSEX / BANKNIFTY migrate into `index_registry` on tracker start. Enabling FINNIFTY (etc.) uses the **same** `get_snapshot` pipeline. Do not add a second OI service.
 

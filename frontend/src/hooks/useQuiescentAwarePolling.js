@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { isMarketQuiescent } from "@/lib/marketTimes";
+import { shouldRunPollImmediately } from "@/lib/pollingLifecycle";
 
 // Hook: useQuiescentAwarePolling
 // - callback: async or sync function to run
@@ -9,6 +10,7 @@ import { isMarketQuiescent } from "@/lib/marketTimes";
 export default function useQuiescentAwarePolling(callback, ms, deps = [], options = {}) {
   const { status = undefined, immediate = true, allowDuringQuiescent = false, dedupeKey = null, delayMs = 0 } = options;
   const mountedRef = useRef(false);
+  const wasQuiescentRef = useRef(null);
 
   const runRef = useRef(false);
   const callbackRef = useRef(callback);
@@ -76,8 +78,14 @@ export default function useQuiescentAwarePolling(callback, ms, deps = [], option
 
     try {
       const closed = isMarketQuiescent(status);
+      const runImmediately = shouldRunPollImmediately({
+        hasRun: mountedRef.current,
+        wasQuiescent: wasQuiescentRef.current,
+        isQuiescent: closed,
+      });
+      wasQuiescentRef.current = closed;
 
-      if (!mountedRef.current && immediate) {
+      if (runImmediately && immediate) {
         // Only the primary owner should perform the immediate run to avoid duplicates
         if (!dedupeKey || isPrimaryOwner) {
           if (process.env.NODE_ENV !== 'production') {

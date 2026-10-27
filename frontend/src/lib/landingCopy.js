@@ -51,6 +51,9 @@ export const LANDING_COPY_FIELDS = [
       ["product_eyebrow", "Eyebrow", "Interactive demo"],
       ["product_title", "Section headline", "Step inside the terminal"],
       ["product_description", "Section description", "Explore OI Change, Straddle, Market & Global Events, Global Markets, Market Intel, Desk AI and a private Positions workspace. Open the Trade Journal preview to see how member notes and booked-day reviews fit into the terminal. Gallery values are illustrative samples."],
+      ["film_eyebrow", "Motion film eyebrow", "A 24-second look"],
+      ["film_title", "Motion film headline", "Three plans. One clear market view."],
+      ["film_description", "Motion film description", "See how the shared OI desk, Premium alerts and context, and Pro's private broker-connected workspace fit together. The film uses illustrative visuals, not live market values."],
     ],
   },
   {

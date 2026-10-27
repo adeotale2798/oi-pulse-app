@@ -11,7 +11,7 @@ Primary database name comes from `DB_NAME` (env). Key collections:
 | `kite_underlyings` | Compact search cache from the daily Kite instruments dump |
 | `admin_audit` | Admin enable/disable (and similar) with previous/new state |
 | `alerts` | Shared server-side OI reversal / pressure alerts; prior-day records are removed at 09:00 IST |
-| `straddle_samples` | ATM straddle time series |
+| `straddle_samples` | ATM straddle time series; uses the quote's source timestamp, accepts only recent OI fallback snapshots, and avoids persisting the same fallback timestamp more than once |
 | `market_memory_events` / `market_memory_state` | Level interactions and latest per-index memory state, captured from existing OI snapshots |
 | `credentials` | Encrypted Kite API key/secret/token vault (`_id: kite`) |
 | `settings` | Admin settings, public access flag (`open`, `require_approval`, expiry), configurable public-entry auth wait (5–60 seconds), password hash, sidebar notes, `mcx_desk_on`, Market Intelligence ingest/retention, `telegram_prefs` (alert filters + Fernet `bot_token_enc` + `chat_id`), `adr_prefs` (Twelve Data Fernet `api_key_enc`, poll/alerts), and landing-page config including the Admin-refreshed sanitized plan-demo snapshot |

@@ -15,7 +15,12 @@ import { sessionAnchorDateIST } from "@/lib/holidays";
 import PageBrandTitle from "@/components/PageBrandTitle";
 import DataLoadingState from "@/components/DataLoadingState";
 import { clampConfiguredPollMs } from "@/lib/dataTruth";
-import { straddleLiveRefreshActive, straddleRefreshLabel } from "@/lib/straddleRefresh";
+import {
+  straddleLiveRefreshActive,
+  straddleRefreshLabel,
+  straddleWsDataFresh,
+  shouldAcceptLiveStraddlePoint,
+} from "@/lib/straddleRefresh";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -262,6 +267,7 @@ export default function StraddleChart({
   const [historyError, setHistoryError] = useState(false);
   const [tradeDate, setTradeDate] = useState(() => sessionAnchorDateIST(new Date(), getMarketOpenMinute()));
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const lastAcceptedPointRef = useRef(null);
   const wsRef = useRef(null);
   const tradeDateRef = useRef(tradeDate);
   const livePollMs = clampConfiguredPollMs(pollMs);
@@ -300,35 +306,36 @@ export default function StraddleChart({
   const pushLivePoint = (raw) => {
     const activeDate = tradeDateRef.current;
     const pointDate = toIstDateString(raw.ts ? (typeof raw.ts === "number" ? raw.ts : Date.parse(raw.ts)) : Date.now());
-    if (pointDate !== activeDate) return;
+    if (pointDate !== activeDate) return false;
 
     const win = sessionWindowMs(activeDate);
-    if (!win) return;
+    if (!win) return false;
     const point = normalizePoint(raw, win.start);
-    if (!point) return;
-    if (point.ts < win.start - 60_000 || point.ts > win.end) return;
+    if (!point) return false;
+    if (point.ts < win.start - 60_000 || point.ts > win.end) return false;
+    if (!shouldAcceptLiveStraddlePoint(
+      point,
+      lastAcceptedPointRef.current,
+      Date.now(),
+      livePollMs * 2,
+    )) return false;
 
+    lastAcceptedPointRef.current = point;
     applyMeta(point, point.ts);
     setHistoryError(false);
     setPoints((prev) => {
       const sessionPrev = filterSessionPoints(prev, activeDate);
-      const last = sessionPrev.length ? sessionPrev[sessionPrev.length - 1] : null;
-      if (last?.premium > 0) {
-        // Reject both explosive spikes and near-zero drops that create comb charts.
-        if (point.premium > Math.max(last.premium * 3, last.premium + 200)) return prev;
-        if (point.premium < last.premium * 0.35 && point.premium < 10 && last.premium > 20) {
-          return prev;
-        }
-      }
       const next = upsertBucketed(sessionPrev, point, bucketMs);
       if (next.length > maxPoints) return next.slice(next.length - maxPoints);
       return next;
     });
+    return point;
   };
 
   // Hard reset chart state when index/expiry changes so we never blend
   // NIFTY (~100) premiums into a SENSEX (~700) series (or vice versa).
   useEffect(() => {
+    lastAcceptedPointRef.current = null;
     setPoints([]);
     setMeta(null);
   }, [index, expiry]);
@@ -356,6 +363,13 @@ export default function StraddleChart({
           filterSessionPoints(cleaned, sessionDate),
           bucketMs,
         ).slice(-maxPoints);
+        const latestHistoryPoint = sliced[sliced.length - 1];
+        if (
+          latestHistoryPoint
+          && (!lastAcceptedPointRef.current || latestHistoryPoint.ts >= lastAcceptedPointRef.current.ts)
+        ) {
+          lastAcceptedPointRef.current = latestHistoryPoint;
+        }
         // Keep same-session samples on an empty refresh; never merge another session.
         setPoints((previous) => {
           const sessionPoints = filterSessionPoints(previous, sessionDate);
@@ -400,7 +414,7 @@ export default function StraddleChart({
     let conn = null;
     let pollId = null;
     let running = true;
-    let wsAlive = false;
+    let lastWsDataAt = 0;
 
     if (!liveRefresh) {
       return () => {
@@ -420,8 +434,8 @@ export default function StraddleChart({
           stopped = true;
           return;
         }
-        // Prefer WS when connected — avoid double Kite quote load.
-        if (wsAlive) return;
+        // An open socket can still be silent; only recent valid ticks suppress REST fallback.
+        if (straddleWsDataFresh(lastWsDataAt, Date.now(), livePollMs)) return;
         const res = await fetchStraddleTick(index, { expiry });
         if (stopped) return;
         pushLivePoint(res);
@@ -444,14 +458,13 @@ export default function StraddleChart({
           { expiry, position, qty },
           (msg) => {
             if (stopped) return;
-            if (msg?.status === "market_closed") return;
             if (msg && msg.premium != null) {
-              wsAlive = true;
-              pushLivePoint(msg);
+              const acceptedPoint = pushLivePoint(msg);
+              if (acceptedPoint) lastWsDataAt = acceptedPoint.ts;
             }
           },
-          () => { wsAlive = true; },
-          () => { wsAlive = false; },
+          undefined,
+          () => { lastWsDataAt = 0; },
         );
         wsRef.current = conn;
         startPolling();
