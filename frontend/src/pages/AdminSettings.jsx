@@ -629,7 +629,7 @@ export default function AdminSettings() {
                 <div className="flex items-center justify-between px-4 py-3">
                   <button className="flex items-center gap-2 text-left" onClick={() => setOpenBroker(openBroker === b.id ? null : b.id)}>
                     <ChevronDown className={`h-4 w-4 text-slate-400 transition ${openBroker === b.id ? "rotate-180" : ""}`} />
-                    <span className="font-semibold text-slate-800">{b.id === "zerodha" ? "Broker" : brokerSafeText(b.name)}</span>
+                    <span className="font-semibold text-slate-800">{b.id === "zerodha" ? "Zerodha" : brokerSafeText(b.name)}</span>
                     <span className="hidden gap-1 sm:flex">{b.capabilities.slice(0, 4).map((c) => <span key={c} className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-slate-500">{c}</span>)}</span>
                   </button>
                   <Toggle checked={b.enabled} onChange={(v) => setBroker(i, "enabled", v)} />

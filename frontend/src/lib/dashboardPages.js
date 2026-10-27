@@ -16,6 +16,11 @@ export function pageAllowed(id, { isAdmin, visiblePages, adminPages, pagesReady 
   return Array.isArray(visiblePages) && visiblePages.includes(id);
 }
 
+export function memberFeatureAllowed(feature, { isMember, features } = {}) {
+  if (!isMember) return true;
+  return Boolean(feature && Array.isArray(features) && features.includes(feature));
+}
+
 export function sanitizePageList(ids, fallback = BOOT_VISIBLE_PAGES) {
   if (!Array.isArray(ids) || !ids.length) return fallback.slice();
   return ids.map((id) => String(id || "").trim()).filter(Boolean);

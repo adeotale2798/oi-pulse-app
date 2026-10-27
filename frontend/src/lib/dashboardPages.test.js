@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { BOOT_VISIBLE_PAGES, HOME_PAGE, pageAllowed, sanitizePageList } from "./dashboardPages.js";
+import {
+  BOOT_VISIBLE_PAGES,
+  HOME_PAGE,
+  memberFeatureAllowed,
+  pageAllowed,
+  sanitizePageList,
+} from "./dashboardPages.js";
 
 assert.equal(HOME_PAGE, "oi-change");
 assert.deepEqual(BOOT_VISIBLE_PAGES, ["oi-change"]);
@@ -21,5 +27,9 @@ assert.equal(pageAllowed("index-events", { pagesReady: true, visiblePages: ["oi-
 assert.deepEqual(sanitizePageList(null), ["oi-change"]);
 assert.deepEqual(sanitizePageList([]), ["oi-change"]);
 assert.deepEqual(sanitizePageList(["adrs", "oi-change"]), ["adrs", "oi-change"]);
+
+assert.equal(memberFeatureAllowed("market_intel", { isMember: true, features: [] }), false);
+assert.equal(memberFeatureAllowed("market_intel", { isMember: true, features: ["market_intel"] }), true);
+assert.equal(memberFeatureAllowed("market_intel", { isMember: false, features: [] }), true);
 
 console.log("dashboardPages.test.js ok");
