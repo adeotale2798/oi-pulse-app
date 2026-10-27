@@ -1,5 +1,24 @@
 # Changelog
 
+## V20.66 — 2026-10-27
+
+Prevent the Positions and journal P&L normalizer from replacing a Kite net-row
+realised value with a larger-magnitude day-row value.
+
+## V20.65 — 2026-10-27
+
+Show the Zerodha name for its broker integration in Admin Settings.
+
+## V20.64 — 2026-10-27
+
+Hide Market Intel popup alerts from Basic members while retaining them for
+entitled members, guests, Admin, and the walkthrough.
+
+## V20.63 — 2026-10-27
+
+Keep the admin journal synced with same-day booked-P&L changes after the EOD
+snapshot, without requiring the Journal screen to be open.
+
 ## V20.62 — 2026-10-18
 
 Compare the NSE calendar’s scheduled constituent results against matched

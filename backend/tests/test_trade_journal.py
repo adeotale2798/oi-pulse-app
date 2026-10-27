@@ -265,6 +265,13 @@ def test_matching_prior_day_pnl_is_still_saved_for_current_session(monkeypatch):
     assert collection.updated_ops["$set"]["booked_pnl"] == 1200
 
 
+def test_internal_journal_positions_poll_can_run_without_http_request(monkeypatch):
+    import server
+
+    monkeypatch.setattr(server, "db", SimpleNamespace(member_sessions=object()))
+    assert asyncio.run(server._member_session_from_request(None)) is None
+
+
 def test_sanitize_clips_and_tags():
     out = sanitize_journal_fields({
         "went_well": "a" * 9000,
@@ -746,7 +753,7 @@ def test_carry_charges_recomputes_after_charges_from_booked():
 
 
 def test_locked_day_is_not_rewritten_after_1546():
-    """After 15:46 the Mongo day is frozen; leftover Kite prints wait for the next session."""
+    """Locked P&L remains unchanged unless same-day reconciliation is explicitly enabled."""
     existing = {
         "date": "2026-08-18",
         "pnl_total": 50076.0,
@@ -781,6 +788,109 @@ def test_locked_day_is_not_rewritten_after_1546():
     assert out is None
     empty = snapshot_from_positions({"positions": [], "pnl_today": {"total": 0, "open": 0, "exited": 0}})
     assert apply_snapshot(existing, empty) is None
+
+
+def test_locked_day_accepts_same_calendar_day_booked_reconciliation_only():
+    existing = {
+        "date": "2026-08-18",
+        "trading_date": "2026-08-18",
+        "pnl_total": 50076.0,
+        "pnl_open": 120.0,
+        "pnl_exited": 1000.0,
+        "booked_pnl": 1000.0,
+        "frozen_pnl": 1000.0,
+        "funds_base": 250000.0,
+        "charges_total": 100.0,
+        "booked_after_charges": 900.0,
+        "trade_count": 1,
+        "eod_locked": True,
+        "eod_locked_at": "2026-08-18T10:15:00+00:00",
+        "notes": "Keep this note",
+        "legs": [
+            {
+                "tradingsymbol": "BANKNIFTY 52000 CE",
+                "index": "BANKNIFTY",
+                "side": "CE",
+                "strike": 52000,
+                "quantity": -15,
+                "exited": False,
+                "partial": False,
+                "realised": 0,
+                "pnl": 375,
+            },
+        ],
+    }
+    snap = snapshot_from_positions({
+        "open_count": 0,
+        "exited_count": 2,
+        "pnl_today": {"open": 0, "exited": 1500, "booked": 1500, "total": 1500},
+        "positions": [
+            {
+                "tradingsymbol": "NIFTY2681823250PE",
+                "index": "NIFTY",
+                "side": "PE",
+                "quantity": 0,
+                "exited": True,
+                "booked_pnl": 1500,
+                "pnl": 1500,
+            },
+        ],
+    }, date="2026-08-18")
+    after_close = datetime(2026, 8, 18, 16, 10, tzinfo=IST)
+
+    fields = apply_snapshot(
+        existing,
+        snap,
+        allow_locked_update=True,
+        now=after_close,
+    )
+
+    assert fields is not None
+    assert fields["booked_pnl"] == 1500
+    assert fields["pnl_exited"] == 1500
+    assert fields["frozen_pnl"] == 1500
+    assert fields["booked_after_charges"] == 1400
+    assert "pnl_total" not in fields
+    assert "pnl_open" not in fields
+    assert "funds_base" not in fields
+    assert "eod_locked" not in fields
+    assert "eod_locked_at" not in fields
+    assert "notes" not in fields
+    assert len(fields["legs"]) == 2
+    assert fields["legs"][0]["pnl"] == 375
+    assert fields["legs"][1]["realised"] == 1500
+
+    next_day = datetime(2026, 8, 19, 8, 0, tzinfo=IST)
+    assert apply_snapshot(
+        existing,
+        snap,
+        allow_locked_update=True,
+        now=next_day,
+    ) is None
+
+    open_only = snapshot_from_positions({
+        "open_count": 1,
+        "exited_count": 0,
+        "partial_count": 0,
+        "pnl_today": {"open": 750, "exited": 0, "booked": 0, "total": 750},
+        "positions": [{
+            "tradingsymbol": "BANKNIFTY 52000 CE",
+            "index": "BANKNIFTY",
+            "side": "CE",
+            "strike": 52000,
+            "quantity": -15,
+            "exited": False,
+            "pnl": 750,
+            "booked_pnl": 0,
+            "realised": 0,
+        }],
+    }, date="2026-08-18")
+    assert apply_snapshot(
+        existing,
+        open_only,
+        allow_locked_update=True,
+        now=after_close,
+    ) is None
 
 
 def test_period_stats_from_to_and_index_filter():

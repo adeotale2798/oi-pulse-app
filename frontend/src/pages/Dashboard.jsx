@@ -96,7 +96,13 @@ import { DESK_IDS, INDEX_STEP, normalizeEnabledIndices, isMcxMajorId } from "@/l
 import { pickIndexLtp, indexDayMove } from "@/lib/indexQuotes";
 import { annotateExpiries } from "@/lib/expiryKind";
 import { atmWindow } from "@/lib/strikeRange";
-import { HOME_PAGE, BOOT_VISIBLE_PAGES, pageAllowed, sanitizePageList } from "@/lib/dashboardPages";
+import {
+  HOME_PAGE,
+  BOOT_VISIBLE_PAGES,
+  memberFeatureAllowed,
+  pageAllowed,
+  sanitizePageList,
+} from "@/lib/dashboardPages";
 
 const INDICES = DESK_IDS;
 const POLL_OPTIONS = [15000, 30000, 60000];
@@ -871,8 +877,10 @@ export default function Dashboard({ demoMode = false }) {
   const tabOn = useCallback(
     (id) => {
       const requiredFeature = MEMBER_PAGE_FEATURES[id];
-      const memberHasFeature = !authState.is_member
-        || (!!requiredFeature && (authState.membership?.features || []).includes(requiredFeature));
+      const hasRequiredMemberFeature = memberFeatureAllowed(requiredFeature, {
+        isMember: authState.is_member,
+        features: authState.membership?.features,
+      });
       // Candidate-style trade surfaces remain available to Admin regardless of guest/member page ticks.
       const adminOnlyPage = id === "sell-candidates";
       // Member pages fail closed unless the plan explicitly grants that page.
@@ -883,7 +891,7 @@ export default function Dashboard({ demoMode = false }) {
         pagesReady,
       });
       return (!adminOnlyPage || !!authState.is_admin)
-        && memberHasFeature
+        && hasRequiredMemberFeature
         && pageIsVisible
         && (id !== "adrs" || globalMarketsEnabled === true);
     },
@@ -3939,7 +3947,12 @@ export default function Dashboard({ demoMode = false }) {
       )}
 
       <MarketIntelPopup
-        enabled={demoMode || !!(authState.is_admin || authState.is_guest)}
+        enabled={demoMode || !!authState.is_admin || (
+          !!authState.is_guest && memberFeatureAllowed("market_intel", {
+            isMember: authState.is_member,
+            features: authState.membership?.features,
+          })
+        )}
         popupOpacity={popupOpacity.marketIntel}
         onNewsAlert={notifyMarketNews}
         onOpenPage={() => {

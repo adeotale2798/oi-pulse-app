@@ -74,6 +74,52 @@ def test_open_position_net_qty_preserved():
     assert int(merged[0]["quantity"]) == -325
 
 
+def test_net_realised_wins_over_larger_day_realised_for_partial_position():
+    """Keep the P&L basis from net; magnitude comparison can turn -7020 into -42593.57."""
+    net = [_row(
+        tradingsymbol="NIFTY26OCT22700PE",
+        quantity=-975,
+        pnl=3169,
+        realised=-7020,
+        unrealised=10189,
+        buy_quantity=975,
+        sell_quantity=1300,
+    )]
+    day = [_row(
+        tradingsymbol="NIFTY26OCT22700PE",
+        quantity=-975,
+        pnl=3169,
+        realised=-42593.57,
+        unrealised=10189,
+        buy_quantity=975,
+        sell_quantity=1300,
+    )]
+
+    merged = merge_kite_net_day(net, day)[0]
+    booked = booked_pnl_from_kite_row(
+        qty=merged["quantity"],
+        buy_qty=merged["buy_quantity"],
+        sell_qty=merged["sell_quantity"],
+        buy_price=merged["buy_price"],
+        sell_price=merged["sell_price"],
+        pnl=merged["pnl"],
+        realised=merged["realised"],
+        unrealised=merged["unrealised"],
+        exited=False,
+    )
+
+    assert merged["realised"] == -7020
+    assert booked["booked_pnl"] == -7020
+
+    zero_is_authoritative = merge_kite_net_day([{**net[0], "realised": 0}], day)[0]
+    assert zero_is_authoritative["realised"] == 0
+
+    missing_fallback = {**net[0]}
+    missing_fallback.pop("realised")
+    fallback = merge_kite_net_day([missing_fallback], day)[0]
+    assert fallback["realised"] == -42593.57
+
+
 def test_merge_tolerates_shadowed_net_float():
     """Regression: margins code once overwrote positions net with equity float → 500."""
     day = [_row(quantity=-50, buy_quantity=0, sell_quantity=50)]
@@ -484,4 +530,3 @@ def test_lot_sizes_from_instrument_dump_not_index_names():
     got = lot_sizes_by_tradingsymbol(dump, ["FOO25AUG100CE", "BAR25AUG200PE", "MISSING"])
     assert got == {"FOO25AUG100CE": 75, "BAR25AUG200PE": 20}
     assert lot_sizes_by_tradingsymbol(None, ["FOO25AUG100CE"]) == {}
-

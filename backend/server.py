@@ -445,9 +445,9 @@ def _member_session_storage_id(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-async def _member_session_from_request(request: Request):
+async def _member_session_from_request(request: Optional[Request]):
     """Resolve durable Google member sessions independently of guest-door state."""
-    if db is None:
+    if db is None or request is None:
         return None
     token = (
         _extract_bearer(request, "x-member-token")
@@ -5890,8 +5890,9 @@ async def get_positions(
         if isinstance(tracker.kite_maintenance, dict) and tracker.kite_maintenance.get("source") == "kite_api":
             tracker.kite_maintenance = None
     try:
-        if role == "admin" and not result.get("error"):
-            asyncio.create_task(_snapshot_trade_journal(result))
+        # HTTP pulls persist asynchronously; internal callers await their own snapshot.
+        if role == "admin" and request is not None and not result.get("error"):
+            asyncio.create_task(_snapshot_trade_journal(result, allow_locked_update=True))
     except Exception:
         pass
     if (
@@ -5922,6 +5923,7 @@ def _ist_today_ymd() -> str:
 _last_journal_charges_mono = 0.0
 _journal_live_probe: tuple[float, bool, str] = (0.0, False, "")
 _last_special_journal_snap_mono = 0.0
+_last_post_lock_journal_snap_mono = 0.0
 
 
 def _journal_enabled_indices():
@@ -6183,11 +6185,12 @@ async def _snapshot_trade_journal(
     payload: Dict[str, Any],
     *,
     force_lock: bool = False,
+    allow_locked_update: bool = False,
     live_session: bool = False,
 ) -> None:
     """Upsert today's booked P&L + brokerage.
 
-    Locked days may still revise booked P&L when Positions books leftover expiry hedges.
+    Locked days may reconcile same-day booked P&L; open/total P&L and journal notes stay frozen.
 
     Weekends and full holidays do not get a new journal date unless Kite is
     actually printing (Muhurat, or any surprise session with fills/quotes).
@@ -6223,7 +6226,7 @@ async def _snapshot_trade_journal(
             journal.apply_charges(snap, charges)
         fields = journal.apply_snapshot(
             existing, snap, force_lock=force_lock, now=now, live_session=live_session,
-            enabled_indices=_journal_enabled_indices(),
+            enabled_indices=_journal_enabled_indices(), allow_locked_update=allow_locked_update,
         )
         if not fields:
             return
@@ -6293,8 +6296,8 @@ async def _snapshot_member_trade_journal(member_id: str, payload: Dict[str, Any]
 
 
 async def _journal_eod_lock_loop() -> None:
-    """Freeze booked P&L after session close; also snapshot Muhurat / live specials."""
-    global _last_special_journal_snap_mono
+    """Snapshot the book in the background and reconcile same-day booked P&L after EOD."""
+    global _last_special_journal_snap_mono, _last_post_lock_journal_snap_mono
     locked_for: Optional[str] = None
     log = logging.getLogger("server")
     while True:
@@ -6312,6 +6315,21 @@ async def _journal_eod_lock_loop() -> None:
             start, end = session_poll_bounds(now)
             in_special_window = start <= t <= end
             enabled = _journal_enabled_indices()
+            if locked_for == day:
+                # Kite's day book remains available after close; stop at midnight so
+                # its prior-session P&L cannot be attributed to the next journal date.
+                if (
+                    (calendar_session or live)
+                    and journal.ist_ymd(now) == day
+                    and time.monotonic() - _last_post_lock_journal_snap_mono >= 60
+                ):
+                    try:
+                        mid = await get_positions(None, "admin")
+                        await _snapshot_trade_journal(mid, allow_locked_update=True, live_session=live)
+                        _last_post_lock_journal_snap_mono = time.monotonic()
+                    except Exception as e:
+                        log.warning("journal same-day reconciliation failed: %s", e)
+                continue
             if special and (live or in_special_window or is_special_session_day(now)):
                 if time.monotonic() - _last_special_journal_snap_mono >= 60:
                     try:
@@ -6484,7 +6502,7 @@ async def journal_day(day: str, _admin: bool = Depends(require_admin)):
     if day == session_day:
         try:
             mid = await get_positions(None, "admin")
-            await _snapshot_trade_journal(mid)
+            await _snapshot_trade_journal(mid, allow_locked_update=True)
         except Exception:
             logging.getLogger("server").debug("journal day snapshot skipped", exc_info=True)
     doc = await db.trade_journal.find_one({"date": day}, {"_id": 0})

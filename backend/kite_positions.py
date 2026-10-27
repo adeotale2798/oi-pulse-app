@@ -55,6 +55,8 @@ def merge_kite_net_day(net: Optional[list], day: Optional[list]) -> list[dict]:
         # stay non-zero while net is flat — that was resurrecting exited trades).
         row = by_key[key]
         row["day_quantity"] = p.get("quantity")
+        # Net and day realised values can have different bases; a reported net zero is meaningful.
+        # Use day realised only when the net row omits that field.
         for field in (
             "buy_quantity",
             "sell_quantity",
@@ -81,13 +83,14 @@ def merge_kite_net_day(net: Optional[list], day: Optional[list]) -> list[dict]:
                 alt = float(p.get(field) or 0)
             except (TypeError, ValueError):
                 alt = 0.0
+            if field == "realised":
+                if row.get(field) is None and abs(alt) > 1e-12:
+                    row[field] = p.get(field)
+                continue
             if abs(cur) < 1e-12 and abs(alt) > 1e-12:
                 row[field] = p.get(field)
             elif field == "last_price" and abs(alt) > 1e-12:
                 # Day LTP is usually fresher than net during the session.
-                row[field] = p.get(field)
-            elif field == "realised" and abs(alt) > abs(cur) + 1e-9:
-                # Today's square-off / partial close often lands on the day row.
                 row[field] = p.get(field)
         # Prefer day's last_price when net is flat (LTP still useful for UI).
         try:

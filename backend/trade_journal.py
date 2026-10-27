@@ -25,7 +25,7 @@ from account_equity import (
     pnl_after_charges,
 )
 
-# Index F&O booked P&L is frozen into Mongo at 15:46 IST; after that the next session is a new day.
+# Index F&O P&L locks at 15:46 IST; same-calendar-day booked corrections may still reconcile.
 EOD_LOCK_IST = dtime(15, 46)
 # Fallback if special-session close is missing (evening Muhurat).
 SPECIAL_SESSION_LOCK_IST = dtime(20, 0)
@@ -259,7 +259,7 @@ def snapshot_from_positions(
 
 
 def should_lock_eod(dt=None, *, live_session: bool = False, enabled_indices=None) -> bool:
-    """True when today's booked P&L should be frozen into Mongo.
+    """True when today's EOD snapshot should be locked in Mongo.
 
     Index F&O: 15:46 IST — that print is the day, then we start the next session.
     MCX majors enabled: wait until that commodity's close + 5 min.
@@ -334,25 +334,118 @@ def mongo_upsert_ops(fields: Dict[str, Any]) -> Dict[str, Any]:
     return ops
 
 
+def _merge_locked_booked_legs(existing: Any, incoming: Any) -> List[Dict[str, Any]]:
+    """Reconcile newly booked legs without replacing locked open-leg MTM."""
+    legs = [dict(leg) for leg in (existing or []) if isinstance(leg, dict)]
+    positions = {
+        (
+            str(leg.get("index") or "").upper(),
+            str(leg.get("tradingsymbol") or "").upper(),
+            str(leg.get("side") or "").upper(),
+            str(leg.get("strike") or ""),
+        ): i
+        for i, leg in enumerate(legs)
+        if leg.get("tradingsymbol")
+    }
+    for leg in incoming or []:
+        if not isinstance(leg, dict):
+            continue
+        realised = _num(leg.get("realised"))
+        if not (leg.get("exited") or leg.get("partial") or abs(realised) > 1e-9):
+            continue
+        symbol = str(leg.get("tradingsymbol") or "")
+        key = (
+            str(leg.get("index") or "").upper(),
+            symbol.upper(),
+            str(leg.get("side") or "").upper(),
+            str(leg.get("strike") or ""),
+        )
+        previous_i = positions.get(key) if symbol else None
+        if previous_i is None:
+            positions[key] = len(legs)
+            legs.append(dict(leg))
+            continue
+        previous = legs[previous_i]
+        updated = {**previous, **leg}
+        if not leg.get("exited") and previous.get("pnl") is not None:
+            updated["pnl"] = previous["pnl"]
+        legs[previous_i] = updated
+    return legs
+
+
 def apply_snapshot(
     existing: Optional[Dict[str, Any]],
     snap: Dict[str, Any],
     *,
     force_lock: bool = False,
+    allow_locked_update: bool = False,
     now=None,
     live_session: bool = False,
     enabled_indices=None,
 ) -> Optional[Dict[str, Any]]:
     """Fields to $set for P&L. None = leave stored P&L untouched (empty clobber).
 
-    At 15:46 IST the booked print is frozen. After lock we do not rewrite the day —
-    the next session is a new Mongo row.
+    The EOD lock freezes open/total P&L and funds. A same-calendar-day Kite
+    reconciliation may still revise booked totals, without touching journal notes.
     """
     now = now or now_ist()
     existing = existing or {}
     keep_day = _resolve_trading_date(existing, snap)
     if existing.get("eod_locked"):
-        return None
+        if not allow_locked_update:
+            return None
+        now_ist_date = now.astimezone(IST).date().isoformat() if now.tzinfo else now.date().isoformat()
+        snap_day = str(snap.get("trading_date") or snap.get("date") or "")[:10]
+        existing_day = str(existing.get("trading_date") or existing.get("date") or "")[:10]
+        if (
+            now_ist_date != existing_day
+            or snap_day != existing_day
+            or not should_lock_eod(now, live_session=live_session, enabled_indices=enabled_indices)
+        ):
+            return None
+
+        booked = round(_num(snap.get("booked_pnl") if snap.get("booked_pnl") is not None else snap.get("pnl_exited")), 2)
+        booked_activity = (
+            int(snap.get("exited_count") or 0) > 0
+            or int(snap.get("partial_count") or 0) > 0
+            or abs(booked) > 0.009
+            or any(
+                isinstance(leg, dict)
+                and (leg.get("exited") or leg.get("partial") or abs(_num(leg.get("realised"))) > 1e-9)
+                for leg in (snap.get("legs") or [])
+            )
+        )
+        if not booked_activity:
+            return None
+
+        fields = {
+            key: snap[key]
+            for key in (
+                "exited_only_pnl",
+                "exited_count",
+                "partial_count",
+                "trade_count",
+                "win_trades",
+                "loss_trades",
+                "booked_index_pnl",
+            )
+            if key in snap
+        }
+        fields["legs"] = _merge_locked_booked_legs(existing.get("legs"), snap.get("legs"))
+        fields["pnl_exited"] = booked
+        fields["booked_pnl"] = booked
+        fields["frozen_pnl"] = booked
+        for key in ("brokerage", "charges_total", "charges_source"):
+            if snap.get(key) is not None:
+                fields[key] = snap[key]
+        charges_total = fields.get("charges_total", existing.get("charges_total"))
+        if charges_total is not None:
+            fields["booked_after_charges"] = round(booked - _num(charges_total), 2)
+        changed = {key: value for key, value in fields.items() if existing.get(key) != value}
+        if not changed:
+            return None
+        changed["snapshot_at"] = snap.get("snapshot_at")
+        return changed
     lock = bool(force_lock or should_lock_eod(now, live_session=live_session, enabled_indices=enabled_indices))
     if snapshot_is_empty(snap):
         if _is_traded(existing) and lock:
