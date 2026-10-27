@@ -19,7 +19,7 @@ jest.mock("framer-motion", () => {
       initial, animate, transition, whileInView, viewport, exit, ...props
     }, ref) => ReactModule.createElement(tag, { ...props, ref })),
   });
-  return { motion, AnimatePresence: ({ children }) => children };
+  return { motion, AnimatePresence: ({ children }) => children, useReducedMotion: jest.fn(() => false) };
 });
 
 jest.mock("@/lib/api", () => ({
@@ -60,6 +60,8 @@ jest.mock("@/components/ui/dialog", () => {
   };
 });
 
+const { useReducedMotion } = require("framer-motion");
+
 function siteConfig(planMoreInfoEnabled = true, offerPrice = null) {
   const premium = { monthly: 999, quarterly: 2499, yearly: 7999 };
   if (offerPrice !== null) premium.offer_prices = { monthly: offerPrice };
@@ -95,6 +97,7 @@ describe("public landing page plan details", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    useReducedMotion.mockReturnValue(false);
     api.get.mockReset();
     fetchTickers.mockReset();
     fetchTickers.mockResolvedValue({ tickers: [] });
@@ -163,9 +166,32 @@ describe("public landing page plan details", () => {
     await renderLanding(true, null, false);
 
     expect(container.querySelector(".slz-section-heading")).not.toBeNull();
+    expect(container.querySelector("header .oi-pulse-logo")).not.toBeNull();
     expect(container.textContent).toContain("Basic");
     expect(container.textContent).not.toContain("Explore demo");
     expect(container.textContent).not.toContain("Explore interactive demo");
+  });
+
+  it("explains plan differences with a silent, illustrative motion film and transcript", async () => {
+    await renderLanding(true);
+
+    const film = container.querySelector("[data-testid='landing-motion-film']");
+    const video = film.querySelector("video");
+    expect(video.getAttribute("src")).toBe("/striklenz-overview.mp4");
+    expect(video.getAttribute("poster")).toBe("/striklenz-overview-poster.jpg");
+    expect(video.muted).toBe(true);
+    expect(video.controls).toBe(true);
+    expect(film.textContent).toContain("Illustrative interface and sample visuals; not live market data.");
+    expect(film.textContent).toContain("Read the film transcript");
+    expect(film.textContent).toContain("No broker setup required");
+    expect(film.textContent).toContain("private Positions");
+  });
+
+  it("keeps the film paused by default when reduced motion is requested", async () => {
+    useReducedMotion.mockReturnValue(true);
+    await renderLanding(true);
+
+    expect(container.querySelector(".slz-film-video").hasAttribute("autoplay")).toBe(false);
   });
 
   it("shows the five required symbols and every additional admin-enabled index in the market ticker", async () => {

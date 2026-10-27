@@ -9,6 +9,7 @@ import "@/styles/landing.css";
 import useLiveDemo from "@/hooks/useLiveDemo";
 import OiPulseLogo from "@/components/OiPulseLogo";
 import BrowserMock from "@/components/landing/BrowserMock";
+import MotionFilm from "@/components/landing/MotionFilm";
 import ProductScreen from "@/components/landing/ProductScreen";
 import AnalyzeShowcasePreview from "@/components/landing/AnalyzeShowcasePreview";
 import ShotTour from "@/components/landing/ShotTour";
@@ -401,6 +402,7 @@ function ProductDemo({ snap, copy }) {
           <h2 className="slz-section-heading text-3xl font-bold tracking-tight sm:text-4xl">{copy.product_title}</h2>
           <p className="mt-4 text-slate-600">{copy.product_description}</p>
         </motion.div>
+        <MotionFilm copy={copy} />
         <motion.div {...reveal} className="mt-8">
           <ShotTour snap={snap} />
         </motion.div>

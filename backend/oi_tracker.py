@@ -1487,6 +1487,10 @@ class OITracker:
             except Exception:
                 step = 50.0
             prev_q = self.last_straddle_quote.get(index_name) or {}
+            sample_ts = snap.get("timestamp") or now_utc.isoformat()
+            if prev_q.get("ts") == sample_ts:
+                # The OI fallback can be reused across several straddle ticks; store each source quote once.
+                return
             prev_atm = int(prev_q.get("atm") or 0)
             if prev_atm and abs(price - prev_atm) < 0.6 * step:
                 # Recompute premium at sticky ATM only when quote already matches.
@@ -1507,7 +1511,7 @@ class OITracker:
                 "index": index_name,
                 "expiry": snap.get("expiry"),
                 "trade_date": trade_date,
-                "ts": snap.get("timestamp") or now_utc.isoformat(),
+                "ts": sample_ts,
                 "premium": premium,
                 "underlying": round(price, 2),
                 "atm": atm,

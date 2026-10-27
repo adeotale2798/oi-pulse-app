@@ -21,6 +21,7 @@ export {
 };
 
 let inflight = null;
+let settleInflight = null;
 let lastPayload = null;
 let lastAt = 0;
 let timer = null;
@@ -64,13 +65,21 @@ export function notifyKiteConnected() {
 /** Force a /positions pull after Kite login (Header may already own the poller). */
 export function refreshPositionsBook() {
   lastAt = 0;
-  if (inflight) return inflight.then(() => fetchPositionsBook({ force: true }));
+  if (inflight) {
+    return inflight
+      .catch(() => undefined)
+      .then(() => fetchPositionsBook({ force: true }));
+  }
   return fetchPositionsBook({ force: true });
 }
 
-export async function fetchPositionsBook({ force = false, settleExpiry = false } = {}) {
-  if (inflight && !settleExpiry) return inflight;
-  if (!force && !settleExpiry && lastPayload && Date.now() - lastAt < 900) return lastPayload;
+function startPositionsRequest({ settleExpiry = false } = {}) {
+  if (inflight) {
+    return inflight
+      .catch(() => undefined)
+      .then(() => startPositionsRequest({ settleExpiry }));
+  }
+
   // Schedule from request start so a slow response doesn't add another full poll interval.
   lastRequestStartedAt = Date.now();
   const req = api
@@ -85,10 +94,25 @@ export async function fetchPositionsBook({ force = false, settleExpiry = false }
       return payload;
     })
     .finally(() => {
-      inflight = null;
+      if (inflight === req) inflight = null;
     });
   inflight = req;
-  return inflight;
+  return req;
+}
+
+export function fetchPositionsBook({ force = false, settleExpiry = false } = {}) {
+  if (settleExpiry) {
+    if (settleInflight) return settleInflight;
+    const request = startPositionsRequest({ settleExpiry: true });
+    const tracked = request.finally(() => {
+      if (settleInflight === tracked) settleInflight = null;
+    });
+    settleInflight = tracked;
+    return tracked;
+  }
+  if (inflight) return inflight;
+  if (!force && lastPayload && Date.now() - lastAt < 900) return Promise.resolve(lastPayload);
+  return startPositionsRequest();
 }
 
 function scheduleNext() {

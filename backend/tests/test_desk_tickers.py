@@ -26,6 +26,43 @@ def test_merge_prefers_kite_ltp():
     assert row["change_pct"] != 0
 
 
+def test_live_quote_as_of_is_not_inherited_from_stale_oi_snapshot():
+    row = merge_ticker_row(
+        "SENSEX",
+        "SENSEX",
+        kite_blob={
+            "last_price": 81111,
+            "last_trade_time": "2026-10-27T10:12:00+00:00",
+        },
+        snap={"price": 81000, "timestamp": "2026-10-27T10:00:00+00:00"},
+        fetched_at="2026-10-27T10:12:01+00:00",
+    )
+    assert row["as_of"] == "2026-10-27T10:12:00+00:00"
+
+
+def test_live_quote_without_timestamp_uses_request_time():
+    row = merge_ticker_row(
+        "SENSEX",
+        "SENSEX",
+        kite_blob={"last_price": 81111},
+        snap={"price": 81000, "timestamp": "2026-10-27T10:00:00+00:00"},
+        fetched_at="2026-10-27T10:12:01+00:00",
+    )
+    assert row["as_of"] == "2026-10-27T10:12:01+00:00"
+
+
+def test_snapshot_fallback_retains_snapshot_timestamp():
+    row = merge_ticker_row(
+        "SENSEX",
+        "SENSEX",
+        kite_blob={"last_price": 0},
+        snap={"price": 81000, "timestamp": "2026-10-27T10:00:00+00:00"},
+        fetched_at="2026-10-27T10:12:01+00:00",
+    )
+    assert row["source"] == "snapshot"
+    assert row["as_of"] == "2026-10-27T10:00:00+00:00"
+
+
 def test_pick_quote_blob_suffix():
     data = {"BSE:SENSEX": {"last_price": 81111}}
     assert pick_quote_blob(data, "BSE:SENSEX")["last_price"] == 81111

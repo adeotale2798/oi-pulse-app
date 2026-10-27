@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { configureMarketHours } from "./marketTimes.js";
-import { straddleLiveRefreshActive, straddleRefreshLabel } from "./straddleRefresh.js";
+import {
+  straddleLiveRefreshActive,
+  straddleRefreshLabel,
+  straddleWsDataFresh,
+} from "./straddleRefresh.js";
 
 configureMarketHours("09:15", "15:40");
 
@@ -17,4 +21,8 @@ assert.equal(straddleLiveRefreshActive(holiday, "2026-09-14"), false, "holiday")
 assert.equal(straddleLiveRefreshActive(liveThu, historicalDate), false, "historical date");
 assert.equal(straddleRefreshLabel(true, 4, 15000), "next (11s)");
 assert.equal(straddleRefreshLabel(false, 4, 15000), null, "no countdown when closed");
+assert.equal(straddleWsDataFresh(0, 1000, 15000), false, "open socket without data");
+assert.equal(straddleWsDataFresh(1000, 30000, 15000), true, "recent socket data");
+assert.equal(straddleWsDataFresh(1000, 31001, 15000), false, "stale socket data");
+assert.equal(straddleWsDataFresh(2000, 1000, 15000), false, "future socket timestamp");
 console.log("straddleRefresh.test.js ok");

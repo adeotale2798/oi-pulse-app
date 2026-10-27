@@ -93,7 +93,7 @@ import { applyUploadedHolidays, isTradingDayIST, nextTradingDayIST, specialSessi
 import { hugeShiftToastCopy, oiBoardAlertCopy, oiPctCopy, oiPressureCopy } from "@/lib/oiAlertCopy";
 
 import { DESK_IDS, INDEX_STEP, normalizeEnabledIndices, isMcxMajorId } from "@/lib/universe";
-import { pickIndexLtp, indexDayMove } from "@/lib/indexQuotes";
+import { pickIndexLtp, indexDayMove, shouldReplaceSpotQuote } from "@/lib/indexQuotes";
 import { annotateExpiries } from "@/lib/expiryKind";
 import { atmWindow } from "@/lib/strikeRange";
 import {
@@ -575,6 +575,7 @@ export default function Dashboard({ demoMode = false }) {
   const selectedExpiryRef = useRef(selectedExpiry);
   const enabledIndicesRef = useRef(DESK_IDS);
   const liveSpotPricesRef = useRef({});
+  const liveSpotQuotesRef = useRef({});
   const tickerQuotesRef = useRef({});
   const pendingOiReloadRef = useRef(false);
 
@@ -813,10 +814,20 @@ export default function Dashboard({ demoMode = false }) {
       const quotePatch = {};
       message.tickers.forEach((ticker) => {
         if (!ticker?.index) return;
-        if (ticker.price != null) nextPrices[ticker.index] = ticker.price;
-        quotePatch[ticker.index] = ticker;
+        const candidate = { price: ticker.price, asOf: ticker.timestamp };
+        const previous = liveSpotQuotesRef.current[ticker.index];
+        if (shouldReplaceSpotQuote(previous, candidate)) {
+          liveSpotQuotesRef.current[ticker.index] = candidate;
+          nextPrices[ticker.index] = Number(ticker.price);
+        }
+        quotePatch[ticker.index] = {
+          ...ticker,
+          price: liveSpotQuotesRef.current[ticker.index]?.price ?? null,
+        };
       });
-      setLiveSpotPrices((prev) => ({ ...prev, ...nextPrices }));
+      if (Object.keys(nextPrices).length) {
+        setLiveSpotPrices((prev) => ({ ...prev, ...nextPrices }));
+      }
       setTickerQuotes((prev) => {
         let changed = false;
         const out = { ...prev };
@@ -1659,14 +1670,25 @@ export default function Dashboard({ demoMode = false }) {
       for (const t of data?.tickers || []) {
         if (!t?.index) continue;
         const n = Number(t.ltp);
-        if (Number.isFinite(n) && n) spots[t.index] = n;
+        const candidate = { price: n, asOf: t.as_of || data.fetched_at };
+        if (shouldReplaceSpotQuote(liveSpotQuotesRef.current[t.index], candidate)) {
+          liveSpotQuotesRef.current[t.index] = candidate;
+          spots[t.index] = n;
+        }
       }
       setTickerQuotes((prev) => {
         const out = { ...prev };
         for (const t of data?.tickers || []) {
           if (!t?.index) continue;
           const cur = out[t.index] || {};
-          const merged = { ...cur, ...t, ltp: liveSpotPricesRef.current?.[t.index] ?? t.ltp ?? cur.ltp };
+          const currentQuote = liveSpotQuotesRef.current[t.index];
+          const fallbackLtp = Number(t.ltp);
+          const merged = {
+            ...cur,
+            ...t,
+            ltp: currentQuote?.price
+              ?? (Number.isFinite(fallbackLtp) && fallbackLtp > 0 ? fallbackLtp : cur.ltp),
+          };
           const iep = mergeIndicativeClose(cur, t, { keepLast: iepKeepRef.current });
           if (iep != null) {
             merged.indicative_close_price = iep;
@@ -1683,13 +1705,10 @@ export default function Dashboard({ demoMode = false }) {
       if (Object.keys(spots).length) {
         setLiveSpotPrices((prev) => {
           const out = { ...prev };
-          let changed = false;
           for (const [idx, px] of Object.entries(spots)) {
-            if (out[idx] != null) continue;
             out[idx] = px;
-            changed = true;
           }
-          return changed ? out : prev;
+          return out;
         });
       }
     } catch (e) {

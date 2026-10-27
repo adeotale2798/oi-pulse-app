@@ -76,6 +76,28 @@ Market & Global Events each have explicitly illustrative sample previews in the
 product demo; do not present their fictional values as live data. The retired
 OI Distribution card must not return.
 
+### Public landing-page motion film
+
+The product walkthrough embeds the original, silent 24-second
+`frontend/public/striklenz-overview.mp4` film with its poster image. It explains
+the shared Basic OI desk, Premium alerts and market context, and Pro's private
+broker-connected Positions, journal, neutral risk summary, and market-context
+Desk AI. Its interface and chart values are illustrative; never replace the
+shared OI / member-book distinction with sample data presented as live. the
+film uses the same StrikLenz waveform mark as the app and landing-page headers.
+The player has native controls, is not autoplayed when reduced motion is
+requested, and sits beside a readable plan summary and transcript.
+
+The film was authored for StrikLenz using the timed scene-and-beat workflow
+described by [NullMotion](https://github.com/blixvip/NullMotion). No NullMotion
+brand marks, reference footage, or showcase assets are bundled. The renderer
+uses the NullMotion-pinned `mp4-muxer` 5.2.1 library under its MIT license; the
+notice and license are in `scripts/vendor/`. To regenerate the film, run
+`node scripts/render_landing_film_server.cjs`, open `http://127.0.0.1:4350/` in
+Chrome or Edge, and choose **Render video and poster**. H.264 frames are
+timestamped and encoded locally with WebCodecs into the MP4; the page writes
+the video and poster into `frontend/public/` without calling external services.
+
 The Positions phone header keeps the page title, position status, and warning
 controls on separate compact rows. Its PositionMeter entry is labeled "PMeter"
 on phone widths and retains the full name on larger screens. Keep mobile chrome

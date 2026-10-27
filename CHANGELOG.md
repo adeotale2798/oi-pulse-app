@@ -1,5 +1,38 @@
 # Changelog
 
+## V20.71 — 2026-10-28
+
+Use the shared StrikLenz waveform brand mark in the motion film, matching the
+app and landing-page headers instead of showing an isolated “S” monogram.
+
+## V20.70 — 2026-10-28
+
+Add a silent, original 24-second H.264 motion film to the public product
+walkthrough. It explains the shared Basic OI desk, Premium alerts and market
+context, and Pro's private broker-connected workspace; sample visuals are
+identified as illustrative, and a transcript plus reduced-motion behavior are
+provided.
+
+## V20.69 — 2026-10-28
+
+Reject stale Straddle snapshots without relabeling them as live, prevent
+duplicate persistence of the same fallback snapshot, and keep rejected or
+out-of-order WebSocket points from suppressing REST fallback. Serialize Positions
+book settlement with live refreshes and retry a forced reconnect pull after a
+failed in-flight request. Cancel pending Spot and Straddle WebSocket retries
+when their owning feed is stopped.
+
+## V20.68 — 2026-10-27
+
+Reconcile live index quotes by source timestamps so REST can replace stale
+WebSocket values, and immediately resume REST-backed dashboard polls at market
+reopen.
+
+## V20.67 — 2026-10-27
+
+Keep the Straddle REST refresh active until the WebSocket delivers fresh valid
+ticks, and resume the fallback poll when that data stream goes stale.
+
 ## V20.66 — 2026-10-27
 
 Prevent the Positions and journal P&L normalizer from replacing a Kite net-row

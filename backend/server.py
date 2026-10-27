@@ -902,7 +902,7 @@ async def _straddle_sampler():
 
     Uses a lightweight 3-instrument quote (spot + ATM CE + PE). Cadence is
     Admin `straddle_poll_interval_seconds` from Mongo. Falls back to last OI
-    snapshot when Kite is offline.
+    snapshot only while that source snapshot is fresh.
     """
     poll_interval_seconds = 15
     while True:
@@ -930,8 +930,18 @@ async def _straddle_sampler():
                         exp = tracker.selected_expiry.get(idx)
                         if svc and hasattr(svc, "get_atm_straddle_quote"):
                             snap = await asyncio.to_thread(svc.get_atm_straddle_quote, idx, exp)
+                        if not _is_recent_straddle_sample(
+                            snap,
+                            _straddle_fallback_max_age_seconds(),
+                        ):
+                            snap = None
                         if not snap:
-                            snap = tracker.last_snapshot.get(idx)
+                            cached = tracker.last_snapshot.get(idx)
+                            if _is_recent_straddle_sample(
+                                cached,
+                                _straddle_fallback_max_age_seconds(),
+                            ):
+                                snap = cached
                         if snap:
                             await _persist_straddle_sample(idx, snap)
                     except Exception as e:
@@ -2845,22 +2855,26 @@ async def get_straddle_tick(index_name: str, expiry: Optional[str] = None):
 
     # Prefer sampler cache when fresh — avoids N clients × Kite quotes.
     cached_q = getattr(tracker, "last_straddle_quote", {}).get(idx)
-    if cached_q:
-        ts = _parse_straddle_ts(cached_q.get("ts"))
-        age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else 9999
-        if age <= interval + 2 and (not expiry or cached_q.get("expiry") == expiry):
-            return {
-                "index": idx,
-                "ts": cached_q.get("ts") or datetime.now(timezone.utc).isoformat(),
-                "atm": cached_q.get("atm"),
-                "underlying": cached_q.get("underlying"),
-                "strike": cached_q.get("atm"),
-                "ce_ltp": cached_q.get("ce_ltp"),
-                "pe_ltp": cached_q.get("pe_ltp"),
-                "premium": cached_q.get("premium"),
-                "expiry": cached_q.get("expiry"),
-                "cached": True,
-            }
+    if (
+        cached_q
+        and _is_recent_straddle_sample(
+            {"timestamp": cached_q.get("ts")},
+            interval + 2,
+        )
+        and (not expiry or cached_q.get("expiry") == expiry)
+    ):
+        return {
+            "index": idx,
+            "ts": cached_q.get("ts"),
+            "atm": cached_q.get("atm"),
+            "underlying": cached_q.get("underlying"),
+            "strike": cached_q.get("atm"),
+            "ce_ltp": cached_q.get("ce_ltp"),
+            "pe_ltp": cached_q.get("pe_ltp"),
+            "premium": cached_q.get("premium"),
+            "expiry": cached_q.get("expiry"),
+            "cached": True,
+        }
 
     snap = None
     try:
@@ -2868,16 +2882,25 @@ async def get_straddle_tick(index_name: str, expiry: Optional[str] = None):
         exp = expiry or (tracker.selected_expiry.get(idx) if tracker else None)
         if svc and getattr(svc, "_loaded", False) and hasattr(svc, "get_atm_straddle_quote"):
             snap = await asyncio.to_thread(svc.get_atm_straddle_quote, idx, exp)
+        if (
+            not _is_recent_straddle_sample(snap, _straddle_fallback_max_age_seconds())
+            or (expiry and snap.get("expiry") != expiry)
+        ):
+            snap = None
         if not snap:
             cached = tracker.last_snapshot.get(idx) if tracker else None
-            if cached and (not expiry or cached.get("expiry") == expiry):
+            if (
+                cached
+                and _is_recent_straddle_sample(cached, _straddle_fallback_max_age_seconds())
+                and (not expiry or cached.get("expiry") == expiry)
+            ):
                 snap = cached
     except Exception as e:
         logger.exception("get_straddle_tick failed for %s", idx)
         raise HTTPException(503, _sanitize_public_error(str(e)) or "Data feed temporarily unavailable")
 
     if not snap:
-        raise HTTPException(503, "No data yet for straddle")
+        raise HTTPException(503, "No fresh data yet for straddle")
 
     atm = int(snap.get("atm") or 0)
     price = float(snap.get("price") or 0.0)
@@ -2906,7 +2929,7 @@ async def get_straddle_tick(index_name: str, expiry: Optional[str] = None):
         pass
     return {
         "index": idx,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": snap.get("timestamp") or snap.get("ts"),
         "atm": atm,
         "underlying": round(price, 2),
         "strike": atm,
@@ -3068,6 +3091,32 @@ def _parse_straddle_ts(value) -> Optional[datetime]:
         return None
 
 
+def _is_recent_straddle_sample(
+    snap: Optional[dict],
+    max_age_seconds: int,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Keep fallback OI snapshots from being relabeled as current straddle ticks."""
+    if not isinstance(snap, dict):
+        return False
+    timestamp = _parse_straddle_ts(snap.get("timestamp") or snap.get("ts"))
+    if timestamp is None:
+        return False
+    age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
+    return 0 <= age <= max_age_seconds
+
+
+def _straddle_fallback_max_age_seconds() -> int:
+    """Allow one configured source cadence plus jitter for OI-backed fallback."""
+    oi_interval = (
+        tracker.effective_oi_poll_seconds()
+        if tracker and hasattr(tracker, "effective_oi_poll_seconds")
+        else clamp_oi_poll_seconds(tracker.settings if tracker else None)
+    )
+    straddle_interval = clamp_straddle_poll_seconds(tracker.settings if tracker else None)
+    return max(oi_interval, straddle_interval) + 2
+
+
 def _filter_straddle_session_docs(docs: list, trade_date: date) -> list:
     """Keep only samples inside the NSE session (09:15–15:40 IST) for trade_date.
 
@@ -3170,34 +3219,47 @@ async def ws_straddle(websocket: WebSocket, index_name: str, expiry: Optional[st
                     continue
 
                 snap = None
-                svc = tracker._get_service()
-                exp = expiry or tracker.selected_expiry.get(idx)
+                svc = tracker._get_service() if tracker else None
+                exp = expiry or (tracker.selected_expiry.get(idx) if tracker else None)
                 # Prefer fresh sampler cache — one Kite quote path for all WS clients.
                 cached_q = getattr(tracker, "last_straddle_quote", {}).get(idx)
-                if cached_q:
-                    ts = _parse_straddle_ts(cached_q.get("ts"))
-                    age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else 9999
-                    if age <= poll_interval_seconds + 2 and (not expiry or cached_q.get("expiry") == expiry):
-                        await websocket.send_json({
-                            "ts": cached_q.get("ts") or datetime.now(timezone.utc).isoformat(),
-                            "premium": cached_q.get("premium"),
-                            "underlying": cached_q.get("underlying"),
-                            "atm": cached_q.get("atm"),
-                            "ce_ltp": cached_q.get("ce_ltp"),
-                            "pe_ltp": cached_q.get("pe_ltp"),
-                            "expiry": cached_q.get("expiry"),
-                        })
-                        await asyncio.sleep(poll_interval_seconds)
-                        continue
+                if (
+                    cached_q
+                    and _is_recent_straddle_sample(
+                        {"timestamp": cached_q.get("ts")},
+                        poll_interval_seconds + 2,
+                    )
+                    and (not expiry or cached_q.get("expiry") == expiry)
+                ):
+                    await websocket.send_json({
+                        "ts": cached_q.get("ts"),
+                        "premium": cached_q.get("premium"),
+                        "underlying": cached_q.get("underlying"),
+                        "atm": cached_q.get("atm"),
+                        "ce_ltp": cached_q.get("ce_ltp"),
+                        "pe_ltp": cached_q.get("pe_ltp"),
+                        "expiry": cached_q.get("expiry"),
+                    })
+                    await asyncio.sleep(poll_interval_seconds)
+                    continue
 
                 if svc and hasattr(svc, "get_atm_straddle_quote"):
                     try:
                         snap = await asyncio.to_thread(svc.get_atm_straddle_quote, idx, exp)
                     except Exception:
                         snap = None
-                if not snap or (expiry and snap.get("expiry") != expiry):
-                    cached = tracker.last_snapshot.get(idx)
-                    if cached and (not expiry or cached.get("expiry") == expiry):
+                if (
+                    not _is_recent_straddle_sample(snap, _straddle_fallback_max_age_seconds())
+                    or (expiry and snap.get("expiry") != expiry)
+                ):
+                    snap = None
+                if not snap:
+                    cached = tracker.last_snapshot.get(idx) if tracker else None
+                    if (
+                        cached
+                        and _is_recent_straddle_sample(cached, _straddle_fallback_max_age_seconds())
+                        and (not expiry or cached.get("expiry") == expiry)
+                    ):
                         snap = cached
 
                 if snap:
@@ -3226,8 +3288,9 @@ async def ws_straddle(websocket: WebSocket, index_name: str, expiry: Optional[st
                         ce_p = float(strike_obj.get("ce_ltp", 0) if strike_obj else 0)
                         pe_p = float(strike_obj.get("pe_ltp", 0) if strike_obj else 0)
                     premium = round(ce_p + pe_p, 2)
+                    source_timestamp = snap.get("timestamp") or snap.get("ts")
                     payload = {
-                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "ts": source_timestamp,
                         "premium": premium,
                         "underlying": round(price, 2),
                         "atm": atm,
@@ -4761,6 +4824,7 @@ async def _desk_ticker_payload():
             kite_data = None
 
     include_iep = is_cas_iep_window()
+    fetched_at = datetime.now(timezone.utc).isoformat()
     result = []
     for internal, symbol, label in symbols:
         snap = await _snap_for(internal)
@@ -4770,10 +4834,11 @@ async def _desk_ticker_payload():
             label,
             kite_blob=blob,
             snap=snap,
+            fetched_at=fetched_at,
             include_iep=include_iep,
             step=int((INDEX_CONFIG.get(internal) or {}).get("step") or 50) or 50,
         ))
-    return {"mode": tracker.mode if tracker else "offline", "tickers": result, "fetched_at": datetime.now(timezone.utc).isoformat()}
+    return {"mode": tracker.mode if tracker else "offline", "tickers": result, "fetched_at": fetched_at}
 
 
 @api_router.get("/tickers")
@@ -7750,6 +7815,7 @@ LANDING_PAGE_COPY_KEYS = {
     "hero_demo", "hero_compare", "hero_no_broker",
     "features_title", "features_description",
     "product_eyebrow", "product_title", "product_description",
+    "film_eyebrow", "film_title", "film_description",
     "pro_eyebrow", "pro_title", "pro_description", "pro_oi_label", "pro_oi_description",
     "pro_market_intel_label", "pro_journal_label", "pro_positions_label",
     "broker_eyebrow", "broker_title", "broker_description",

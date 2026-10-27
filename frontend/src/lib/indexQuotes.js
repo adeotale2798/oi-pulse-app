@@ -15,6 +15,22 @@ export function pickIndexLtp({ idx, live, tickerLtp, current, cachedPrice } = {}
   return null;
 }
 
+/** Keep the freshest valid quote when WebSocket and REST feeds overlap. */
+export function shouldReplaceSpotQuote(previous, incoming) {
+  const price = Number(incoming?.price);
+  if (!Number.isFinite(price) || price <= 0) return false;
+  if (!previous) return true;
+
+  const previousAt = Date.parse(previous.asOf || "");
+  const incomingAt = Date.parse(incoming.asOf || "");
+  if (Number.isFinite(incomingAt) && Number.isFinite(previousAt)) {
+    return incomingAt >= previousAt;
+  }
+  if (Number.isFinite(incomingAt)) return true;
+  if (Number.isFinite(previousAt)) return false;
+  return true;
+}
+
 /** Day move vs prev close for inactive index chips (do not wait for that tab). */
 export function indexDayMove({ price, ticker } = {}) {
   const prev = Number(ticker?.prev_close || ticker?.day_open) || 0;
@@ -30,4 +46,3 @@ export function indexDayMove({ price, ticker } = {}) {
     pct: Number.isFinite(pct) ? pct : null,
   };
 }
-

@@ -76,6 +76,7 @@ def merge_ticker_row(
     *,
     kite_blob: Optional[dict] = None,
     snap: Optional[dict] = None,
+    fetched_at: Optional[str] = None,
     include_iep: bool = False,
     step: int = 50,
 ) -> Dict[str, Any]:
@@ -99,6 +100,15 @@ def merge_ticker_row(
     change = (ltp - prev) if prev else 0.0
     change_pct = (change / prev * 100) if prev else 0.0
     source = "kite" if kite_ltp else ("snapshot" if snap_ltp else "none")
+    quote_as_of = (
+        blob.get("last_trade_time")
+        or blob.get("timestamp")
+        or blob.get("exchange_timestamp")
+    )
+    if source == "kite":
+        as_of = quote_as_of or fetched_at or snap.get("timestamp")
+    else:
+        as_of = snap.get("timestamp")
     ohlc_close = _f(ohlc.get("close"))
     atm = round_atm(ltp, step)
     row: Dict[str, Any] = {
@@ -112,7 +122,7 @@ def merge_ticker_row(
         "change": round(change, 2),
         "change_pct": round(change_pct, 3),
         "source": source,
-        "as_of": snap.get("timestamp"),
+        "as_of": as_of,
     }
     if atm > 0:
         row["atm"] = atm

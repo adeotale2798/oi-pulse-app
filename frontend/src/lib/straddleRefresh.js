@@ -35,3 +35,48 @@ export function straddleRefreshLabel(live, ageSeconds, pollMs) {
   const left = rem === 0 ? pollS : rem;
   return `next (${left}s)`;
 }
+
+export function straddleWsDataFresh(lastDataAt, now, pollMs) {
+  const last = Number(lastDataAt);
+  const current = Number(now);
+  const interval = Number(pollMs);
+  if (
+    !Number.isFinite(last) ||
+    last <= 0 ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(interval) ||
+    interval <= 0 ||
+    current < last
+  ) {
+    return false;
+  }
+  return current - last <= interval * 2;
+}
+
+export function shouldAcceptLiveStraddlePoint(point, previous, now, maxAgeMs) {
+  const timestamp = Number(point?.ts);
+  const current = Number(now);
+  const maxAge = Number(maxAgeMs);
+  if (
+    !Number.isFinite(timestamp) ||
+    timestamp <= 0 ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(maxAge) ||
+    maxAge <= 0 ||
+    timestamp > current ||
+    current - timestamp > maxAge
+  ) {
+    return false;
+  }
+  if (Number.isFinite(Number(previous?.ts)) && timestamp < Number(previous.ts)) {
+    return false;
+  }
+
+  const premium = Number(point?.premium);
+  const previousPremium = Number(previous?.premium);
+  if (previousPremium > 0) {
+    if (premium > Math.max(previousPremium * 3, previousPremium + 200)) return false;
+    if (premium < previousPremium * 0.35 && premium < 10 && previousPremium > 20) return false;
+  }
+  return true;
+}
