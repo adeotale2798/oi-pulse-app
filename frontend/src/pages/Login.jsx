@@ -4,10 +4,50 @@ import { motion } from "framer-motion";
 import { ArrowRight, Loader2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import "@/styles/landing.css";
-import { api, persistGuestAuth } from "@/lib/api";
-import useLiveDemo, { isMarketOpenNow } from "@/hooks/useLiveDemo";
+import { api, fetchTickers, persistGuestAuth } from "@/lib/api";
 import OiPulseLogo from "@/components/OiPulseLogo";
 import BrowserMock from "@/components/landing/BrowserMock";
+
+const PREVIEW_INDICES = ["NIFTY", "BANKNIFTY", "SENSEX"];
+
+function previewSnapshot(tickerPayload) {
+  const indices = {};
+  for (const ticker of Array.isArray(tickerPayload?.tickers) ? tickerPayload.tickers : []) {
+    const price = Number(ticker?.ltp);
+    if (!PREVIEW_INDICES.includes(ticker?.index) || !Number.isFinite(price) || price <= 0) {
+      continue;
+    }
+    const changePct = ticker.change_pct == null ? null : Number(ticker.change_pct);
+    indices[ticker.index] = {
+      price,
+      changePct: Number.isFinite(changePct) ? changePct : null,
+      isLive: ticker.is_live === true,
+      asOf: ticker.as_of || null,
+    };
+  }
+  return { indices };
+}
+
+function previewStatus(preview) {
+  const hasData = Object.keys(preview.snap.indices).length > 0
+    || Array.isArray(preview.oi?.current?.strikes) && preview.oi.current.strikes.length > 0;
+  if (!hasData) return "unavailable";
+  if (preview.marketStatus?.is_pre_market === true) return "pre-market";
+  if (preview.marketStatus?.is_market_open === false) return "last-session";
+
+  const allQuotesLive = PREVIEW_INDICES.every((index) => preview.snap.indices[index]?.isLive === true);
+  const oiIsLive = preview.oi?.data_status?.is_live === true;
+  if (
+    preview.refreshSucceeded
+    && preview.marketStatus?.is_oi_polling === true
+    && preview.publisherMode === "live"
+    && allQuotesLive
+    && oiIsLive
+  ) {
+    return "live";
+  }
+  return "delayed";
+}
 
 function GoogleIcon() {
   return (
@@ -22,8 +62,13 @@ function GoogleIcon() {
 
 export default function Login() {
   const nav = useNavigate();
-  const marketOpen = isMarketOpenNow();
-  const snap = useLiveDemo(1600, marketOpen);
+  const [marketPreview, setMarketPreview] = useState({
+    snap: { indices: {} },
+    oi: null,
+    marketStatus: null,
+    publisherMode: null,
+    refreshSucceeded: false,
+  });
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null);
@@ -36,6 +81,39 @@ export default function Login() {
   const [localTestBusy, setLocalTestBusy] = useState(false);
 
   const redirectUri = typeof window !== "undefined" ? `${window.location.origin}/login` : "";
+
+  // Use only the publisher's public feeds here; the login screen must not turn
+  // the walkthrough's fictional fixtures into apparent market quotes.
+  useEffect(() => {
+    let active = true;
+    let timer;
+
+    const refresh = async () => {
+      const [tickerResult, oiResult, marketResult] = await Promise.allSettled([
+        fetchTickers(),
+        api.get("/public/login-preview/oi").then((response) => response.data),
+        api.get("/market/status"),
+      ]);
+      if (!active) return;
+
+      const tickerPayload = tickerResult.status === "fulfilled" ? tickerResult.value : null;
+      setMarketPreview((previous) => ({
+        snap: tickerPayload ? previewSnapshot(tickerPayload) : previous.snap,
+        oi: oiResult.status === "fulfilled" ? oiResult.value : previous.oi,
+        marketStatus: marketResult.status === "fulfilled" ? marketResult.value?.data : previous.marketStatus,
+        publisherMode: tickerPayload?.mode ?? previous.publisherMode,
+        refreshSucceeded: [tickerResult, oiResult, marketResult].every((result) => result.status === "fulfilled"),
+      }));
+
+      timer = window.setTimeout(refresh, 15_000);
+    };
+
+    refresh();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     api.get("/auth/state", { timeout: 3500 })
@@ -200,6 +278,7 @@ export default function Login() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending?.id]);
 
+  const status = previewStatus(marketPreview);
   return (
     <div className="slz slz-light relative flex min-h-screen items-stretch overflow-x-hidden">
       <div className="slz-aurora" />
@@ -214,7 +293,16 @@ export default function Login() {
           <h2 className="text-3xl font-black leading-tight">Read the market.<br />Then read your book.</h2>
           <p className="mx-auto mt-3 max-w-md text-slate-300">Live OI, Strike Pressure and your positions on the OI wall — the moment you sign in.</p>
           <motion.div className="mx-auto mt-8 w-full max-w-md" animate={{ y: [0, -8, 0] }} transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}>
-            <BrowserMock id="dashboard" snap={snap} title="Live Market Dashboard" chipIndex="SENSEX" marketOpen={marketOpen} />
+            <BrowserMock
+              id="dashboard"
+              snap={marketPreview.snap}
+              marketData={marketPreview}
+              marketStatus={status}
+              status={status}
+              chipAlign="left"
+              title="Live Market Dashboard"
+              chipIndex="SENSEX"
+            />
           </motion.div>
         </div>
         <div className="relative text-center text-xs text-slate-400">Information only, not investment advice.</div>

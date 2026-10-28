@@ -49,6 +49,7 @@ flowchart LR
 - Desk AI and the carry brief request `/oi/{index}/change` only while `/market/status` reports `is_oi_polling: true`; missing status fails closed, preventing repeated after-hours OI requests while retaining the Dashboard's separate last-session display.
 - Domain JS: `frontend/src/lib/` — `universe.js`, `positionPayoff.js`, `holidays.js`, `journalYearHeat.js`.
 - Trade Journal archive imports are parsed and held in browser-tab memory; the imported cycle-ledger calendar is visibly separate from saved `trade_journal` P&L and never posts archive contents to the API.
+- While the saved Trade Journal is open, its month and period totals refresh on the configured Positions cadence; selected current-day P&L refreshes without overwriting in-progress notes, and the UI shows the last refresh or a stale-data warning.
 - HTTP: `frontend/src/lib/api.js` (axios, admin/guest headers).
 - Membership screens: `AccountSettings.jsx` owns member preferences and billing, `MemberJournal.jsx` writes caller-scoped Pro journal rows, and `AdminSubscriptions.jsx` is the admin member-control surface. Admin plan configuration is separate from Public guest access.
 - The public product walkthrough includes a silent, original 24-second motion film and a text transcript. The film uses illustrative visuals only, follows the Basic / Premium / Pro feed and privacy boundaries, and does not read live quotes or member data.

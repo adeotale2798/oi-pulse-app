@@ -10,6 +10,7 @@ import os
 import time
 import logging
 import asyncio
+from html import escape
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 import httpx
@@ -251,18 +252,19 @@ def _classify_shift(side: str, direction: str) -> tuple:
 
 
 def format_huge_shift_html(shift: dict, *, is_major: bool) -> str:
-    idx = shift.get("index", "?")
-    side = shift.get("side", "?")
+    idx = escape(str(shift.get("index", "?")), quote=True)
+    side = escape(str(shift.get("side", "?")), quote=True)
     value = shift.get("value", 0) or 0
-    direction = shift.get("direction", "build")
-    window = shift.get("window", "?")
+    direction = escape(str(shift.get("direction", "build")), quote=True)
+    window = escape(str(shift.get("window", "?")), quote=True)
     price = shift.get("price")
     atm = shift.get("atm")
     contributing = (shift.get("contributing") or [])[:5]
     bias, meaning = _classify_shift(side, direction)
     banner = "🚨 <b>MAJOR OI SHIFT</b>\n" if is_major else "⚡ <b>OI SHIFT</b>\n"
     contrib_lines = "\n".join(
-        f"• {c.get('strike')}: CE {fmt_lakh(c.get('ce_delta', 0))}  ·  PE {fmt_lakh(c.get('pe_delta', 0))}"
+        f"• {escape(str(c.get('strike')), quote=True)}: "
+        f"CE {fmt_lakh(c.get('ce_delta', 0))}  ·  PE {fmt_lakh(c.get('pe_delta', 0))}"
         for c in contributing
         if isinstance(c, dict) and "quantity" not in c and "tradingsymbol" not in c
     )
@@ -271,7 +273,8 @@ def format_huge_shift_html(shift: dict, *, is_major: bool) -> str:
         f"<b>{idx}</b> · {side} {direction.upper()} in last <b>{window} min</b> → <b>{fmt_lakh(value)}</b>\n"
         f"Read: <b>{bias}</b>\n"
         f"{meaning}\n"
-        f"Spot: <b>{price if price is not None else '—'}</b>  ·  ATM: <b>{atm if atm is not None else '—'}</b>\n"
+        f"Spot: <b>{escape(str(price), quote=True) if price is not None else '—'}</b>  ·  "
+        f"ATM: <b>{escape(str(atm), quote=True) if atm is not None else '—'}</b>\n"
         f"{contrib_lines}\n"
         f"<i>Open the OI chart on the desk. We never send your book.</i>"
     )

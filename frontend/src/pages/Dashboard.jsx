@@ -660,7 +660,7 @@ export default function Dashboard({ demoMode = false }) {
   useEffect(() => {
     const t = window.setTimeout(() => {
       api.get("/holidays").then((r) => {
-        if (r.data?.source === "upload") applyUploadedHolidays(r.data.holidays || []);
+        if (Array.isArray(r.data?.holidays) && r.data.holidays.length) applyUploadedHolidays(r.data.holidays);
       }).catch(() => {});
     }, 6000);
     return () => clearTimeout(t);
@@ -758,11 +758,14 @@ export default function Dashboard({ demoMode = false }) {
   const showRightPanel = isMobile
     ? false
     : rightPanelOpen;
-  // Credentials / kite_ok beat brief mode=offline flaps (Positions + CAS + side panel).
+  // A configured feed beats brief offline flaps for Positions + CAS + side panel.
   const kiteLiveConnected =
     status?.mode === "kite"
+    || status?.mode === "live"
     || !!status?.has_kite_credentials
-    || !!status?.kite_ok;
+    || !!status?.kite_ok
+    || !!status?.publisher_feed_configured
+    || !!status?.publisher_feed_live;
   const startUserKite = async () => {
     if (demoMode) return;
     if (authState.is_member) {
@@ -2425,7 +2428,7 @@ export default function Dashboard({ demoMode = false }) {
       // (Radix dialog sets body pointer-events: none).
       skipToast: true,
     });
-    try {
+    if (authState.is_admin) {
       api.post("/telegram/huge-shift", {
         index: shift.index,
         side: shift.side,
@@ -2436,8 +2439,8 @@ export default function Dashboard({ demoMode = false }) {
         atm: shift.atm,
         contributing: shift.contributing || [],
       }).catch(() => { /* silent — user already sees the modal */ });
-    } catch (_) { /* noop */ }
-  }, [push, playEntitledAlertSound]);
+    }
+  }, [push, playEntitledAlertSound, authState.is_admin]);
 
   const saveMemberShiftAlert = useCallback((shift) => {
     if (!authState.is_member) return;
@@ -3631,7 +3634,9 @@ export default function Dashboard({ demoMode = false }) {
                       isMember={!!authState.is_member}
                       memberBrokerStatus={authState.user_kite}
                       privacyMode={positionsPrivacyMode}
-                      hasKiteCredentials={status ? !!status.has_kite_credentials : null}
+                      hasKiteCredentials={status
+                        ? !!(status.has_kite_credentials ?? status.publisher_feed_configured)
+                        : null}
                       current={filteredCurrent || current}
                       previous={previous}
                       vix={current?.vix || status?.vix}
@@ -3727,7 +3732,6 @@ export default function Dashboard({ demoMode = false }) {
                         refreshKey={uploadRefreshKey}
                         isAdmin={!!authState.is_admin}
                         allowDismiss={false}
-                        marketIntelEnabled={tabOn("market-intel")}
                       />
                     </TabsContent>
                   )}
@@ -3778,7 +3782,7 @@ export default function Dashboard({ demoMode = false }) {
                     <span className="inline-flex items-center rounded-sm bg-white border border-slate-200 px-1.5 py-0.5 font-mono-data text-emerald-800 dark:bg-slate-900 dark:border-slate-700 dark:text-emerald-300">
                       {status?.market?.is_market_open === false
                         ? "Market closed"
-                        : status?.mode === "kite"
+                        : (status?.mode === "kite" || status?.mode === "live")
                           ? "Live"
                           : "Offline"}
                     </span>
@@ -3966,6 +3970,7 @@ export default function Dashboard({ demoMode = false }) {
       )}
 
       <MarketIntelPopup
+        isAdmin={!!authState.is_admin}
         enabled={demoMode || !!authState.is_admin || (
           !!authState.is_guest && memberFeatureAllowed("market_intel", {
             isMember: authState.is_member,
@@ -4007,6 +4012,7 @@ export default function Dashboard({ demoMode = false }) {
         <TradeJournalModal
           open={journalOpen}
           onOpenChange={setJournalOpen}
+          refreshIntervalMs={positionsPollMs}
         />
       )}
       {authState.is_admin && (
@@ -4045,7 +4051,7 @@ export default function Dashboard({ demoMode = false }) {
           setUploadRefreshKey((k) => k + 1);
           if (kind === "holidays") {
             api.get("/holidays").then((r) => {
-              if (r.data?.source === "upload") applyUploadedHolidays(r.data.holidays || []);
+              if (Array.isArray(r.data?.holidays) && r.data.holidays.length) applyUploadedHolidays(r.data.holidays);
             }).catch(() => {});
           }
         }}

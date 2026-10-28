@@ -19,6 +19,7 @@ from market_intel import (
     parse_news_datetime,
     popup_allowed,
     popup_matches_preferences,
+    remove_public_source_metadata,
     retention_cutoff,
     source_interval_seconds,
     source_is_due,
@@ -34,6 +35,35 @@ def test_us_cpi_high_india():
     assert impact_score(t) >= 55
     assert india_relevance_score(t) >= 40
     assert classify_event_type(t) == "macro"
+
+
+def test_public_market_intel_removes_source_names_urls_and_counts():
+    result = remove_public_source_metadata({
+        "items": [{
+            "title": "Market-moving headline",
+            "source_name": "Publisher One",
+            "article_url": "https://publisher.test/story",
+            "independent_source_names": ["Publisher One", "Publisher Two"],
+            "independent_source_count": 2,
+            "source_direction_agreement": "AGREE",
+            "direction_basis": "SOURCES",
+            "direction_reason": "Independent publishers' directional reads agree.",
+        }],
+        "source_count": 2,
+        "disclaimer": "Provider-specific source-backed disclaimer.",
+    })
+
+    assert result == {
+        "items": [{
+            "title": "Market-moving headline",
+            "direction_basis": "COMBINED",
+            "direction_reason": "Available news signals agree on direction.",
+        }],
+        "disclaimer": (
+            "Risk scores rank mapped event exposure; they are not probabilities, "
+            "predicted index moves, or trading signals. Direction is tentative."
+        ),
+    }
 
 
 def test_fed_decision():

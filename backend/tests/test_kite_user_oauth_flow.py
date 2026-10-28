@@ -48,6 +48,12 @@ def test_public_broker_errors_hide_provider_names():
     )
 
 
+def test_public_broker_errors_hide_html_maintenance_response():
+    assert server._friendly_kite_connect_error(
+        RuntimeError("Unknown Content-Type (text/html): <html><body>503 Service Unavailable</body></html>")
+    ) == "Broker service is temporarily unavailable. Please try again shortly."
+
+
 def test_kite_callback_bridges_encoded_request_token_to_spa(monkeypatch):
     monkeypatch.setattr(kite_callback_origin, "kite_spa_origin", lambda _request: "https://striklenz.com")
 

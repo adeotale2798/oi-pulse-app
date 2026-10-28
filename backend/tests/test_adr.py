@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import Request
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import adr
+import server
 from adr import (
     DEFAULT_LARGE_MOVE,
     SEED_ADRS,
@@ -27,7 +31,11 @@ from adr import (
     universe_doc,
     validate_universe_row,
 )
-from adr_api import PrefsIn, UniverseIn
+from adr_api import (
+    PrefsIn,
+    UniverseIn,
+    _remove_private_adr_source_metadata,
+)
 
 
 INFY_QUOTE = {
@@ -60,6 +68,82 @@ INFY_QUOTE = {
         "range": "9.50 - 23.10",
     },
 }
+
+
+def test_public_adr_payload_removes_provider_metadata_recursively():
+    payload = {
+        "prefs": {
+            "provider": "twelve_data",
+            "api_key_configured": True,
+            "enabled": True,
+        },
+        "items": [{
+            "provider": "twelve_data",
+            "provider_symbol": "INFY.N",
+            "observation": {
+                "provider": "twelve_data",
+                "provider_extra": {"vendor": "Twelve Data"},
+                "last_price": 11.08,
+            },
+        }],
+    }
+
+    sanitized = _remove_private_adr_source_metadata(payload)
+
+    assert sanitized == {
+        "prefs": {"enabled": True},
+        "items": [{"observation": {"last_price": 11.08}}],
+    }
+
+
+def test_adr_routes_hide_provider_details_from_members_but_keep_admin_diagnostics(monkeypatch):
+    role = {"value": "guest"}
+    snapshot = {
+        "prefs": {"provider": "twelve_data", "api_key_configured": True, "enabled": True},
+        "items": [{
+            "id": "adr-infy",
+            "provider": "twelve_data",
+            "provider_symbol": "INFY.N",
+            "observation": {"provider": "twelve_data", "last_price": 11.08},
+        }],
+    }
+
+    async def allow_role(_request: Request):
+        return role["value"]
+
+    async def no_op(_db):
+        return None
+
+    async def snapshot_for_test(_db):
+        return snapshot
+
+    async def history_for_test(_db, _adr_id, _range):
+        return [{"provider": "twelve_data", "last_price": 11.08}]
+
+    monkeypatch.setattr(server, "db", object())
+    monkeypatch.setattr(adr, "seed_universe", no_op)
+    monkeypatch.setattr(adr, "desk_snapshot", snapshot_for_test)
+    monkeypatch.setattr(adr, "history", history_for_test)
+    server.app.dependency_overrides[server.require_desk_user] = allow_role
+    client = TestClient(server.app)
+    try:
+        member_snapshot = client.get("/api/adrs")
+        assert member_snapshot.status_code == 200
+        assert "twelve_data" not in member_snapshot.text
+        assert "INFY.N" not in member_snapshot.text
+        assert "api_key_configured" not in member_snapshot.text
+
+        member_history = client.get("/api/adrs/history/adr-infy")
+        assert member_history.status_code == 200
+        assert "twelve_data" not in member_history.text
+
+        role["value"] = "admin"
+        admin_snapshot = client.get("/api/adrs")
+        assert admin_snapshot.status_code == 200
+        assert admin_snapshot.json()["prefs"]["provider"] == "twelve_data"
+        assert admin_snapshot.json()["items"][0]["provider_symbol"] == "INFY.N"
+    finally:
+        server.app.dependency_overrides.pop(server.require_desk_user, None)
 
 
 def test_normalize_infy_quote():

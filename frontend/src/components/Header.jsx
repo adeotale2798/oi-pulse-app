@@ -429,10 +429,10 @@ export default function Header({
   const [extras, setExtras] = useState({ vix: null, gift_nifty: null });
   useEffect(() => {
     let alive = true;
-    const onExtras = (data, meta) => {
+    const onExtras = (data) => {
       if (!alive || !data) return;
       if (process.env.NODE_ENV !== 'production') {
-        try { console.debug('[Header] subscribeExtras notified', { source: meta?.source, vix_ts: data?.vix?.ts || data?.vix?.last, gift_ts: data?.gift_nifty?.ts || data?.gift_nifty?.last, server_time_ist: data?.server_time_ist }); } catch (_) {}
+        try { console.debug('[Header] subscribeExtras notified', { vix_ts: data?.vix?.ts || data?.vix?.last, gift_ts: data?.gift_nifty?.ts || data?.gift_nifty?.last, server_time_ist: data?.server_time_ist }); } catch (_) {}
       }
       setExtras((prev) => {
         const next = {
@@ -894,7 +894,7 @@ export default function Header({
             data={extras.gift_nifty}
             windows={giftSessions}
             openNow={extras?.windows?.gift?.open_now}
-            kiteSymbol={extras?.windows?.gift?.kite_symbol || "NSEIX:GIFT NIFTY"}
+            referenceSymbol="GIFT NIFTY"
             serverIst={extras?.server_time_ist}
             onOpenSessions={() => setGiftModalOpen(true)}
             inline={headerRail}
@@ -957,14 +957,14 @@ export default function Header({
               className={`rounded-sm ${modeBadgeCls} ${headerRail ? "text-[10px] px-1.5 py-0 h-6" : ""}`}
               title={[
                 modeBadge.title,
-                mode === "kite" && dataStatus?.data_date && status?.market?.is_market_open === false
+                (mode === "kite" || mode === "live") && dataStatus?.data_date && status?.market?.is_market_open === false
                   ? `Session ${dataStatus.data_date}`
                   : null,
               ].filter(Boolean).join(" · ")}
             >
               {modeBadge.label}
             </Badge>
-            {!headerRail && mode === "kite" && dataStatus?.data_date && status?.market && status.market.is_market_open === false && (
+            {!headerRail && (mode === "kite" || mode === "live") && dataStatus?.data_date && status?.market && status.market.is_market_open === false && (
               <span
                 data-testid="session-date-chip"
                 className="text-[10px] font-mono-data text-center text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5"
@@ -973,7 +973,7 @@ export default function Header({
                 {dataStatus.data_date}
               </span>
             )}
-            {!headerRail && mode !== "kite" && (
+            {!headerRail && mode !== "kite" && mode !== "live" && (
               <span
                 data-testid="offline-hint-chip"
                 className="hidden sm:inline-flex text-[10px] font-mono-data text-center text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded px-1.5 py-0.5"
@@ -1329,7 +1329,7 @@ export default function Header({
             data={extras.gift_nifty}
             windows={giftSessions}
             openNow={extras?.windows?.gift?.open_now}
-            kiteSymbol={extras?.windows?.gift?.kite_symbol || "NSEIX:GIFT NIFTY"}
+            referenceSymbol="GIFT NIFTY"
             serverIst={extras?.server_time_ist}
             onOpenSessions={() => setGiftModalOpen(true)}
           />
@@ -1574,7 +1574,7 @@ function VixMetric({ value, sessionOpen, liveVix, inline = false }) {
   );
 }
 
-function ExtraTickerCell({ label, data, windows, serverIst, onOpenSessions, openNow, kiteSymbol, inline = false }) {
+function ExtraTickerCell({ label, data, windows, serverIst, onOpenSessions, openNow, referenceSymbol, inline = false }) {
   const [hover, setHover] = useState(false);
   const [tipPos, setTipPos] = useState({ top: 0, left: 0 });
   const hasData = data && data.last != null && data.last > 0;
@@ -1584,7 +1584,6 @@ function ExtraTickerCell({ label, data, windows, serverIst, onOpenSessions, open
   const toneCls = tone === "rose" ? "text-rose-600" : tone === "emerald" ? "text-emerald-600" : "text-slate-500 dark:text-slate-400";
   const arrow = chgPct > 0.05 ? "▲" : chgPct < -0.05 ? "▼" : "▬";
   const isProxy = Boolean(data?.is_proxy);
-  const source = data?.source || null;
 
   // determine GIFT session status using server-provided IST timestamp when available,
   // otherwise fallback to client-side conversion to Asia/Kolkata
@@ -1823,8 +1822,7 @@ function ExtraTickerCell({ label, data, windows, serverIst, onOpenSessions, open
           <div className="mb-1 font-semibold text-slate-900 dark:text-slate-100">GIFT NIFTY Sessions</div>
           <div className="mb-1.5 text-slate-700 dark:text-slate-200">{giftTooltip}</div>
           <div className="mb-1.5 text-[11px] text-slate-500">
-            Broker instrument: <span className="font-mono">{kiteSymbol || "NSEIX:GIFT NIFTY"}</span>
-            {source ? ` · ${source}` : ""}
+            Reference market: <span className="font-mono">{referenceSymbol || "GIFT NIFTY"}</span>
             {isProxy ? " · proxy" : ""}
           </div>
           {data?.note && <div className="mb-1 text-[10px] text-amber-700">{data.note}</div>}

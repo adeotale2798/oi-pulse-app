@@ -38,7 +38,7 @@ function pickOiSnapshot(value) {
 
 function pickMarketIntelItem(item) {
   return pickFields(item, [
-    "id", "title", "headline", "event_title", "source", "source_name",
+    "id", "title", "headline", "event_title",
     "published_at", "published", "summary", "description", "india_impact",
     "india_impact_summary", "impact", "direction", "volatility", "importance",
   ]);
@@ -62,7 +62,6 @@ function pickDeskMarket(data) {
     : {};
   return {
     updated_at: data?.updated_at || null,
-    quote_source: data?.quote_source || null,
     movers: Array.isArray(data?.movers)
       ? data.movers.slice(0, 12).map((mover) => pickFields(mover, [
           "index", "symbol", "pct", "weightage", "price", "timestamp",

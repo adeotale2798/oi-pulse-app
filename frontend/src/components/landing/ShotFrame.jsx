@@ -1,5 +1,6 @@
 import React from "react";
 import BrowserChrome from "@/components/landing/BrowserChrome";
+import OiPulseLogo from "@/components/OiPulseLogo";
 
 // Wraps a REAL Striklenz screenshot in a browser frame and layers a subtle
 // live overlay (moving index chip + LIVE badge) so an authentic snapshot still
@@ -13,7 +14,7 @@ export default function ShotFrame({ src, alt = "Striklenz", title = "Striklenz T
       {showChip && d && (
         <div className="flex justify-end border-b border-slate-100 bg-white px-3 py-1.5">
           <div data-testid="landing-price-chip" className="flex max-w-full items-center gap-1.5">
-            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-emerald-500 text-[9px] font-bold text-white">S</span>
+            <OiPulseLogo className="h-4 w-4 shrink-0" pulse={false} />
             <div className="min-w-0 leading-none">
               <span className="mr-1 text-[9px] font-semibold text-slate-500">{chipIndex}</span>
               <span className="slz-mono whitespace-nowrap text-[10px] font-bold text-slate-900">{Number(d.price).toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>

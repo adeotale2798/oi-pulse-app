@@ -121,7 +121,7 @@ examples, never a member's private alert history.
 | GET/PUT | `/membership/journal/{day}` | Pro-only private day P&L summary, reflection, tags, rating, and notes; never reads the admin journal |
 | GET | `/membership/journal-period?from=YYYY-MM-DD&to=YYYY-MM-DD` | Caller-owned aggregate period totals for the same Pro journal |
 | POST/DELETE | `/membership/journal/{day}/screenshot` | Add/remove a screenshot from the authenticated member's private journal day |
-| GET | `/membership/alerts` | Premium/Pro alerts filtered by member indices/types/threshold |
+| GET | `/membership/alerts` | Authenticated Premium/Pro alerts filtered by that member's indices/types/threshold |
 | POST | `/membership/alerts/oi-shift` | Persist an entitled member's detected OI-shift alert to that member's expiring inbox |
 | POST | `/membership/alerts/{id}/ack` | Acknowledge one caller-owned alert |
 | POST | `/billing/checkout` | Creates a Razorpay subscription; entitlement is not granted by the browser |
@@ -186,50 +186,54 @@ turns it back on.
 | GET | `/` | API hello + **product version** |
 | GET | `/health` `/ready` `/api/health` | K8s readiness — 200 without Kite/Yahoo |
 | GET | `/version` | Public `{ name, version, version_label }` for the current product release |
-| GET | `/status` | Mode (`kite`/`offline`), market hours, tracker health, `app_version` |
+| GET | `/status` | Provider-neutral feed mode (`live`/`offline`) and health for desk users; Admin retains broker diagnostics, market hours, and `app_version` |
 | GET | `/admin/indices` `/search` `/inspect` | Admin: registry + Kite discovery |
 | POST | `/admin/indices/sync` `{name}/enable` `{name}/disable` | Admin: dump refresh + toggle (keeps history) |
 | GET | `/settings` / POST `/settings` | Admin settings (enabled indices, alert windows, market close, trade-cycle persistence, etc.) |
-| GET | `/oi/{index}` | Latest snapshot |
-| GET | `/oi/{index}/change` | Current vs N-minutes-ago + multi-window deltas |
-| GET | `/history/{index}` | Snapshot timeline for Replay |
-| GET | `/expiries/{index}` / POST | Expiry list + selection |
-| GET | `/alerts` / DELETE | Reversal alerts (session-scoped; prior days purged at new open) |
-| GET | `/tickers` | Index LTP / prev close cards |
-| GET | `/tickers/extras` | India VIX, GIFT NIFTY, session windows |
+| GET | `/public/login-preview/oi` | Public login preview: current NIFTY OI at a limited set of nearby strikes; no history |
+| GET | `/oi/{index}` | Latest snapshot (desk user; page visibility and plan entitlement enforced) |
+| GET | `/oi/{index}/change` | Current vs N-minutes-ago + multi-window deltas (desk user; page visibility and plan entitlement enforced) |
+| GET | `/history/{index}` | Snapshot timeline for Replay (desk user; page visibility and plan entitlement enforced) |
+| GET | `/expiries/{index}` / POST | Expiry list + selection (GET requires desk access; POST is Admin-only) |
+| GET | `/alerts` | Authenticated admin or approved guest reversal alerts (session-scoped; prior days purged at new open) |
+| DELETE | `/alerts` | Admin-only: clear shared reversal alerts |
+| GET | `/tickers` | Index LTP / prev close cards with generic freshness indicators |
+| GET | `/tickers/extras` | India VIX, GIFT NIFTY, and session windows without provider identifiers |
 | GET | `/market/status` | Open/close helpers |
 | GET | `/market/fii-dii` | Cached NSE FII/DII cash (after 19:31 IST warm) |
-| GET | `/cas/status` | Classic CAS + Auto Trade snapshot (guests: reduced) |
+| GET | `/cas/status` | Classic CAS + Auto Trade snapshot (guests: reduced; Admin broker-readiness diagnostics are omitted) |
 | POST | `/cas/settings` | Admin: classic CAS + Auto Trade times/thresholds/mode |
 | POST | `/cas/auto-trade/inject` | Admin Paper: fake first indicative (rehearsal before 15:20). Runbook: [CAS_AUTO_TRADE_15_20.md](./CAS_AUTO_TRADE_15_20.md) |
-| GET | `/vrp/{index}` | Volatility risk premium (EOD-ish) |
-| GET | `/straddle/{index}` (+ `/history`) | ATM straddle series |
+| GET | `/vrp/{index}` | Volatility risk premium (EOD-ish; desk user with Open Interest access) |
+| GET | `/straddle/{index}` (+ `/tick`, `/history`) | ATM straddle series (desk user; page visibility and plan entitlement enforced) |
 | GET | `/positions` | Open F&O from Kite (admin publisher book / guest own book), with `pnl_today` broker totals. Anonymous 401. Header Today P&L is admin-only. Positions and PositionMeter share this response and poller; PositionMeter derives open-short premium capture, decay runway, and strike-level hedge quantity from enriched rows. The feed does not include per-option quote timestamps or strategy IDs. Risk scenarios are client-side estimates and add no broker request. |
 | GET | `/trades/export` | Excel of stored cycles (`from`/`to` IST dates, optional `index`). Desk user. Entry + exit clocks; second sheet is fills/partials. |
 | GET | `/trades/archive/range` `/trades/archive/export` | Admin: count or download owned closed cycles for exact inclusive `from`/`to` Exit Dates as gzip NDJSON. Future dates are rejected. |
 | POST | `/trades/archive/compact` | Admin: after download, SHA-256 verified removal of only raw events/fills for detailed cycles in the same inclusive date range. |
 | POST | `/trades/archive/delete` | Admin: after download, SHA-256 verified permanent deletion of owned closed cycles in the same inclusive date range. Open/partial and guest cycles are excluded. |
-| GET | `/desk-outside` | Heavyweight cash movers + news. Pass `?index=` when the selected name is an enabled MCX contract |
+| GET | `/desk-outside` | Heavyweight cash movers + news without provider names or original article links. Pass `?index=` when the selected name is an enabled MCX contract |
+| GET | `/global-markets/overview` `/global-markets/instruments` | Member-accessible market data without provider attribution or provider configuration |
+| GET | `/adrs` `/adrs/history/{adr_id}` | Desk-user ADR snapshot/history without provider metadata; Admin configuration diagnostics remain under `/adrs/config` |
 | POST | `/desk-guide` | Admin-only read-only market/book guide; explicit trade-action output is not available to members (see [AI.md](./AI.md)) |
 | POST | `/desk-ai` | Desk user: one `desk_ai_show` flag for the whole desk |
 | GET/POST/DELETE | `/desk-ai/providers` | Admin: vaulted OpenAI-compatible Desk AI keys |
-| GET | `/market-intel` | Ranked clustered events (desk user). Query `filter=`. Articles include `market_direction`, `direction_basis` (`HEADLINE`, `SUMMARY`, `SOURCES`, `NONE`), signed heuristic `directional_impact_score`, separate textual volatility risk, India transmission explanation, publisher/receipt freshness, independent-source consensus, market-session classification, and computed `index_impacts` with index, weight, exposure score/level, tentative direction, explanation, and evidence confidence; `impact_score` remains importance only. |
-| GET | `/market-intel/index-risk` | Market Intel entitled desk user: current or requested IST date (`date=YYYY-MM-DD`) summary for NIFTY, BANKNIFTY, and SENSEX, derived from retained stories, uploaded constituent weights, and the NSE event calendar. Per-index results include risk level/score, tentative direction, up to five source-linked events, and each scheduled quarterly result with exact-company matched news status (`RESULTS_NEWS_FOUND`, `COMPANY_NEWS_ONLY`, or `NO_MATCHING_NEWS`). Calendar freshness is explicit; no matching headline does not mean no result was published. Scores are heuristic exposure rankings, not probabilities or trade signals. |
+| GET | `/market-intel` | Ranked clustered events (desk user). Query `filter=`. External members receive directional estimates, volatility context, India transmission, freshness, and index impacts without publisher names, source URLs, or source-agreement counts; Admin retains source attribution. |
+| GET | `/market-intel/index-risk` | Market Intel entitled desk user: current or requested IST date (`date=YYYY-MM-DD`) summary for NIFTY, BANKNIFTY, and SENSEX, derived from retained stories, uploaded constituent weights, and the NSE event calendar. Members receive risk level/score, tentative direction, event evidence, and scheduled-result matches without publisher attribution or original article URLs; Admin retains those details. Scores are heuristic exposure rankings, not probabilities or trade signals. |
 | GET | `/market-intel/performance` | Separate direction alignment and textual-volatility validation against existing OI snapshots. Direction hit rates include weak / moderate / strong heuristic-score bands and a strong-vs-weak comparison; volatility outcomes are also grouped by RBI, crude, global-rates, and earnings catalysts. Rates and catalyst breakdowns require at least 30 usable event-cluster outcomes in their group. |
 | GET | `/market-memory/{index}` | Recent price-level interaction summary derived from stored OI snapshots (desk user) |
 | GET/POST | `/market-intel/prefs` | Per-user page/popup prefs; public feeds and the page default to 60-second refresh, with default popup thresholds of 75 impact / 30 India relevance |
-| GET | `/market-intel/popup` POST `/market-intel/popup/ack` | In-app high-impact popup (up to 12 unseen clusters), including direction, volatility, India-link, source-agreement, timing evidence, and computed index exposure. The default includes high-impact India-relevant events plus a critical global-event override. Desk-wide popup tick off → empty for everyone; ingest is independent. Admin always receives items when the desk tick is on. |
+| GET | `/market-intel/popup` POST `/market-intel/popup/ack` | In-app high-impact popup (up to 12 unseen clusters), including direction, volatility, India-link, timing evidence, and computed index exposure. Members do not receive publisher names or source-agreement details. The default includes high-impact India-relevant events plus a critical global-event override. Desk-wide popup tick off → empty for everyone; ingest is independent. Admin always receives items when the desk tick is on. |
 | GET/POST/DELETE | `/market-intel/sources` | Admin sources; `.../test` and `.../fetch`. The ingest worker seeds/maintains index-specific public Google News searches for the 12 highest-weight uploaded constituents of each core index; Admin can inspect, disable, or customize them here. |
 | POST | `/market-intel/cleanup` | Admin retention cleanup now |
-| GET | `/market-intel/templates` | public-apis News/Finance catalog + RSS templates |
+| GET | `/market-intel/templates` | Admin-only source/API catalog + RSS templates |
 | POST | `/admin/refresh-day` | **Fresh Pull** — wipe snapshots, live-pull all **enabled** indices |
 | POST | `/admin/upload/constituents` | CSV/XLSX constituents (replaces index bucket on success — see [UPLOAD.md](./UPLOAD.md)) |
 | POST | `/admin/upload/events` | Event calendar upload (full replace on success) |
 | POST | `/admin/upload/holidays` | NSE holiday circular (year overlay on success) |
-| GET | `/holidays` | Uploaded holiday rows (`source` upload or builtin) |
+| GET | `/holidays` | Holiday rows; upload-origin metadata is Admin-only |
 | POST | `/admin/upload/reuse/{upload_type}` | Admin confirms that one existing data category remains current; stored rows are unchanged |
 | GET | `/upload/meta` | Admin-only upload timestamps and freshness advisories (Nifty / Bank / Sensex / events / holidays) |
-| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps); join-coverage diagnostics are Admin-only |
+| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps); source filenames and join-coverage diagnostics are Admin-only |
 
 ### Auth
 `/auth/login`, `/auth/remember-login`, `/auth/logout`, `/auth/change-password`, `/auth/guest`, `/auth/state`, `/auth/public-access`, `/auth/guests*`, `/auth/access-requests*`, `/auth/blocked-ips*`, `/auth/access-request/{id}`.
@@ -239,6 +243,7 @@ turns it back on.
 
 ### Telegram
 `/telegram/status`, `/telegram/prefs`, `/telegram/test`, `/telegram/huge-shift`, digest preview/send.
+`/telegram/huge-shift` is Admin-only; shift labels are validated and escaped before Telegram HTML rendering.
 
 ### WebSockets
 Spot and straddle WS endpoints (see `frontend/src/lib/spotWs.js`, `straddleWs.js`) — default `ws://localhost:8000`.

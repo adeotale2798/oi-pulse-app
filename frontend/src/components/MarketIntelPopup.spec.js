@@ -198,7 +198,7 @@ describe("MarketIntelPopup docking", () => {
     });
 
     await act(async () => {
-      root.render(<MarketIntelPopup enabled />);
+      root.render(<MarketIntelPopup enabled isAdmin />);
     });
     await act(async () => {
       jest.advanceTimersByTime(2000);
@@ -226,6 +226,52 @@ describe("MarketIntelPopup docking", () => {
     expect(container.querySelector('[data-testid="mi-popup-india-link"]')?.textContent)
       .toContain("Domestic rates");
     expect(container.querySelector('[data-testid="market-intel-popup"]')?.className).toContain("bg-emerald-50");
+  });
+
+  it("does not render news publisher attribution for external users", async () => {
+    jest.useFakeTimers();
+    window.matchMedia = () => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    });
+    localStorage.removeItem(MI_POPUP_MIN_KEY);
+    api.get.mockResolvedValueOnce({
+      data: {
+        items: [{
+          event_cluster_id: "rbi-rate-cut",
+          title: "RBI cuts repo rate",
+          source_name: "Publisher One",
+          article_url: "https://publisher.test/story",
+          source_direction_agreement: "AGREE",
+          independent_source_count: 2,
+          independent_source_names: ["Publisher One", "Publisher Two"],
+          market_direction: "SUPPORTIVE",
+          market_timing: "IN_SESSION",
+          news_freshness: "CURRENT",
+          published_at_known: true,
+          published_at: "2026-10-09T04:00:00Z",
+          discovered_at: "2026-10-09T04:01:00Z",
+        }],
+      },
+    });
+
+    await act(async () => {
+      root.render(<MarketIntelPopup enabled />);
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).not.toContain("Publisher One");
+    expect(container.textContent).not.toContain("Publisher Two");
+    expect(container.textContent).not.toContain("independent source");
+    expect(container.textContent).not.toContain("Independent reads agree");
+    expect(container.querySelectorAll('a[href^="https://publisher.test/"]')).toHaveLength(0);
   });
 
   it("colors the news popup red and shows a down arrow for likely market pressure", async () => {

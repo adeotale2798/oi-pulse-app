@@ -4,10 +4,10 @@ import { brokerSafeText } from "@/lib/brokerCopy";
 
 /**
  * Surface broker maintenance notices in the shared desk status banner —
- * when /status reports kite_maintenance.active from API errors or bulletin.
+ * when /status reports a broker_maintenance notice.
  */
 export default function KiteMaintenanceBanner({ status }) {
-  const maint = status?.kite_maintenance;
+  const maint = status?.broker_maintenance || status?.kite_maintenance;
   if (!maint?.active || !maint?.message) return null;
 
   const href = safeHttpUrl(maint.url);

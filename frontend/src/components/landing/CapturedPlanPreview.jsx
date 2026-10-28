@@ -316,13 +316,13 @@ function MarketIntelSnapshot({ snapshot }) {
         <div className="space-y-2">
           {items.slice(0, 40).map((story, index) => (
             <button key={story.id || story.cluster_id || story.title || index} type="button" onClick={() => setSelected(index)} aria-pressed={selected === index} className={`w-full rounded-xl border p-3 text-left ${selected === index ? "border-indigo-300 bg-indigo-50" : "border-slate-200 bg-white"}`}>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-500"><Newspaper className="h-3 w-3" />{story.source || story.source_name || "Market Intel"}</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-500"><Newspaper className="h-3 w-3" />Market Intel</span>
               <span className="mt-1 block text-xs font-bold text-slate-800">{story.title || story.headline || "Market Intel story"}</span>
             </button>
           ))}
         </div>
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">{item.source || item.source_name || "Market Intel"}{item.published_at ? ` · ${item.published_at}` : ""}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Market Intel{item.published_at ? ` · ${item.published_at}` : ""}</div>
           <h5 className="mt-2 text-sm font-bold text-slate-900">{title}</h5>
           <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{summary || "The captured story has no summary field."}</p>
           {(item.direction || item.volatility || item.importance) && (

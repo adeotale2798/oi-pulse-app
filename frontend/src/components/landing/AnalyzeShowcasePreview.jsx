@@ -1,4 +1,5 @@
 import React from "react";
+import OiPulseLogo from "@/components/OiPulseLogo";
 
 const SAMPLE_LEGS = [
   { side: "B", contract: "15 Oct · 68,500 PE", qty: "700", pnl: "−410", positive: false },
@@ -49,7 +50,7 @@ export default function AnalyzeShowcasePreview() {
         <div className="min-w-0 p-3">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="rounded bg-emerald-600 px-2 py-1 text-[9px] font-bold text-white">S</span>
+              <OiPulseLogo className="h-5 w-5 shrink-0" pulse={false} />
               <span className="text-[10px] font-bold text-slate-800">SENSEX</span>
               <span className="font-mono-data text-[10px] text-slate-600">72,781.89</span>
               <span className="font-mono-data text-[9px] text-emerald-700">+0.34%</span>

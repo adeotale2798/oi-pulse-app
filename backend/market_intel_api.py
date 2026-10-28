@@ -312,6 +312,8 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
         for it in items:
             if isinstance(it, dict):
                 it.pop("_id", None)
+        if role != "admin":
+            items = mi.remove_public_source_metadata(items)
         return {"items": items, "date": (mi.parse_feed_date(feed_date) or mi.ist_today()).isoformat()}
 
     @api_router.get("/market-intel/index-risk")
@@ -320,7 +322,6 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
         role: str = Depends(require_desk_user),
         _feature=member_feature,
     ):
-        del role
         db = _db()
         if db is None:
             raise HTTPException(503, "Market Intel event storage unavailable")
@@ -362,12 +363,13 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
                 else "STALE" if event_meta.get("stale")
                 else "CURRENT"
             )
-            return ire.attach_scheduled_results(
+            result = ire.attach_scheduled_results(
                 result,
                 scheduled_events,
                 calendar_status=calendar_status,
                 calendar_as_of=event_meta.get("confirmed_at") or event_meta.get("uploaded_at"),
             )
+            return result if role == "admin" else mi.remove_public_source_metadata(result)
         except Exception as exc:
             logger = __import__("logging").getLogger("market_intel")
             logger.exception("market-intel index risk failed")
@@ -422,8 +424,11 @@ def mount(api_router, *, require_admin, require_desk_user, require_member_featur
             "published_at_known", "published_at_precision",
             "index_impacts",
         )
+        result_items = [{k: it.get(k) for k in keys} for it in items]
+        if role != "admin":
+            result_items = mi.remove_public_source_metadata(result_items)
         return {
-            "items": [{k: it.get(k) for k in keys} for it in items],
+            "items": result_items,
             "critical_count": len(items),
             "day": mi.ist_today().isoformat(),
             "dock_until_next": s.get("market_intel_popup_dock_until_next", True) is not False,

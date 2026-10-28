@@ -199,8 +199,8 @@ export default function RightPanel({
           {selectedView === "positions" && (
             <PositionsPanel
               isKiteMode={isKiteMode}
-              hasKiteCredentials={status?.has_kite_credentials != null
-                ? !!status.has_kite_credentials
+              hasKiteCredentials={status?.has_kite_credentials != null || status?.publisher_feed_configured != null
+                ? !!(status.has_kite_credentials ?? status.publisher_feed_configured)
                 : null}
               current={filteredCurrent || current}
               previous={previous}

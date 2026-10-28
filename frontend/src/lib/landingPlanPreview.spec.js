@@ -28,7 +28,14 @@ describe("captureLandingPlanSnapshot", () => {
     api.get.mockImplementation((path) => {
       if (path.includes("/straddle/")) return Promise.resolve({ data: { trade_date: "2026-10-15", history: [{ ts: "2026-10-15T08:00:00Z", premium: 22, internal_note: "discard" }] } });
       if (path.startsWith("/events/")) return Promise.resolve({ data: { events: [{ event_date: "2026-10-20", event_type: "Results", symbol: "TEST", upload_meta: "discard" }], join: { secret: "discard" } } });
-      if (path === "/market-intel") return Promise.resolve({ data: { items: [{ id: "story-1", title: "Captured story", description: "Current feed", member_id: "discard" }] } });
+      if (path === "/market-intel") return Promise.resolve({ data: { items: [{
+        id: "story-1",
+        title: "Captured story",
+        description: "Current feed",
+        source_name: "Publisher One",
+        article_url: "https://publisher.test/story",
+        member_id: "discard",
+      }] } });
       if (path === "/global-markets/overview") return Promise.resolve({ data: { enabled: true, categories: ["GLOBAL INDICES"], items: [{ id: "idx-1", symbol: "Nikkei", price: 38000, access_token: "discard" }] } });
       if (path === "/desk-outside") return Promise.resolve({ data: {
         quote_source: "Kite",
@@ -73,7 +80,6 @@ describe("captureLandingPlanSnapshot", () => {
     });
     expect(snapshot.desk_market.data).toEqual({
       updated_at: "2026-10-15T08:00:00Z",
-      quote_source: "Kite",
       movers: [{
         index: "NIFTY",
         symbol: "HDFCBANK",
@@ -90,7 +96,7 @@ describe("captureLandingPlanSnapshot", () => {
     expect(api.get.mock.calls.map(([path]) => path)).not.toContain("/membership/alerts");
     expect(api.get.mock.calls.map(([path]) => path)).not.toContain("/positions");
     expect(api.get.mock.calls.map(([path]) => path)).not.toContain("/journal");
-    expect(JSON.stringify(snapshot)).not.toMatch(/member_id|access_token|secret|upload_meta|owner|buyer|seller|private_note/);
+    expect(JSON.stringify(snapshot)).not.toMatch(/member_id|access_token|secret|upload_meta|owner|buyer|seller|private_note|Publisher One|publisher\.test|quote_source|Kite/);
   });
 
   it("preserves unavailable index feeds as unavailable in a partial capture", async () => {

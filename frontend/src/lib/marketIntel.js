@@ -40,6 +40,7 @@ export function directionalBasisLabel(basis) {
   if (basis === "HEADLINE") return "Direction read from headline.";
   if (basis === "SUMMARY") return "Direction read from article summary; less direct than the headline.";
   if (basis === "SOURCES") return "Direction checked against independent publisher reads.";
+  if (basis === "COMBINED") return "Direction inferred from combined news context.";
   return "No clear directional cue found.";
 }
 

@@ -106,7 +106,6 @@ export const SAMPLE_HOLIDAYS = [
 export const SAMPLE_MARKET_INTEL = [
   {
     id: "sample-macro",
-    source: "Illustrative sample",
     title: "Global rate expectations: sample headline",
     summary: "Example only: a global rates move can influence currency and risk sentiment in Indian markets.",
     direction: "Mixed",
@@ -115,7 +114,6 @@ export const SAMPLE_MARKET_INTEL = [
   },
   {
     id: "sample-energy",
-    source: "Illustrative sample",
     title: "Energy prices: sample India-context note",
     summary: "Example only: energy prices may matter through import costs and inflation expectations.",
     direction: "Unclear",
@@ -141,7 +139,6 @@ export const SAMPLE_ACTIVITY = [
 ];
 
 export const SAMPLE_DESK_MARKET = {
-  quote_source: "Illustrative sample",
   updated_at: null,
   movers: [
     { index: "NIFTY", symbol: "SAMPLECO", pct: 0.62, weightage: 8.4 },

@@ -1,6 +1,11 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { api, fetchJournalDay } from "@/lib/api";
+import {
+  api,
+  fetchJournalDay,
+  fetchJournalMonth,
+  fetchJournalPeriod,
+} from "@/lib/api";
 import TradeJournalModal from "./TradeJournalModal";
 
 jest.mock("@/lib/api", () => ({
@@ -8,14 +13,9 @@ jest.mock("@/lib/api", () => ({
     get: jest.fn(),
     post: jest.fn(),
   },
-  fetchJournalMonth: async () => ({
-    today: "2026-10-07",
-    days: [],
-    stats: {},
-    tags: [],
-  }),
-  fetchJournalYear: async () => ({ stats: {}, heatmap: null }),
-  fetchJournalPeriod: async () => ({ stats: {} }),
+  fetchJournalMonth: jest.fn(),
+  fetchJournalYear: jest.fn(),
+  fetchJournalPeriod: jest.fn(),
   fetchJournalDay: jest.fn(),
   saveJournalDay: jest.fn(),
   addJournalScreenshot: jest.fn(),
@@ -185,11 +185,19 @@ describe("TradeJournalModal local archive calendar", () => {
     global.IS_REACT_ACT_ENVIRONMENT = true;
     api.get.mockResolvedValue({ data: { trade_cycle_saving_enabled: true } });
     api.post.mockResolvedValue({ data: { trade_cycle_saving_enabled: true } });
+    fetchJournalMonth.mockResolvedValue({
+      today: "2026-10-07",
+      days: [],
+      stats: {},
+      tags: [],
+    });
+    fetchJournalPeriod.mockResolvedValue({ stats: {} });
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    jest.useRealTimers();
     jest.clearAllMocks();
   });
 
@@ -243,5 +251,78 @@ describe("TradeJournalModal local archive calendar", () => {
 
     expect(container.querySelector('[data-testid="journal-local-archive-banner"]')).toBeNull();
     expect(container.querySelector('[data-testid="journal-month-label"]').textContent).toBeTruthy();
+  });
+
+  it("refreshes saved month and period data while the journal is open", async () => {
+    jest.useFakeTimers();
+    await act(async () => root.render(
+      <TradeJournalModal open onOpenChange={() => {}} refreshIntervalMs={2000} />,
+    ));
+
+    expect(fetchJournalMonth).toHaveBeenCalledTimes(1);
+    expect(fetchJournalPeriod).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchJournalMonth).toHaveBeenCalledTimes(2);
+    expect(fetchJournalPeriod).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="journal-refresh-status"]').textContent).toContain("Journal refreshed");
+  });
+
+  it("refreshes selected current-day P&L without replacing notes being edited", async () => {
+    jest.useFakeTimers();
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const today = `${parts.find((part) => part.type === "year").value}-${parts.find((part) => part.type === "month").value}-${parts.find((part) => part.type === "day").value}`;
+    fetchJournalMonth.mockResolvedValue({
+      today,
+      days: [{ date: today, booked_pnl: 100, pnl_exited: 100, exited_count: 1, trade_count: 1 }],
+      stats: {},
+      tags: [],
+    });
+    fetchJournalDay
+      .mockResolvedValueOnce({
+        date: today,
+        booked_pnl: 100,
+        pnl_exited: 100,
+        notes: "Saved note",
+        legs: [],
+      })
+      .mockResolvedValue({
+        date: today,
+        booked_pnl: 250,
+        pnl_exited: 250,
+        notes: "Server note",
+        legs: [],
+      });
+
+    await act(async () => root.render(
+      <TradeJournalModal open onOpenChange={() => {}} refreshIntervalMs={2000} />,
+    ));
+    await act(async () => {
+      container.querySelector(`[data-testid="journal-cell-${today}"]`).click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="journal-notes"]').value).toBe("Saved note");
+    expect(container.textContent).toContain("Booked 100");
+
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchJournalDay).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="journal-notes"]').value).toBe("Saved note");
+    expect(container.textContent).toContain("Booked 250");
   });
 });

@@ -12,6 +12,7 @@ describe("AnalyzeShowcasePreview", () => {
     expect(markup).toContain("Sample legs");
     expect(markup).toContain("Scenario summary");
     expect(markup).toContain("Synthetic example only");
+    expect(markup).toContain('aria-label="StrikLenz"');
     expect(markup).not.toContain("Shared open-interest context");
   });
 });

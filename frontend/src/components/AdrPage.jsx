@@ -344,7 +344,7 @@ export default function AdrPage({ isAdmin = false, userKey = "desk", onOpenAdmin
                 <div>Avg {fmtVolume(detail.average_volume)}</div>
                 <div>52W {detail.week52_range || `${usdPrice(detail.week52_low)} – ${usdPrice(detail.week52_high)}`}</div>
                 <div>1D {pctSigned(detail.rolling_1d_change)} · 7D {pctSigned(detail.rolling_7d_change)}</div>
-                <div className="col-span-2">Updated {formatIstStamp(detail.fetched_at)} · {detail.provider}</div>
+                <div className="col-span-2">Updated {formatIstStamp(detail.fetched_at)}</div>
                 <div className="col-span-2">Indices {detail.indices?.length ? detail.indices.join(", ") : "—"}</div>
               </div>
               <div className="flex gap-1">

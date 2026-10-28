@@ -129,7 +129,9 @@ function IndexTiles({ snap }) {
           <div key={label} className="rounded-lg border border-slate-200 bg-white p-2.5">
             <div className="text-[10px] font-semibold text-slate-500">{label}</div>
             <div className="slz-mono text-sm font-bold text-slate-900">{fmt(d?.price)}</div>
-            <div className={`slz-mono text-[10px] font-semibold ${up ? "text-emerald-600" : "text-rose-600"}`}>{up ? "▲" : "▼"} {Math.abs(d?.changePct ?? 0).toFixed(2)}%</div>
+            <div className={`slz-mono text-[10px] font-semibold ${up ? "text-emerald-600" : "text-rose-600"}`}>
+              {d?.changePct == null ? "—" : `${up ? "▲" : "▼"} ${Math.abs(d.changePct).toFixed(2)}%`}
+            </div>
             <div className="mt-1.5 h-1 rounded-full" style={{ background: c }} />
           </div>
         );
@@ -340,7 +342,6 @@ function MarketIntel() {
       summary: "Example only: assess the source, timing and market response before treating a headline as a catalyst.",
       indiaImpact: "India impact · domestic policy context",
       volatility: "Volatility watch",
-      source: "Illustrative source · 3 independent reports",
     },
     {
       category: "Oil",
@@ -351,7 +352,6 @@ function MarketIntel() {
       summary: "Example only: commodity moves can affect inflation expectations and energy-sensitive constituents.",
       indiaImpact: "India impact · import-cost transmission path",
       volatility: "Volatility low",
-      source: "Illustrative source · 1 independent report",
     },
   ].filter((story) => category === "All" || story.category === category || category === story.severity || category === "High Impact");
   return (
@@ -379,7 +379,7 @@ function MarketIntel() {
               <span className="text-[7px] text-slate-500">{story.direction}</span>
               <span className="ml-auto text-[7px] font-bold uppercase text-slate-500">{story.category}</span>
             </div>
-            <div className="mt-1.5 text-[9px] leading-4 text-slate-500">{story.source} · Published: illustrative time</div>
+            <div className="mt-1.5 text-[9px] leading-4 text-slate-500">Published: illustrative time</div>
             <h4 className="mt-1 text-[10px] font-bold leading-4 text-slate-900">{story.headline}</h4>
             <p className="mt-1 text-[8px] leading-3 text-slate-600">{story.summary}</p>
             <div className="mt-1 text-[8px] text-slate-700">{story.indiaImpact} · {story.volatility}</div>
@@ -468,7 +468,21 @@ function TradeJournal() {
   );
 }
 
-export default function ProductScreen({ id = "dashboard", snap }) {
+function OiUnavailable({ hasCurrent }) {
+  return (
+    <div
+      role="status"
+      data-testid="landing-oi-unavailable"
+      className="rounded-lg border border-slate-200 bg-white px-3 py-4 text-center text-[10px] text-slate-600"
+    >
+      {hasCurrent
+        ? "The prior publisher snapshot is not available for an OI-change comparison."
+        : "Publisher OI data is not available right now."}
+    </div>
+  );
+}
+
+export default function ProductScreen({ id = "dashboard", snap, marketData, marketStatus = "sample" }) {
   const sampleOi = makeSampleOi("NIFTY");
   const spot = snap?.indices?.NIFTY?.price ?? sampleOi.current.price;
   const atm = snap?.chain?.atm || Math.round(spot / 50) * 50;
@@ -483,6 +497,21 @@ export default function ProductScreen({ id = "dashboard", snap }) {
     ...sampleOi.previous,
     strikes: sampleOi.previous.strikes.map((row) => ({ ...row, strike: row.strike + strikeShift })),
   };
+  const usesPublisherData = marketData != null;
+  const currentOi = usesPublisherData ? marketData.oi?.current : current;
+  const previousOi = usesPublisherData ? marketData.oi?.previous : previous;
+  const hasCurrentOi = Array.isArray(currentOi?.strikes) && currentOi.strikes.length > 0;
+  const hasPreviousOi = Array.isArray(previousOi?.strikes) && previousOi.strikes.length > 0;
+  const sourceLabel = marketStatus === "last-session" || marketStatus === "pre-market"
+    ? "Last session"
+    : marketStatus === "live"
+      ? "Live publisher data"
+      : "Publisher snapshot";
+  const dashboardOi = usesPublisherData
+    ? hasCurrentOi && hasPreviousOi
+      ? <LandingOiChart current={currentOi} previous={previousOi} featureId="oi_change" sourceLabel={sourceLabel} />
+      : <OiUnavailable hasCurrent={hasCurrentOi} />
+    : <LandingOiChart current={current} previous={previous} featureId="oi_change" sample />;
   switch (id) {
     case "oi":
     case "chain-nifty":
@@ -528,7 +557,7 @@ export default function ProductScreen({ id = "dashboard", snap }) {
       return (
         <div className="space-y-2">
           <IndexTiles snap={snap} />
-          <LandingOiChart current={current} previous={previous} featureId="oi_change" sample />
+          {dashboardOi}
         </div>
       );
   }

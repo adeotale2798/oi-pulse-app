@@ -1,6 +1,23 @@
 """Global Markets routes.  Quotes are served from the centralized background cache."""
+from typing import Any, Dict
+
 from fastapi import Depends
 from pydantic import BaseModel
+
+def _public_overview(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose display data and preferences only, never provider configuration."""
+    result = dict(payload)
+    result["items"] = [
+        {key: value for key, value in item.items() if key not in {"source", "provider", "providerSymbol"}}
+        for item in payload.get("items", [])
+    ]
+    prefs = payload.get("prefs") or {}
+    result["prefs"] = {
+        key: prefs[key]
+        for key in ("enabled", "session_timeline_enabled")
+        if key in prefs
+    }
+    return result
 
 
 class InstrumentConfigIn(BaseModel):
@@ -28,7 +45,12 @@ def mount(api_router, *, require_desk_user, require_admin, require_member_featur
         _user: str = Depends(require_desk_user),
         _feature=member_feature,
     ):
-        return {"items": global_markets.instruments()}
+        return {
+            "items": [
+                {key: value for key, value in item.items() if key not in {"provider", "providerSymbol"}}
+                for item in global_markets.instruments()
+            ]
+        }
 
     @api_router.get("/global-markets/config")
     async def global_market_config(_admin: bool = Depends(require_admin)):
@@ -68,7 +90,7 @@ def mount(api_router, *, require_desk_user, require_admin, require_member_featur
         _user: str = Depends(require_desk_user),
         _feature=member_feature,
     ):
-        return await global_markets.overview(_db())
+        return _public_overview(await global_markets.overview(_db()))
 
     @api_router.get("/global-markets/status")
     async def global_market_status(

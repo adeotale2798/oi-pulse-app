@@ -42,6 +42,15 @@ them. The administrator controls availability from **Header â†’ Admin Settings â
 Site walkthrough**, not Admin configuration. When disabled, render the branded
 maintenance screen and do not mount the dashboard or fetch market data.
 
+The Google login screen's dashboard preview is separate from the fictional
+walkthrough: it reads the public `/tickers`, `/public/login-preview/oi`, and
+`/market/status` feeds. The preview-only OI endpoint returns a limited current
+NIFTY strike sample without history; full OI/straddle REST data requires desk
+authentication and the relevant page/plan entitlement. Use publisher quotes
+for NIFTY, BANKNIFTY, and SENSEX, and show the saved last session when the
+market is closed. If the public feeds are missing or stale, show an
+unavailable/delayed state instead of substituting walkthrough fixtures.
+
 ### Interactive subscription plan details
 
 The public pricing **More info** dialogs are a plan explorer, separate from

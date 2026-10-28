@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import OiPulseLogo from "@/components/OiPulseLogo";
 
 const PUT_GREEN = "#16A34A";
 const PUT_LIGHT = "#86EFAC";
@@ -95,7 +96,7 @@ function LegendKey({ color, label, pattern = false, outline = false }) {
   );
 }
 
-export default function LandingOiChart({ current, previous, featureId = "open_interest", sample = false }) {
+export default function LandingOiChart({ current, previous, featureId = "open_interest", sample = false, sourceLabel }) {
   const showWindowChange = featureId === "oi_change";
   // Open Interest is a current distribution; only OI Change compares snapshots.
   const rows = chartRows(current, showWindowChange ? previous : null, sample);
@@ -113,12 +114,12 @@ export default function LandingOiChart({ current, previous, featureId = "open_in
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/40 px-2.5 py-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-emerald-600 text-[8px] font-bold text-white">S</span>
+          <OiPulseLogo className="h-4 w-4 shrink-0" pulse={false} />
           <span className="truncate text-[10px] font-bold text-slate-800">{title}</span>
           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] font-semibold text-slate-600">{showWindowChange ? "15 min" : "Distribution"}</span>
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[8px] font-bold uppercase ${sample ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}`}>
-          {sample ? "Illustrative sample" : "Admin capture"}
+          {sourceLabel || (sample ? "Illustrative sample" : "Admin capture")}
         </span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2.5 pt-2 text-[8px] text-slate-500">

@@ -12,7 +12,32 @@ from global_markets import (
     fetch_fmp_quotes,
     instrument_session_open,
 )
+from global_markets_api import _public_overview
 from market_memory import _levels
+
+
+def test_public_global_overview_uses_provider_free_items_and_prefs_allowlist():
+    payload = {
+        "enabled": True,
+        "items": [{
+            "symbol": "S&P 500",
+            "source": "fmp",
+            "provider": "fmp",
+            "providerSymbol": "^GSPC",
+            "price": 5000,
+        }],
+        "prefs": {
+            "enabled": True,
+            "session_timeline_enabled": False,
+            "fmp_api_key_configured": True,
+            "instruments": {"sp500": {"provider": "fmp", "providerSymbol": "^GSPC"}},
+        },
+    }
+
+    result = _public_overview(payload)
+
+    assert result["items"] == [{"symbol": "S&P 500", "price": 5000}]
+    assert result["prefs"] == {"enabled": True, "session_timeline_enabled": False}
 
 
 def test_global_registry_keeps_provider_symbols_separate_from_display_symbols():
