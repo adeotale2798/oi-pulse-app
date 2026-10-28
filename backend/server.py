@@ -22,7 +22,7 @@ import ipaddress
 from collections import defaultdict, deque
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Annotated, Optional, List, Dict, Any
+from typing import Annotated, Optional, List, Dict, Any, Literal
 from datetime import datetime, timezone, timedelta, date
 
 # Delay motor client creation until startup to avoid heavy connection objects during import.
@@ -426,13 +426,16 @@ async def require_admin(request: Request):
 async def require_desk_user(request: Request):
     """Admin, approved guest, or durable Google member."""
     if await _is_admin_request(request):
+        await _enforce_market_data_access(request, "admin")
         return "admin"
     member = await _member_session_from_request(request)
     if member:
         await _require_member_route_access(request)
+        await _enforce_market_data_access(request, "member")
         return "guest"
     guest = await _guest_from_request(request)
     if guest:
+        await _enforce_market_data_access(request, "guest")
         return "guest"
     raise HTTPException(401, "Sign in required")
 
@@ -608,6 +611,41 @@ async def _require_member_route_access(request: Request):
     )
     if feature:
         await _member_context(request, feature)
+
+
+def _market_data_page_for_path(path: str):
+    """Map data APIs to the dashboard page and member entitlement they serve."""
+    route = path.removeprefix("/api").strip("/").split("/")
+    if len(route) == 3 and route[0] == "oi" and route[2] == "change":
+        return "oi-change", "oi_change"
+    if len(route) == 2 and route[0] == "oi":
+        return "open-interest", "open_interest"
+    if len(route) == 2 and route[0] == "expiries":
+        return "open-interest", "open_interest"
+    if len(route) == 2 and route[0] == "history":
+        return "open-interest", "open_interest"
+    if len(route) == 2 and route[0] == "vrp":
+        return "open-interest", "open_interest"
+    if len(route) >= 2 and route[0] == "straddle":
+        return "straddle", "straddle"
+    return None
+
+
+async def _enforce_market_data_access(request: Request, role: str):
+    page = _market_data_page_for_path(request.url.path)
+    if not page:
+        return
+    page_id, feature = page
+    if role == "member":
+        await _member_context(request, feature)
+        return
+
+    setting_key = "admin_visible_pages" if role == "admin" else "visible_pages"
+    visible_pages = _live_settings().get(setting_key)
+    if not isinstance(visible_pages, list):
+        visible_pages = DEFAULT_SETTINGS.get(setting_key, [])
+    if page_id not in visible_pages:
+        raise HTTPException(403, "This dashboard page is not available")
 
 
 def require_member_feature(feature: str):
@@ -854,6 +892,61 @@ def _sanitize_public_error(err: Optional[str]) -> Optional[str]:
     if any(k in low for k in ("token", "api_key", "api key", "secret", "unauthorized", "forbidden", "incorrect", "signature")):
         return "Broker authentication issue — admin must reconnect"
     return "Data feed temporarily unavailable"
+
+
+def _public_status_payload(status: dict) -> dict:
+    """Keep member-facing feed health without exposing the provider integration."""
+    public = dict(status)
+    if public.get("mode") == "kite":
+        public["mode"] = "live"
+    public["publisher_feed_configured"] = bool(public.pop("has_kite_credentials", False))
+    public["publisher_feed_live"] = bool(public.pop("kite_ok", False))
+    public["publisher_feed_attention"] = bool(public.pop("kite_token_issue", False))
+    public.pop("kite_user_id", None)
+    public.pop("metrics", None)
+    maintenance = public.pop("kite_maintenance", None)
+    if isinstance(maintenance, dict) and maintenance.get("active"):
+        public["broker_maintenance"] = {
+            "active": True,
+            "message": "Market data service maintenance may affect live updates.",
+        }
+    return public
+
+
+def _public_ticker_payload(payload: dict) -> dict:
+    """Expose quote freshness, not the underlying market-data provider."""
+    public = dict(payload)
+    if public.get("mode") == "kite":
+        public["mode"] = "live"
+    public["tickers"] = []
+    for row in payload.get("tickers") or []:
+        if not isinstance(row, dict):
+            continue
+        quote = dict(row)
+        source = quote.pop("source", None)
+        quote["is_live"] = source == "kite"
+        public["tickers"].append(quote)
+    return public
+
+
+def _public_oi_snapshot(snapshot: Optional[dict]) -> Optional[dict]:
+    if not isinstance(snapshot, dict):
+        return snapshot
+    public = dict(snapshot)
+    public.pop("mode", None)
+    public.pop("source", None)
+    return public
+
+
+def _public_extra_tickers_payload(payload: dict) -> dict:
+    import market_intel
+
+    public = market_intel.remove_public_source_metadata(payload)
+    for key in ("vix", "gift_nifty"):
+        row = public.get(key)
+        if isinstance(row, dict) and row.get("note"):
+            row["note"] = "Proxy reference used; it may differ from the live index."
+    return public
 
 
 async def _store_oi_snapshot(snapshot: Dict[str, Any], *, index_name: Optional[str] = None) -> None:
@@ -1473,11 +1566,8 @@ async def get_status(request: Request):
     status = await tracker.get_status()
     # Guests / anonymous never receive raw Kite exception text (may contain key fragments).
     if not await _is_admin_request(request):
-        status = dict(status)
+        status = _public_status_payload(status)
         status["last_error"] = _sanitize_public_error(status.get("last_error"))
-        status.pop("metrics", None)
-        # Kite user id is admin-only (shows on Kite API button).
-        status.pop("kite_user_id", None)
     status = dict(status)
     status["app_version"] = APP_VERSION
     status["app_version_label"] = APP_VERSION_LABEL
@@ -1810,7 +1900,11 @@ async def tracker_stop(_admin: bool = Depends(require_admin)):
 
 
 @api_router.get("/oi/{index_name}")
-async def get_current_oi(index_name: str, expiry: Optional[str] = None):
+async def get_current_oi(
+    index_name: str,
+    expiry: Optional[str] = None,
+    _who: str = Depends(require_desk_user),
+):
     idx = index_name.upper()
     if idx not in INDEX_CONFIG:
         raise HTTPException(404, "Unknown index")
@@ -1848,11 +1942,73 @@ async def get_current_oi(index_name: str, expiry: Optional[str] = None):
                 tracker.last_snapshot[idx] = doc
     if not snap:
         raise HTTPException(503, "No data yet")
-    return snap
+    return _public_oi_snapshot(snap)
+
+
+@api_router.get("/public/login-preview/oi")
+async def get_login_preview_oi():
+    """Return a small NIFTY OI sample for the unauthenticated login preview."""
+    idx = "NIFTY"
+    market_is_open = tracker.oi_session_open() if tracker else is_market_open()
+    current = tracker.last_snapshot.get(idx) if tracker else None
+    age = (
+        tracker.snapshot_age_seconds(current)
+        if tracker and current and hasattr(tracker, "snapshot_age_seconds")
+        else None
+    )
+    if not current or (age is not None and age > 25):
+        stored = await _latest_oi_snapshot(idx)
+        if stored:
+            current = prefer_newer_snapshot(current, stored)
+            if tracker and current is stored:
+                tracker.last_snapshot[idx] = stored
+            if tracker and current and hasattr(tracker, "snapshot_age_seconds"):
+                age = tracker.snapshot_age_seconds(current)
+
+    if not current:
+        raise HTTPException(503, "No public preview data available")
+    if (
+        market_is_open
+        and tracker
+        and hasattr(tracker, "request_background_refresh")
+        and (age is None or age > 25)
+    ):
+        tracker.request_background_refresh(idx)
+
+    allowed_snapshot_fields = ("timestamp", "expiry", "price", "atm")
+    preview = {
+        key: current[key]
+        for key in allowed_snapshot_fields
+        if key in current
+    }
+    preview["index"] = idx
+    raw_strikes = current.get("strikes") or []
+    try:
+        atm = float(current.get("atm"))
+        nearby = sorted(
+            (row for row in raw_strikes if isinstance(row, dict)),
+            key=lambda row: abs(float(row.get("strike")) - atm),
+        )[:9]
+    except (TypeError, ValueError):
+        nearby = [row for row in raw_strikes[:9] if isinstance(row, dict)]
+    preview_fields = ("strike", "ce_oi", "pe_oi", "ce_volume", "pe_volume", "ce_ltp", "pe_ltp")
+    preview["strikes"] = [
+        {key: row[key] for key in preview_fields if key in row}
+        for row in sorted(nearby, key=lambda row: float(row.get("strike", 0) or 0))
+    ]
+    return {
+        "index": idx,
+        "current": preview,
+        "previous": None,
+        "data_status": _build_data_status(current, market_is_open, age),
+    }
 
 
 @api_router.get("/expiries/{index_name}")
-async def get_expiries(index_name: str):
+async def get_expiries(
+    index_name: str,
+    _who: str = Depends(require_desk_user),
+):
     idx = index_name.upper()
     if idx not in INDEX_CONFIG:
         raise HTTPException(404, "Unknown index")
@@ -2524,7 +2680,7 @@ def _build_data_status(current: dict, market_is_open: bool, age_seconds: Optiona
     stale_reason = None
     is_live = False
     if mode != "kite":
-        stale_reason = "missing_kite_credentials"
+        stale_reason = "publisher_feed_unavailable"
     elif not market_is_open:
         stale_reason = "market_closed"
     elif age_seconds is None:
@@ -2578,6 +2734,7 @@ async def get_oi_change(
     minutes: int = Query(15, ge=1, le=1440),
     expiry: Optional[str] = None,
     also: Optional[str] = Query(None, description="Comma-separated extra windows e.g. 1,3,5"),
+    _who: str = Depends(require_desk_user),
 ):
     """Return current snapshot plus a time-based baseline snapshot for diffing.
 
@@ -2710,18 +2867,25 @@ async def get_oi_change(
 
     return {
         "index": idx,
-        "current": current,
-        "previous": prev_doc,
+        "current": _public_oi_snapshot(current),
+        "previous": _public_oi_snapshot(prev_doc),
         "minutes": minutes,
         "history_ready": history_ready,
         "available_history_minutes": available_min,
-        "also_windows": also_windows,
+        "also_windows": {
+            key: {**window, "previous": _public_oi_snapshot(window.get("previous"))}
+            for key, window in also_windows.items()
+        },
         "data_status": _build_data_status(current, market_is_open, age),
     }
 
 
 @api_router.get("/history/{index_name}")
-async def get_history(index_name: str, minutes: int = Query(60, ge=1, le=1440)):
+async def get_history(
+    index_name: str,
+    minutes: int = Query(60, ge=1, le=1440),
+    _who: str = Depends(require_desk_user),
+):
     """Return OI snapshot history for Replay.
 
     While the market is open: last `minutes` of wall-clock time.
@@ -2745,7 +2909,7 @@ async def get_history(index_name: str, minutes: int = Query(60, ge=1, le=1440)):
         return {
             "index": idx,
             "count": len(docs),
-            "history": docs,
+            "history": [_public_oi_snapshot(doc) for doc in docs],
             "session_anchor_date": session_anchor_date().isoformat(),
             "source": "live_window",
         }
@@ -2782,14 +2946,18 @@ async def get_history(index_name: str, minutes: int = Query(60, ge=1, le=1440)):
     return {
         "index": idx,
         "count": len(docs),
-        "history": docs,
+        "history": [_public_oi_snapshot(doc) for doc in docs],
         "session_anchor_date": anchor.isoformat(),
         "source": "last_session",
     }
 
 
 @api_router.get("/vrp/{index_name}")
-async def get_vrp(index_name: str, days: int = Query(30, ge=5, le=90)):
+async def get_vrp(
+    index_name: str,
+    days: int = Query(30, ge=5, le=90),
+    _who: str = Depends(require_desk_user),
+):
     """Volatility Risk Premium for an index (IV - Historical Vol).
 
     Uses Kite historical_data (daily OHLC) to compute HV_10, HV_20 and
@@ -2827,7 +2995,7 @@ async def get_vrp(index_name: str, days: int = Query(30, ge=5, le=90)):
             "label": "Needs broker login",
             "tone": "slate",
             "series": [],
-            "error": "not_in_kite_mode",
+            "error": "market_feed_unavailable",
         }
     if not getattr(tracker.kite_service, "_loaded", False):
         return {
@@ -2845,7 +3013,11 @@ async def get_vrp(index_name: str, days: int = Query(30, ge=5, le=90)):
 
 
 @api_router.get("/straddle/{index_name}/tick")
-async def get_straddle_tick(index_name: str, expiry: Optional[str] = None):
+async def get_straddle_tick(
+    index_name: str,
+    expiry: Optional[str] = None,
+    _who: str = Depends(require_desk_user),
+):
     """Lightweight ATM straddle tick for the intraday chart (spot + CE + PE)."""
     idx = index_name.upper()
     if idx not in INDEX_CONFIG:
@@ -2941,7 +3113,15 @@ async def get_straddle_tick(index_name: str, expiry: Optional[str] = None):
 
 
 @api_router.get("/straddle/{index_name}")
-async def get_straddle(index_name: str, expiry: Optional[str] = None, position: str = Query("long"), qty: int = Query(1, ge=1), span_steps: Optional[int] = Query(None, ge=4), points: int = Query(81, ge=5, le=801)):
+async def get_straddle(
+    index_name: str,
+    expiry: Optional[str] = None,
+    position: str = Query("long"),
+    qty: int = Query(1, ge=1),
+    span_steps: Optional[int] = Query(None, ge=4),
+    points: int = Query(81, ge=5, le=801),
+    _who: str = Depends(require_desk_user),
+):
     """Return a straddle payoff series for the ATM strike.
 
     - `position`: "long" or "short"
@@ -3143,7 +3323,13 @@ def _filter_straddle_session_docs(docs: list, trade_date: date) -> list:
 
 
 @api_router.get("/straddle/{index_name}/history")
-async def get_straddle_history(index_name: str, minutes: Optional[int] = Query(None, ge=1, le=24*60), expiry: Optional[str] = None, date: Optional[str] = None):
+async def get_straddle_history(
+    index_name: str,
+    minutes: Optional[int] = Query(None, ge=1, le=24*60),
+    expiry: Optional[str] = None,
+    date: Optional[str] = None,
+    _who: str = Depends(require_desk_user),
+):
     idx = index_name.upper()
     if idx not in INDEX_CONFIG:
         raise HTTPException(404, "Unknown index")
@@ -3357,7 +3543,7 @@ async def ws_spot(websocket: WebSocket):
                         "index": t.get("index"),
                         "price": round(float(ltp), 2),
                         "timestamp": t.get("as_of") or pack.get("fetched_at"),
-                        "mode": t.get("source") or "kite",
+                        "mode": "live" if t.get("source") == "kite" else (t.get("source") or "live"),
                         "prev_close": t.get("prev_close"),
                         "day_open": t.get("day_open"),
                         "change": t.get("change"),
@@ -3387,7 +3573,7 @@ async def ws_spot(websocket: WebSocket):
                         "price": round(float(snap.get("price") or 0.0), 2),
                         "atm": int(snap.get("atm") or 0),
                         "timestamp": snap.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-                        "mode": snap.get("mode") or "snapshot",
+                        "mode": "live" if snap.get("mode") == "kite" else (snap.get("mode") or "snapshot"),
                         "prev_close": (round(float(snap.get("prev_close") or 0), 2) or None),
                         "day_open": (round(float(snap.get("day_open") or 0), 2) or None),
                         "change": None,
@@ -3413,7 +3599,11 @@ async def ws_spot(websocket: WebSocket):
 
 
 @api_router.get("/alerts")
-async def get_alerts(request: Request, limit: int = Query(50, ge=1, le=100)):
+async def get_alerts(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100),
+    _role: str = Depends(require_desk_user),
+):
     """Return alerts for the active board session only.
 
     Uses session_anchor_date so weekend/holiday views stay on the last session,
@@ -4677,22 +4867,31 @@ async def telegram_test(_admin: bool = Depends(require_admin)):
     return {"ok": True, "sent": True}
 
 
+class HugeShiftContribution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strike: float = Field(allow_inf_nan=False)
+    ce_delta: float = Field(default=0, allow_inf_nan=False)
+    pe_delta: float = Field(default=0, allow_inf_nan=False)
+
+
 class HugeShiftIn(BaseModel):
-    index: str
-    side: str          # 'CE' or 'PE'
-    value: float
-    direction: str     # 'build' or 'unwind'
-    window: int
-    price: Optional[float] = None
-    atm: Optional[float] = None
-    contributing: Optional[List[dict]] = None
+    model_config = ConfigDict(extra="forbid")
+
+    index: Literal["NIFTY", "BANKNIFTY", "SENSEX"]
+    side: Literal["CE", "PE"]
+    value: float = Field(allow_inf_nan=False)
+    direction: Literal["build", "unwind"]
+    window: Literal[1, 3, 5]
+    price: Optional[float] = Field(default=None, allow_inf_nan=False)
+    atm: Optional[float] = Field(default=None, allow_inf_nan=False)
+    contributing: List[HugeShiftContribution] = Field(default_factory=list, max_length=5)
 
 
 @api_router.post("/telegram/huge-shift")
 async def telegram_huge_shift(
     payload: HugeShiftIn,
-    request: Request,
-    _who: str = Depends(require_desk_user),
+    _admin: bool = Depends(require_admin),
 ):
     await _notifier.get_prefs()
     if not _notifier.is_configured():
@@ -4843,7 +5042,7 @@ async def _desk_ticker_payload():
 
 @api_router.get("/tickers")
 async def get_tickers():
-    return await _desk_ticker_payload()
+    return _public_ticker_payload(await _desk_ticker_payload())
 
 
 # ------------------- Extra tickers: VIX + GIFT NIFTY -------------------
@@ -4854,7 +5053,7 @@ async def get_extra_tickers():
     - VIX: 09:15–15:40 IST
     - GIFT NIFTY: 06:30–15:40 IST and 16:35–02:45 IST
     Mon–Fri. Returns last-known values outside those windows."""
-    return extra_tickers.snapshot()
+    return _public_extra_tickers_payload(extra_tickers.snapshot())
 
 
 # ------------------- FII / DII (NSE cash market, EOD) -------------------
@@ -5067,6 +5266,11 @@ def _friendly_kite_connect_error(exc: Exception) -> str:
         return "Broker login expired or was reused. Start a new broker login and try once more."
     if "checksum" in low:
         return "The broker login token was invalid. Start a new broker login and try again."
+    # Provider error pages can include full HTML bodies; keep those out of API banners.
+    if "text/html" in low or re.search(r"<!doctype\s+html|<html\b|<body\b", raw, flags=re.IGNORECASE):
+        if "503" in low or "service unavailable" in low:
+            return "Broker service is temporarily unavailable. Please try again shortly."
+        return "Broker service returned an unexpected response. Please try again shortly."
     safe = re.sub(
         r"https?://(?:developers\.)?kite\.tech\S*|https?://(?:api\.)?kite\.trade\S*|https?://kite\.zerodha\.com\S*|https?://(?:www\.)?zerodha\.com\S*",
         "broker service",
@@ -7198,11 +7402,16 @@ async def cas_status(role: str = Depends(require_cas_desk_user)):
         raise HTTPException(500, "CAS status unavailable")
     await _persist_cas_auto_log()
     await _persist_cas_auto_log()
-    # Guests never see raw kite errors that might leak broker details
+    # Broker readiness diagnostics remain Admin-only; sanitize guest-facing errors.
     if role == "guest":
         plain = status.get("plain") or {}
         if plain.get("last_error"):
             plain = {**plain, "last_error": _sanitize_public_error(plain.get("last_error"))}
+        plain = {
+            key: value
+            for key, value in plain.items()
+            if key not in {"live_ready_code", "live_ready_summary"}
+        }
         state = status.get("state") or {}
         status = {
             "plain": plain,
@@ -7229,7 +7438,6 @@ async def cas_status(role: str = Depends(require_cas_desk_user)):
                 "watch_end": (status.get("config") or {}).get("watch_end"),
                 "move_window_start": (status.get("config") or {}).get("move_window_start"),
                 "move_window_end": (status.get("config") or {}).get("move_window_end"),
-                "has_token": (status.get("config") or {}).get("has_token"),
             },
             "state": {
                 "activated": state.get("activated"),
@@ -7245,7 +7453,6 @@ async def cas_status(role: str = Depends(require_cas_desk_user)):
             },
             "ws": status.get("ws") or {},
             "market_closed": status.get("market_closed"),
-            "live_readiness": status.get("live_readiness"),
             "role": "guest",
         }
     else:
@@ -7494,10 +7701,13 @@ async def upload_holidays(
 
 
 @api_router.get("/holidays")
-async def get_holidays():
+async def get_holidays(request: Request):
     """NSE holiday circular: uploaded rows when present, else empty (UI uses built-in)."""
     import holiday_calendar as hcal
-    return await hcal.fetch_holidays_payload(db)
+    payload = await hcal.fetch_holidays_payload(db)
+    if await _is_admin_request(request):
+        return payload
+    return {key: value for key, value in payload.items() if key not in {"source", "source_filename"}}
 
 
 @api_router.get("/upload/meta")
@@ -7543,15 +7753,21 @@ async def get_index_events(index: str, request: Request):
         "count": len(events),
         "events": events,
         "events_uploaded_at": events_meta.get("uploaded_at"),
-        "events_source_filename": events_meta.get("source_filename"),
         "constituents_uploaded_at": constituents_meta.get("uploaded_at"),
-        "constituents_source_filename": constituents_meta.get("source_filename"),
         "join": coverage if is_admin else None,
+        **(
+            {
+                "events_source_filename": events_meta.get("source_filename"),
+                "constituents_source_filename": constituents_meta.get("source_filename"),
+            }
+            if is_admin
+            else {}
+        ),
     }
 
 
 @api_router.get("/constituents/{index}")
-async def get_index_constituents(index: str):
+async def get_index_constituents(index: str, request: Request):
     key = (index or "").strip().upper()
     idx_code = _ACTIVE_INDEX_ALIASES.get(key)
     if not idx_code:
@@ -7562,13 +7778,15 @@ async def get_index_constituents(index: str):
     meta = await ers.fetch_upload_meta(db)
     idx_key = {"NIFTY": "nifty50", "BANKNIFTY": "banknifty", "SENSEX": "sensex"}.get(idx_code)
     cmeta = meta.get(idx_key) or {} if idx_key else {}
-    return {
+    payload = {
         "index": idx_code,
         "count": len(docs),
         "constituents": docs,
         "uploaded_at": cmeta.get("uploaded_at"),
-        "source_filename": cmeta.get("source_filename"),
     }
+    if await _is_admin_request(request):
+        payload["source_filename"] = cmeta.get("source_filename")
+    return payload
 
 
 class DeskGuideIn(BaseModel):
@@ -7643,7 +7861,19 @@ async def get_desk_outside(
     """Heavyweight cash movers + news. MCX tape only when that name is selected."""
     if request and await _member_session_from_request(request):
         await _member_context(request, "desk_ai")
-    return await desk_outside_svc.snapshot(db, tracker, index=index)
+    payload = await desk_outside_svc.snapshot(db, tracker, index=index)
+    if role != "admin":
+        import market_intel
+
+        payload = market_intel.remove_public_source_metadata(payload)
+        if isinstance(payload.get("briefing"), str):
+            payload["briefing"] = re.sub(
+                r"\b(?:kite|zerodha|yahoo|twelve[\s_-]*data|fmp)\b",
+                "market data",
+                payload["briefing"],
+                flags=re.IGNORECASE,
+            )
+    return payload
 
 
 @api_router.get("/desk-guide")
@@ -7945,6 +8175,12 @@ def _normalize_landing_plan_preview_snapshot(raw: object) -> Optional[dict]:
     except ValueError as exc:
         raise ValueError("Plan preview capture requires a valid capture timestamp") from exc
     snapshot = dict(raw)
+    if isinstance(snapshot.get("market_intel"), dict):
+        import market_intel
+
+        snapshot["market_intel"] = market_intel.remove_public_source_metadata(
+            snapshot["market_intel"]
+        )
     encoded_size = len(json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     if encoded_size > _LANDING_PREVIEW_MAX_BYTES:
         raise ValueError("Plan preview capture is larger than 3 MB")
@@ -9046,6 +9282,7 @@ async def member_alerts_get(
     request: Request,
     limit: int = Query(50, ge=1, le=100),
 ):
+    await _member_context(request, "alerts")
     return await get_alerts(request, limit)
 
 

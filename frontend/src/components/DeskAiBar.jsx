@@ -324,6 +324,7 @@ export default function DeskAiBar({
         extras={sessionExtras}
         guide={guide}
         compact={!isPanel}
+        isAdmin={isAdmin}
         oi={intel.oi}
         book={intel.book}
         adjust={intel.adjust}

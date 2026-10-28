@@ -469,9 +469,9 @@ function fixture(path, now, config, params = {}) {
   }
   if (path === "/status") {
     return {
-      mode: "kite",
-      kite_ok: true,
-      has_kite_credentials: false,
+      mode: "live",
+      publisher_feed_live: true,
+      publisher_feed_configured: true,
       market: {
         is_market_open: session.isOpen,
         is_oi_polling: session.isOpen,
@@ -546,7 +546,6 @@ function fixture(path, now, config, params = {}) {
           display: "06:30–15:40 & 16:35–02:45",
           sessions: [{ start_ist: "06:30", end_ist: "15:40" }, { start_ist: "16:35", end_ist: "02:45" }],
           open_now: session.isOpen,
-          kite_symbol: "NSEIX:GIFT NIFTY",
         },
       },
       server_time_ist: quoteTime,
@@ -630,7 +629,7 @@ function fixture(path, now, config, params = {}) {
       positions,
       funds: { available: 524850, used: 186400 },
       pnl_today: { total: Number(positions.reduce((total, position) => total + position.pnl, 0).toFixed(2)) },
-      kite_connected: true,
+      broker_connected: true,
       connect_required: false,
     };
   }

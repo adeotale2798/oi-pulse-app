@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiDetail } from "@/lib/api";
 import PageBrandTitle from "@/components/PageBrandTitle";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { MarketIntelUserPrefs } from "@/components/DeskAiKeysAdmin";
 import ScheduledResultsPanel from "@/components/ScheduledResultsPanel";
 import { MI_FILTERS, bandClass, directionalBasisLabel, directionalImpactClass, directionalImpactLabel, formatEventTypeLabel, impactScoreLabel, indiaImpactLabel, marketTimingLabel, newsFreshnessLabel, sourceAgreementLabel, marketIntelTimeLabel, marketIntelPublicationLabel, volatilityRiskClass, volatilitySellerNote, MI_RELOAD_EVENT, notifyMarketIntelReload, readMiFeedCache, writeMiFeedCache } from "@/lib/marketIntel";
@@ -24,6 +24,8 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
   const [indexRisk, setIndexRisk] = useState([]);
   const [indexRiskError, setIndexRiskError] = useState(null);
   const [indexRiskLoading, setIndexRiskLoading] = useState(false);
+  const [indexRiskOpen, setIndexRiskOpen] = useState(true);
+  const [indexRiskEvidenceOpen, setIndexRiskEvidenceOpen] = useState(false);
   const feedGen = useRef(0);
 
   const loadPrefs = useCallback(() => {
@@ -258,26 +260,46 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
         </p>
       </div>
       <section className="rounded-md border border-slate-200 bg-slate-50 p-2.5" data-testid="mi-index-risk">
-        <div className="flex flex-wrap items-baseline justify-between gap-1">
-          <h2 className="text-sm font-bold text-slate-800">Today at a glance · {selectedDate}</h2>
-          {indexRiskLoading ? <span className="text-[10px] text-slate-500">Updating…</span> : null}
-        </div>
-        <p className="mt-1 text-[10px] text-slate-500">
-          Risk shows headline exposure, not a forecast. Direction is only a tentative read.
-        </p>
-        {indexRiskError ? (
-          <p className="mt-2 text-xs text-rose-700" role="status" data-testid="mi-index-risk-error">
-            Index risk unavailable: {indexRiskError}
-          </p>
-        ) : null}
-        {!indexRiskError && indexRisk.length === 0 && indexRiskLoading ? (
-          <p className="mt-2 text-xs text-slate-500">Loading index risk…</p>
-        ) : null}
-        {!indexRiskError && indexRisk.length > 0 ? (
-          <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3" data-testid="mi-index-risk-cards">
-            {indexRisk.map((summary) => (
-              <IndexRiskCard key={summary.index} summary={summary} />
-            ))}
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-2 text-left"
+          aria-expanded={indexRiskOpen}
+          aria-controls="mi-index-risk-content"
+          data-testid="mi-index-risk-toggle"
+          onClick={() => setIndexRiskOpen((open) => !open)}
+        >
+          <span className="text-sm font-bold text-slate-800">Today at a glance · {selectedDate}</span>
+          <span className="flex items-center gap-2">
+            {indexRiskLoading ? <span className="text-[10px] font-normal text-slate-500">Updating…</span> : null}
+            <ChevronDown className={`h-4 w-4 transition-transform ${indexRiskOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+          </span>
+        </button>
+        {indexRiskOpen ? (
+          <div id="mi-index-risk-content" className="mt-1">
+            <p className="text-[10px] text-slate-500">
+              Risk shows headline exposure, not a forecast. Direction is only a tentative read.
+            </p>
+            {indexRiskError ? (
+              <p className="mt-2 text-xs text-rose-700" role="status" data-testid="mi-index-risk-error">
+                Index risk unavailable: {indexRiskError}
+              </p>
+            ) : null}
+            {!indexRiskError && indexRisk.length === 0 && indexRiskLoading ? (
+              <p className="mt-2 text-xs text-slate-500">Loading index risk…</p>
+            ) : null}
+            {!indexRiskError && indexRisk.length > 0 ? (
+              <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3" data-testid="mi-index-risk-cards">
+                {indexRisk.map((summary) => (
+                  <IndexRiskCard
+                    key={summary.index}
+                    summary={summary}
+                    isAdmin={isAdmin}
+                    evidenceOpen={indexRiskEvidenceOpen}
+                    onToggleEvidence={() => setIndexRiskEvidenceOpen((open) => !open)}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -302,7 +324,7 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
               {selectedDate === maxDate ?
                 'Older days stay in storage but are not shown here.' :
                 'No news data exist for the selected date kindly change the date.'}
-              Admin can add RSS/API sources. Ingest waits ~90s after boot, then runs on the admin interval.
+              {isAdmin ? " Admin can configure news feeds; updates run on the configured schedule." : null}
             </div>
           )}
           {items.length > 0 && (
@@ -321,9 +343,11 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
                       {directionalImpactLabel(it.market_direction)}
                     </span>
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{formatEventTypeLabel(it.event_type)}</span>
-                    <span className="ml-auto text-[10px] text-slate-500">
-                      {(it.independent_source_names || [it.source_name]).filter(Boolean).slice(0, 1).join("") || "Source not identified"}
-                    </span>
+                    {isAdmin ? (
+                      <span className="ml-auto text-[10px] text-slate-500">
+                        {(it.independent_source_names || [it.source_name]).filter(Boolean).slice(0, 1).join("") || "Source not identified"}
+                      </span>
+                    ) : null}
                   </div>
                   <h3 className="text-sm font-semibold text-slate-900 leading-snug">{it.title}</h3>
                   {it.summary ? <p className="text-xs text-slate-600 line-clamp-2">{it.summary}</p> : null}
@@ -347,10 +371,10 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
                     <div className="mt-2 space-y-1.5">
                       <div className="flex flex-wrap gap-x-2 gap-y-1">
                         <span>{impactScoreLabel(it.impact_score)}</span>
-                        <span>{sourceAgreementLabel(it.source_direction_agreement)}</span>
+                        {isAdmin ? <span>{sourceAgreementLabel(it.source_direction_agreement)}</span> : null}
                         <span>{marketTimingLabel(it.market_timing)}</span>
                         <span>{newsFreshnessLabel(it.news_freshness)}</span>
-                        <span>{it.independent_source_count ?? it.source_count ?? 1} independent source{(it.independent_source_count ?? it.source_count ?? 1) === 1 ? "" : "s"}</span>
+                        {isAdmin ? <span>{it.independent_source_count ?? it.source_count ?? 1} independent source{(it.independent_source_count ?? it.source_count ?? 1) === 1 ? "" : "s"}</span> : null}
                         <span>Published: {it.published_at_known ? marketIntelPublicationLabel(it.published_at, it.published_at_precision) : "time not supplied"}</span>
                         <span>Received: {marketIntelTimeLabel(it.discovered_at)}</span>
                       </div>
@@ -368,7 +392,7 @@ export default function MarketIntelPage({ compact = false, isAdmin = false, demo
                       {Array.isArray(it.potential) && it.potential.length > 0 ? (
                         <ul className="list-disc pl-4">{it.potential.map((p) => <li key={p}>{p}</li>)}</ul>
                       ) : null}
-                      {it.article_url ? <a className="text-emerald-800 underline" href={it.article_url} target="_blank" rel="noreferrer">Open source</a> : null}
+                      {isAdmin && it.article_url ? <a className="text-emerald-800 underline" href={it.article_url} target="_blank" rel="noreferrer">Open source</a> : null}
                     </div>
                   </details>
                 </article>
@@ -399,7 +423,7 @@ function indexDirectionLabel(direction) {
   return "No clear direction";
 }
 
-function IndexRiskCard({ summary }) {
+function IndexRiskCard({ summary, isAdmin, evidenceOpen, onToggleEvidence }) {
   const events = summary.events || [];
   const leadEvent = events[0];
   const scheduledResults = summary.scheduled_results || [];
@@ -420,7 +444,7 @@ function IndexRiskCard({ summary }) {
       {leadEvent ? (
         <div className="mt-2 border-t border-slate-100 pt-2">
           <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Main headline</p>
-          {leadEvent.article_url ? (
+          {isAdmin && leadEvent.article_url ? (
             <a href={leadEvent.article_url} target="_blank" rel="noreferrer" className="mt-0.5 block text-xs font-semibold leading-snug text-slate-800 underline decoration-slate-300 hover:text-emerald-800 line-clamp-2">
               {leadEvent.title}
             </a>
@@ -447,27 +471,30 @@ function IndexRiskCard({ summary }) {
         calendarAsOf={summary.result_calendar_as_of}
         scheduleDate={summary.date}
         testId={`mi-scheduled-results-${summary.index}`}
+        isAdmin={isAdmin}
       />
       {events.length ? (
-        <details className="mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-500" data-testid="mi-index-risk-details">
-          <summary className="w-fit cursor-pointer font-medium text-slate-600 hover:text-slate-900">
-            See evidence ({summary.event_count || events.length} headlines)
-          </summary>
+        <div className="mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-500" data-testid="mi-index-risk-details">
+          <button type="button" className="w-fit cursor-pointer font-medium text-slate-600 hover:text-slate-900" aria-expanded={evidenceOpen} onClick={onToggleEvidence}>
+            {evidenceOpen ? "Hide evidence" : `See evidence (${summary.event_count || events.length} headlines)`}
+          </button>
+          {evidenceOpen ? (
+            <>
           <p className="mt-2">
             Evidence confidence: {String(summary.evidence_confidence || "LOW").toLowerCase()} · showing up to {events.length} top headlines.
           </p>
           <ul className="mt-2 space-y-2">
             {events.map((event) => (
               <li key={event.event_cluster_id} className="leading-snug">
-                {event.article_url ? (
+                {isAdmin && event.article_url ? (
                   <a href={event.article_url} target="_blank" rel="noreferrer" className="font-medium text-slate-700 underline decoration-slate-300 hover:text-emerald-800">
                     {event.title}
                   </a>
                 ) : <span className="font-medium text-slate-700">{event.title}</span>}
                 <p>{event.reason}</p>
+                {isAdmin ? <p>{(event.independent_source_names || []).join(" · ") || "Source not identified"}{" · "}</p> : null}
                 <p>
-                  {(event.independent_source_names || []).join(" · ") || "Source not identified"}
-                  {" · Published "}
+                  {"Published "}
                   {event.published_at_known
                     ? marketIntelPublicationLabel(event.published_at, event.published_at_precision)
                     : "time not supplied"}
@@ -477,7 +504,9 @@ function IndexRiskCard({ summary }) {
             ))}
           </ul>
           {summary.risk_score != null ? <p className="mt-2">Exposure score {summary.risk_score}/100; heuristic, not a probability.</p> : null}
-        </details>
+            </>
+          ) : null}
+        </div>
       ) : null}
     </article>
   );

@@ -25,6 +25,16 @@ assert.equal(live.mode, "LIVE");
 assert.match(live.detail, /Market Open · Next Pull \(\d+s\)/);
 assert.equal(/Market open · next \(/.test(live.detail), false);
 
+const providerNeutralLive = buildDataTruth({
+  dataStatus: { is_live: true, data_date: "2026-08-19", cache_age_seconds: 4 },
+  marketOpen: true,
+  mode: "live",
+  snapshotTs: new Date(Date.now() - 4000).toISOString(),
+  now: new Date(),
+  pollMs: 15000,
+});
+assert.equal(providerNeutralLive.mode, "LIVE");
+
 const preMarket = buildDataTruth({
   dataStatus: {
     is_live: false,

@@ -102,7 +102,7 @@ export function collectNewMarketIntelItems(items, seenIds, hasBaseline) {
 }
 
 /** In-app Market Intel sheet — same dock/minimize pattern as the overnight carry brief. */
-export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, popupOpacity = 92 }) {
+export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, popupOpacity = 92, isAdmin = false }) {
   const [items, setItems] = useState([]);
   const [idx, setIdx] = useState(0);
   const [minimized, setMinimized] = useState(() => readMinimized());
@@ -652,11 +652,15 @@ export default function MarketIntelPopup({ enabled, onOpenPage, onNewsAlert, pop
             <div className="text-base font-semibold leading-snug">{item.title}</div>
             {item.direction_reason ? <p className="text-sm opacity-90" data-testid="mi-popup-direction-reason">{item.direction_reason}</p> : null}
             <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs opacity-80">
-              <span>
-                {item.independent_source_count ?? 1} independent source{(item.independent_source_count ?? 1) === 1 ? "" : "s"}
-                {(item.independent_source_names || []).length ? ` · ${item.independent_source_names.slice(0, 2).join(" / ")}` : ""}
-              </span>
-              <span>{sourceAgreementLabel(item.source_direction_agreement)}</span>
+              {isAdmin ? (
+                <>
+                  <span>
+                    {item.independent_source_count ?? 1} independent source{(item.independent_source_count ?? 1) === 1 ? "" : "s"}
+                    {(item.independent_source_names || []).length ? ` · ${item.independent_source_names.slice(0, 2).join(" / ")}` : ""}
+                  </span>
+                  <span>{sourceAgreementLabel(item.source_direction_agreement)}</span>
+                </>
+              ) : null}
               <span>{marketTimingLabel(item.market_timing)}</span>
               <span>{newsFreshnessLabel(item.news_freshness)}</span>
             </div>

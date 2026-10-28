@@ -203,7 +203,13 @@ function Gauge({ pct }) {
   );
 }
 
-export default function TradeJournalModal({ open, onOpenChange, privacy = false, memberMode = false }) {
+export default function TradeJournalModal({
+  open,
+  onOpenChange,
+  privacy = false,
+  memberMode = false,
+  refreshIntervalMs = 60_000,
+}) {
   const now = useMemo(() => new Date(), []);
   const walkthroughMode = isSiteWalkthroughPath();
   const [year, setYear] = useState(() => now.getFullYear());
@@ -218,6 +224,8 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [memberUnavailable, setMemberUnavailable] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+  const [refreshError, setRefreshError] = useState("");
   const [tradeCycleSaving, setTradeCycleSaving] = useState(null);
   const [tradeCycleSettingLoading, setTradeCycleSettingLoading] = useState(false);
   const [tradeCycleSettingSaving, setTradeCycleSettingSaving] = useState(false);
@@ -287,11 +295,14 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
       // Keep the Positions presentation shared while preserving member-owned API boundaries.
       const d = await (memberMode ? fetchMemberJournalMonth : fetchJournalMonth)(y, m);
       setData(d);
+      setLastRefreshedAt(new Date());
+      setRefreshError("");
     } catch (e) {
       if (memberMode && e?.response?.status === 403) {
         setMemberUnavailable(true);
         return;
       }
+      setRefreshError("Journal could not be loaded; retrying automatically.");
       toast.error(e?.response?.data?.detail || "Could not load journal");
     } finally {
       setLoading(false);
@@ -423,9 +434,9 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
     setDayDoc(null);
   };
 
-  const applyDayPayload = (iso, d) => {
+  const applyDayPayload = useCallback((iso, d, { preserveNotes = false } = {}) => {
     const wrn = (d.win_trades || 0) + (d.loss_trades || 0);
-    setDayDoc({
+    const next = {
       went_well: d.went_well || "",
       went_wrong: d.went_wrong || "",
       notes: d.notes || "",
@@ -456,14 +467,123 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
       screenshots: d.screenshots || [],
       empty: !!d.empty,
       date: iso,
+    };
+    setDayDoc((current) => {
+      if (!preserveNotes || current?.date !== iso) return next;
+      return {
+        ...next,
+        went_well: current.went_well,
+        went_wrong: current.went_wrong,
+        notes: current.notes,
+        tags: current.tags,
+        rating: current.rating,
+        followed_plan: current.followed_plan,
+        screenshots: current.screenshots,
+      };
     });
-  };
+  }, []);
 
   const loadDay = async (iso) => {
     setSelected(iso);
     const d = await (memberMode ? fetchMemberJournalDay : fetchJournalDay)(iso);
     applyDayPayload(iso, d);
   };
+
+  // Re-read saved snapshots; backend reconciliation does not push updates into this modal.
+  useEffect(() => {
+    if (!open || archiveView || walkthroughMode) return undefined;
+    const intervalMs = Math.max(1000, Number(refreshIntervalMs) || 60_000);
+    let cancelled = false;
+    let refreshing = false;
+
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const requests = [
+          {
+            key: "month",
+            load: () => (memberMode ? fetchMemberJournalMonth : fetchJournalMonth)(year, month),
+          },
+        ];
+        if (periodFrom && periodTo && periodFrom <= periodTo) {
+          requests.push({
+            key: "period",
+            load: () => (memberMode
+              ? fetchMemberJournalPeriod(periodFrom, periodTo)
+              : fetchJournalPeriod(periodFrom, periodTo, periodIndex)),
+          });
+        }
+        if (tab === "year") {
+          requests.push({
+            key: "year",
+            load: () => (memberMode ? fetchMemberJournalYear : fetchJournalYear)(year),
+          });
+        }
+        if (selected === todayIstYmd()) {
+          requests.push({
+            key: "day",
+            load: () => (memberMode ? fetchMemberJournalDay : fetchJournalDay)(selected),
+          });
+        }
+
+        const results = await Promise.allSettled(requests.map(({ load }) => load()));
+        if (cancelled) return;
+        let failed = false;
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled") {
+            failed = true;
+            if (memberMode && result.reason?.response?.status === 403) {
+              setMemberUnavailable(true);
+            }
+            return;
+          }
+          switch (requests[index].key) {
+            case "month":
+              setData(result.value);
+              break;
+            case "period":
+              setPeriodData(result.value);
+              break;
+            case "year":
+              setYearData(result.value);
+              break;
+            case "day":
+              applyDayPayload(selected, result.value, { preserveNotes: true });
+              break;
+            default:
+              break;
+          }
+        });
+        setRefreshError(failed ? "Journal refresh failed; showing the last saved figures." : "");
+        if (!failed) setLastRefreshedAt(new Date());
+      } catch {
+        if (!cancelled) setRefreshError("Journal refresh failed; showing the last saved figures.");
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const timer = setInterval(refresh, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [
+    open,
+    archiveView,
+    walkthroughMode,
+    refreshIntervalMs,
+    memberMode,
+    year,
+    month,
+    periodFrom,
+    periodTo,
+    periodIndex,
+    tab,
+    selected,
+    applyDayPayload,
+  ]);
 
   const openDay = async (iso) => {
     if (archiveView) {
@@ -661,6 +781,23 @@ export default function TradeJournalModal({ open, onOpenChange, privacy = false,
               </span>
             </DialogDescription>
           </DialogHeader>
+          {!walkthroughMode ? (
+            <div
+              className={`mt-1 text-[10px] ${refreshError ? "text-rose-700" : "text-slate-500"}`}
+              role="status"
+              aria-live="polite"
+              data-testid="journal-refresh-status"
+            >
+              {refreshError || (lastRefreshedAt
+                ? `Journal refreshed ${lastRefreshedAt.toLocaleTimeString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })} IST`
+                : "Loading saved journal data…")}
+            </div>
+          ) : null}
           <div className="mt-3 flex gap-1 rounded-full bg-white border border-slate-200 p-0.5 w-fit shadow-sm">
             <button
               type="button"

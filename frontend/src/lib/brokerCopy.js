@@ -3,7 +3,13 @@ const PROVIDER_HOSTS = /\b(?:developers\.)?kite\.tech\b|\b(?:api\.)?kite\.trade\
 const PROVIDER_URLS = /https?:\/\/[^\s"'<>]*(?:kite\.tech|kite\.trade|kite\.zerodha\.com|zerodha\.com)[^\s"'<>]*/gi;
 
 export function brokerSafeText(value) {
-  return String(value ?? "")
+  const raw = String(value ?? "");
+  if (/text\/html|<!doctype\s+html|<html\b|<body\b/i.test(raw)) {
+    return /(?:\b503\b|service unavailable)/i.test(raw)
+      ? "Broker service is temporarily unavailable. Please try again shortly."
+      : "Broker service returned an unexpected response. Please try again shortly.";
+  }
+  return raw
     .replace(PROVIDER_URLS, "broker service")
     .replace(PROVIDER_HOSTS, "broker service")
     .replace(PROVIDER_NAMES, "broker");

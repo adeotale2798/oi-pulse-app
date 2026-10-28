@@ -17,6 +17,7 @@ import PlanWalkthrough from "@/components/landing/PlanWalkthrough";
 import { normalizeLandingCopy } from "@/lib/landingCopy";
 import { BRAND, NAV_LINKS, FAQS, PRICING_FALLBACK, money } from "@/config/site";
 import { api, fetchExtras, fetchTickers } from "@/lib/api";
+import { brokerSafeText } from "@/lib/brokerCopy";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 const reveal = {

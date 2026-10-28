@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import Login from "@/pages/Login";
-import { api } from "@/lib/api";
+import { api, fetchTickers } from "@/lib/api";
 
 jest.mock("react-router-dom", () => {
   const ReactModule = require("react");
@@ -24,14 +24,19 @@ jest.mock("framer-motion", () => {
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn(), message: jest.fn() } }));
 jest.mock("@/lib/api", () => ({
   api: { get: jest.fn(), post: jest.fn() },
+  fetchTickers: jest.fn(),
   persistGuestAuth: jest.fn(),
 }));
-jest.mock("@/hooks/useLiveDemo", () => ({
-  __esModule: true,
-  default: () => ({ indices: { SENSEX: { price: 84000, changePct: 0.2 } } }),
-  isMarketOpenNow: () => false,
-}));
-jest.mock("@/components/landing/BrowserMock", () => () => null);
+jest.mock("@/components/landing/BrowserMock", () => {
+  const ReactModule = require("react");
+  return ({ snap, marketData, status, chipAlign }) => ReactModule.createElement("div", {
+    "data-testid": "login-market-preview",
+    "data-status": status,
+    "data-chip-align": chipAlign,
+    "data-sensex-price": snap?.indices?.SENSEX?.price ?? "",
+    "data-oi-timestamp": marketData?.oi?.current?.timestamp ?? "",
+  });
+});
 
 describe("Login guest sign-in control", () => {
   let container;
@@ -44,6 +49,8 @@ describe("Login guest sign-in control", () => {
     root = createRoot(container);
     api.get.mockReset();
     api.post.mockReset();
+    fetchTickers.mockReset();
+    fetchTickers.mockResolvedValue({ mode: "offline", tickers: [] });
     window.history.replaceState({}, "", "/login");
   });
 
@@ -53,13 +60,25 @@ describe("Login guest sign-in control", () => {
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
   });
 
-  async function renderWithAuthState(guestLoginEnabled, googleLoginEnabled = true) {
-    api.get.mockResolvedValue({
-      data: {
-        google_login_enabled: googleLoginEnabled,
-        guest_login_enabled: guestLoginEnabled,
-      },
-    });
+  async function renderWithAuthState(
+    guestLoginEnabled,
+    googleLoginEnabled = true,
+    marketStatus = { is_market_open: false },
+    loginOiPreview = {
+      current: { timestamp: "2026-10-28T09:30:00+05:30", strikes: [{ strike: 25000, ce_oi: 100, pe_oi: 120 }] },
+      data_status: { is_live: true },
+    },
+  ) {
+    api.get.mockImplementation((path) => Promise.resolve({
+      data: path === "/market/status"
+        ? marketStatus
+        : path === "/public/login-preview/oi"
+          ? loginOiPreview
+          : {
+            google_login_enabled: googleLoginEnabled,
+            guest_login_enabled: guestLoginEnabled,
+          },
+    }));
     await act(async () => {
       root.render(<Login />);
       await Promise.resolve();
@@ -122,5 +141,34 @@ describe("Login guest sign-in control", () => {
     expect(card.parentElement.className).toContain("items-center");
     expect(card.querySelector(".relative.mb-7").className).toContain("justify-center");
     expect(card.querySelector("button").textContent).toContain("Continue with Google");
+  });
+
+  it("uses current shared-feed quotes and OI snapshot in the login preview", async () => {
+    fetchTickers.mockResolvedValue({
+      mode: "live",
+      tickers: ["NIFTY", "BANKNIFTY", "SENSEX"].map((index) => ({
+        index,
+        ltp: index === "SENSEX" ? 84000 : 25000,
+        change_pct: 0.2,
+        is_live: true,
+      })),
+    });
+    await renderWithAuthState(false, true, { is_market_open: true, is_oi_polling: true });
+
+    const preview = container.querySelector('[data-testid="login-market-preview"]');
+    expect(fetchTickers).toHaveBeenCalled();
+    expect(api.get).toHaveBeenCalledWith("/public/login-preview/oi");
+    expect(preview.dataset.status).toBe("live");
+    expect(preview.dataset.sensexPrice).toBe("84000");
+    expect(preview.dataset.oiTimestamp).toBe("2026-10-28T09:30:00+05:30");
+    expect(preview.dataset.chipAlign).toBe("left");
+  });
+
+  it("does not substitute illustrative prices when the public feeds are unavailable", async () => {
+    await renderWithAuthState(false, true, { is_market_open: false }, null);
+
+    const preview = container.querySelector('[data-testid="login-market-preview"]');
+    expect(preview.dataset.status).toBe("unavailable");
+    expect(preview.dataset.sensexPrice).toBe("");
   });
 });

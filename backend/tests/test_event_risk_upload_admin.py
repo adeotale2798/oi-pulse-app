@@ -6,6 +6,18 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 import server
+import holiday_calendar
+
+
+class MemoryCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def sort(self, *_args):
+        return self
+
+    async def to_list(self, length):
+        return self.rows[:length]
 
 
 class MemoryCollection:
@@ -17,6 +29,9 @@ class MemoryCollection:
             all(row.get(key) == value for key, value in query.items())
             for row in self.rows
         )
+
+    def find(self, *_args, **_kwargs):
+        return MemoryCursor(self.rows)
 
 
 class MemorySettings:
@@ -67,7 +82,16 @@ def test_upload_freshness_is_admin_only_and_each_category_can_be_confirmed(monke
     async def no_events(_db, _index):
         return [], {"constituent_count": 0, "constituents_with_event": 0}
 
+    async def holiday_payload(_db):
+        return {
+            "source": "upload",
+            "holidays": holiday_rows,
+            "source_filename": "internal-holiday-upload.csv",
+            "uploaded_at": old_upload,
+        }
+
     monkeypatch.setattr(server.ers, "fetch_events_for_index", no_events)
+    monkeypatch.setattr(holiday_calendar, "fetch_holidays_payload", holiday_payload)
     client = TestClient(server.app)
 
     assert client.get("/api/upload/meta").status_code == 401
@@ -76,6 +100,15 @@ def test_upload_freshness_is_admin_only_and_each_category_can_be_confirmed(monke
     assert events_response.status_code == 200
     assert "upload_meta" not in events_response.json()
     assert events_response.json()["join"] is None
+    assert "events_source_filename" not in events_response.json()
+    assert "constituents_source_filename" not in events_response.json()
+    constituents_response = client.get("/api/constituents/SENSEX")
+    assert constituents_response.status_code == 200
+    assert "source_filename" not in constituents_response.json()
+    holiday_response = client.get("/api/holidays")
+    assert holiday_response.status_code == 200
+    assert "source" not in holiday_response.json()
+    assert "source_filename" not in holiday_response.json()
 
     async def allow_admin(_request: Request):
         return True
@@ -89,6 +122,15 @@ def test_upload_freshness_is_admin_only_and_each_category_can_be_confirmed(monke
         admin_events_response = client.get("/api/events/SENSEX")
         assert admin_events_response.status_code == 200
         assert admin_events_response.json()["join"]["constituent_count"] == 0
+        assert admin_events_response.json()["events_source_filename"] == "events.csv"
+        assert admin_events_response.json()["constituents_source_filename"] == "sensex.csv"
+        admin_constituents_response = client.get("/api/constituents/SENSEX")
+        assert admin_constituents_response.status_code == 200
+        assert admin_constituents_response.json()["source_filename"] == "sensex.csv"
+        admin_holiday_response = client.get("/api/holidays")
+        assert admin_holiday_response.status_code == 200
+        assert admin_holiday_response.json()["source"] == "upload"
+        assert admin_holiday_response.json()["source_filename"] == "internal-holiday-upload.csv"
 
         stale_meta = client.get("/api/upload/meta")
         assert stale_meta.status_code == 200

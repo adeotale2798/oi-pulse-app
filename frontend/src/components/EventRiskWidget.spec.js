@@ -79,54 +79,14 @@ describe("EventRiskWidget weight colors", () => {
     expect(container.querySelector('[data-testid="event-card-FARHIGH"]').className).not.toContain("border-l-4");
   });
 
-  it("shows source-backed news risk only when Market Intel is available", async () => {
-    api.get.mockImplementation((url) => {
-      if (url === "/events/NIFTY") return Promise.resolve({ data: { events: bandEvents } });
-      return Promise.resolve({
-        data: {
-          indices: [{
-            index: "NIFTY",
-            status: "READY",
-            risk_level: "HIGH",
-            direction: "NEGATIVE",
-            evidence_confidence: "MEDIUM",
-            event_count: 1,
-            events: [{
-              event_cluster_id: "hdfc-results",
-              title: "HDFC Bank results miss estimates",
-              weightage: 12.5,
-              reason: "Constituent news with high index exposure.",
-            }],
-            result_calendar_status: "CURRENT",
-            scheduled_results: [{
-              symbol: "HDFCBANK",
-              company_name: "HDFC Bank Limited",
-              weightage: 25,
-              news_status: "RESULTS_NEWS_FOUND",
-              stories: [{
-                title: "HDFC Bank quarterly results beat estimates",
-                article_url: "https://example.test/hdfc-results",
-              }],
-            }],
-          }],
-        },
-      });
-    });
-
+  it("keeps scheduled events and omits the headline-risk panel and request", async () => {
     await act(async () => {
-      root.render(<EventRiskWidget activeIndex="NIFTY" marketIntelEnabled />);
-      await Promise.resolve();
-      await Promise.resolve();
+      root.render(<EventRiskWidget activeIndex="NIFTY" />);
     });
 
-    expect(container.querySelector('[data-testid="event-risk-news"]')?.textContent)
-      .toContain("HDFC Bank results miss estimates");
-    expect(container.querySelector('[data-testid="event-risk-news"]')?.textContent)
-      .toContain("NIFTY");
-    expect(container.querySelector('[data-testid="event-risk-news"]')?.textContent)
-      .toContain("12.50% index share");
-    expect(container.querySelector('[data-testid="event-risk-news-details"]')?.open).toBe(false);
-    expect(container.querySelector('[data-testid="event-risk-scheduled-results"]')?.textContent)
-      .toContain("Results news found");
+    expect(container.textContent).not.toContain("Today’s headline risk");
+    expect(container.querySelector('[data-testid="event-risk-news"]')).toBeNull();
+    expect(container.querySelector('[data-testid="event-chip-HIGH"]')).not.toBeNull();
+    expect(api.get.mock.calls.map(([url]) => url)).toEqual(["/events/NIFTY"]);
   });
 });

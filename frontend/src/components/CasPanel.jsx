@@ -1028,7 +1028,8 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
 
           {casArm === "expiry" && (
           <>
-          {/* Live readiness — collapsed by default; open on demand */}
+          {/* Admin-only provider readiness diagnostics, collapsed by default. */}
+          {isAdmin && (
           <div className="rounded-md border border-slate-200 bg-white" data-testid="cas-live-readiness">
             <button
               type="button"
@@ -1109,6 +1110,7 @@ export default function CasPanel({ isAdmin = false, isKiteMode = false, onOpenKi
               </div>
             )}
           </div>
+          )}
 
           {/* TODAY's RUN */}
           <section className="rounded-md border border-slate-200 bg-white p-3 space-y-2" data-testid="cas-today-run">

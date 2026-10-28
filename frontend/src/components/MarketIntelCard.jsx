@@ -104,6 +104,7 @@ export default function MarketIntelCard({
   extras,
   guide,
   compact = false,
+  isAdmin = false,
   layoutKey,
   oi = [],
   book = null,
@@ -122,9 +123,7 @@ export default function MarketIntelCard({
   const headline = summaryLine(outside, guide);
   const sessionBrief = buildSessionBrief({ market, extras, outside, oi, journal });
   const evidenceConflicts = findEvidenceConflicts({ extras, outside });
-  const quoteHint = outside?.quote_source && outside.quote_source !== "none"
-    ? `prices from ${brokerSafeText(outside.quote_source)}`
-    : "cash quotes wait on the broker feed — OI tape still live";
+  const quoteHint = "live cash references · OI tape updates separately";
 
   const nodes = useMemo(() => {
     const news = outside?.news || [];
@@ -230,7 +229,8 @@ export default function MarketIntelCard({
             <li key={n.title} className="text-[12px] leading-snug text-slate-800 dark:text-slate-100">
               <span>{n.title}</span>
               <span className="block text-[10px] text-slate-500">
-                {n.source || "News feed"} · {n.published ? `published ${formatEvidenceAsOf(n.published)}` : "publish time unavailable"}
+                {isAdmin ? `${n.source || "News feed"} · ` : ""}
+                {n.published ? `published ${formatEvidenceAsOf(n.published)}` : "publish time unavailable"}
               </span>
             </li>
           ))}
@@ -294,7 +294,7 @@ export default function MarketIntelCard({
       ) : empty("Ask AI or wait one poll — coach uses OI, book, VIX, journal, and today's booked %."),
     };
   }, [movers, compact, oi, book, adjust, journal, sections.do, sections.dont, scenarios,
-    outside?.briefing, outside?.heavy_count, outside?.note, outside?.news,
+    isAdmin, outside?.briefing, outside?.heavy_count, outside?.note, outside?.news,
     outside?.corporate, outside?.breadth]);
 
   const visible = order.filter((id) => nodes[id] != null);
@@ -382,12 +382,12 @@ export default function MarketIntelCard({
                 <p className="mt-1.5 break-words text-sm font-medium leading-relaxed text-slate-900 dark:text-slate-100">
                   {item.text}
                 </p>
-                {(item.source || item.asOf) ? (
+                {(isAdmin && item.source || item.asOf) ? (
                   <p className="mt-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                    <span className="font-semibold">Source:</span> {item.source || "Not identified"}
+                    {isAdmin && item.source ? <><span className="font-semibold">Source:</span> {item.source}</> : null}
                     {item.asOf ? (
                       <span className="block">
-                        <span className="font-semibold">{item.timeKind || "Updated"}:</span> {formatEvidenceAsOf(item.asOf)}
+                        <span className="font-semibold">{isAdmin ? item.timeKind || "Updated" : "Updated"}:</span> {formatEvidenceAsOf(item.asOf)}
                       </span>
                     ) : null}
                   </p>
@@ -397,7 +397,7 @@ export default function MarketIntelCard({
           </ul>
           {sessionBrief.outsideAsOf ? (
             <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-              <span className="font-semibold">Cash data:</span> {sessionBrief.outsideSource || "Source unavailable"} · refreshed {formatEvidenceAsOf(sessionBrief.outsideAsOf)}
+              <span className="font-semibold">Cash data:</span> {isAdmin ? sessionBrief.outsideSource || "Source unavailable" : "Market references"} · refreshed {formatEvidenceAsOf(sessionBrief.outsideAsOf)}
             </p>
           ) : null}
         </section>
@@ -414,7 +414,7 @@ export default function MarketIntelCard({
           </summary>
           <p className="mt-1 text-slate-500">Coverage is input availability, not forecast confidence.</p>
           <ul className="mt-1 space-y-1">
-            {sources.map((source) => (
+            {isAdmin ? sources.map((source) => (
               <li key={source.name} className="text-slate-600 dark:text-slate-300">
                 <b>{source.name}</b>
                 {source.source ? ` · ${source.source}` : ""}
@@ -422,11 +422,11 @@ export default function MarketIntelCard({
                 {source.ageMinutes != null ? ` · ${source.ageMinutes}m old` : ""}
                 {source.status ? ` · ${source.status}` : ""}
               </li>
-            ))}
+            )) : <li className="text-slate-600 dark:text-slate-300">Input freshness is summarized without exposing provider details.</li>}
           </ul>
           {missingSources.length ? (
             <p className="mt-1 text-amber-800 dark:text-amber-200">
-              No timestamped input supplied: {missingSources.join(", ")}.
+              {isAdmin ? `No timestamped input supplied: ${missingSources.join(", ")}.` : "Some expected evidence has no timestamp."}
             </p>
           ) : null}
           {evidenceConflicts.length ? (

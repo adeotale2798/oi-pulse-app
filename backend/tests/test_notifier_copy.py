@@ -25,6 +25,26 @@ def test_huge_shift_copy_is_desk_not_buy_sell_spam():
     assert "quantity" not in html
 
 
+def test_huge_shift_copy_escapes_untrusted_html_fields():
+    html = format_huge_shift_html(
+        {
+            "index": "NIFTY<tg>",
+            "side": "PE<a>",
+            "direction": "build</b><a href='https://attacker.test'>",
+            "value": 21_000_000,
+            "window": 15,
+            "price": 24800,
+            "atm": 24800,
+            "contributing": [{"strike": "<a href='https://attacker.test'>", "ce_delta": 0, "pe_delta": 5_000_000}],
+        },
+        is_major=False,
+    )
+    assert "NIFTY&lt;tg&gt;" in html
+    assert "PE&lt;a&gt;" in html
+    assert "&lt;a href=&#x27;https://attacker.test&#x27;&gt;" in html
+    assert "<a href='https://attacker.test'>" not in html
+
+
 def test_eod_html_has_next_session_and_no_positions():
     html = format_eod_html(
         {

@@ -20,6 +20,7 @@ export default function ScheduledResultsPanel({
   calendarAsOf,
   scheduleDate,
   testId = "scheduled-results",
+  isAdmin = false,
 }) {
   const visibleResults = results.slice(0, 3);
   const matchingCount = results.filter(
@@ -51,7 +52,7 @@ export default function ScheduledResultsPanel({
       {visibleResults.length ? (
         <ul className="mt-1 space-y-1.5">
           {visibleResults.map((result) => (
-            <ScheduledResultRow key={result.symbol || result.company_name} result={result} />
+            <ScheduledResultRow key={result.symbol || result.company_name} result={result} isAdmin={isAdmin} />
           ))}
         </ul>
       ) : (
@@ -68,7 +69,7 @@ export default function ScheduledResultsPanel({
           </summary>
           <ul className="mt-1 space-y-1.5">
             {results.slice(visibleResults.length).map((result) => (
-              <ScheduledResultRow key={result.symbol || result.company_name} result={result} />
+              <ScheduledResultRow key={result.symbol || result.company_name} result={result} isAdmin={isAdmin} />
             ))}
           </ul>
         </details>
@@ -77,7 +78,7 @@ export default function ScheduledResultsPanel({
   );
 }
 
-function ScheduledResultRow({ result }) {
+function ScheduledResultRow({ result, isAdmin }) {
   const statusText = {
     RESULTS_NEWS_FOUND: "Results news found",
     COMPANY_NEWS_ONLY: "Company news only",
@@ -99,7 +100,7 @@ function ScheduledResultRow({ result }) {
         {result.symbol}{result.weightage != null ? ` · ${Number(result.weightage).toFixed(2)}% index weight` : ""}
       </p>
       {story ? (
-        story.article_url ? (
+        isAdmin && story.article_url ? (
           <a href={story.article_url} target="_blank" rel="noreferrer" className="block text-slate-600 underline decoration-slate-300 hover:text-emerald-800">
             {story.title}
           </a>

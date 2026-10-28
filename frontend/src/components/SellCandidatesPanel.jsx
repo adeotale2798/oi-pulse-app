@@ -237,7 +237,7 @@ export default function SellCandidatesPanel({
         <Pill
           label="VRP (IV − HV₁₀)"
           value={vrp && vrp.vrp != null ? `${vrp.vrp >= 0 ? "+" : ""}${vrp.vrp.toFixed(2)}` : "—"}
-          sub={vrp?.label || (vrp?.error === "not_in_kite_mode" ? "Needs broker login" : "—")}
+          sub={vrp?.label || (["not_in_kite_mode", "market_feed_unavailable"].includes(vrp?.error) ? "Needs broker login" : "—")}
           tone={vrp?.tone || "slate"}
           testId="scpill-vrp"
           tip={vrpGuide(vrp?.vrp)}

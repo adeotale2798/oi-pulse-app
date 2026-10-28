@@ -59,9 +59,39 @@ describe("MarketIntelCard evidence and session brief", () => {
     expect(container.textContent).toContain("Before-open brief");
     expect(container.textContent).toContain("Timestamped headline");
     expect(container.textContent).toContain("Evidence & limits");
-    expect(container.textContent).toContain("GIFT quote, India VIX, Outside tape");
+    expect(container.textContent).toContain("Some expected evidence has no timestamp.");
     expect(container.textContent).toContain("Mixed direction");
     expect(container.textContent).toContain("published");
+  });
+
+  it("keeps news publisher and quote-provider names out of member-facing cards", async () => {
+    await act(async () => {
+      root.render(
+        <MarketIntelCard
+          market={{ phase: "pre_market" }}
+          extras={{ gift_nifty: { source: "kite", ts: "2026-09-29T08:58:00+05:30" } }}
+          outside={{
+            quote_source: "Kite",
+            news: [{ title: "Headline text", source: "Publisher One", published: "2026-09-29T08:30:00Z" }],
+          }}
+          guide={{
+            guide: "Market context.",
+            evidence_quality: {
+              level: "limited",
+              covered: 1,
+              total: 4,
+              sources: [{ name: "Outside tape", source: "Yahoo", status: "LIVE" }],
+            },
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).not.toContain("Publisher One");
+    expect(container.textContent).not.toContain("Kite");
+    expect(container.textContent).not.toContain("Yahoo");
+    expect(container.textContent).not.toContain("prices from");
+    expect(container.textContent).toContain("live cash references");
   });
 
   it("shows an honest closeout and does not imply trade-plan records exist", async () => {

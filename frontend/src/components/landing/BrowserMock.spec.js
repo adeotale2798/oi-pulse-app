@@ -51,5 +51,59 @@ describe("landing price chips", () => {
       expect(chip.lastElementChild.className).toContain("whitespace-nowrap");
       expect(chip.lastElementChild.textContent).toMatch(/^[+-]\d+\.\d{2}%$/);
     });
+    expect(chips[0].querySelector('svg[aria-label="StrikLenz"]')).not.toBeNull();
+    expect(chips[1].querySelector('svg[aria-label="StrikLenz"]')).not.toBeNull();
+  });
+
+  it("renders real OI data without sample labels and supports a left-aligned last-session chip", async () => {
+    const snap = { indices: { SENSEX: { price: 84000, changePct: 0.2 } } };
+    const marketData = {
+      status: "last-session",
+      oi: {
+        current: {
+          price: 25000,
+          atm: 25000,
+          strikes: [{ strike: 25000, ce_oi: 120, pe_oi: 140 }],
+        },
+        previous: {
+          strikes: [{ strike: 25000, ce_oi: 100, pe_oi: 120 }],
+        },
+      },
+    };
+    await act(async () => {
+      root.render(
+        <BrowserMock
+          snap={snap}
+          marketData={marketData}
+          status="last-session"
+          marketStatus="last-session"
+          chipAlign="left"
+        />,
+      );
+    });
+
+    expect(container.querySelector(".slz-browser-status-wide").textContent).toBe("LAST SESSION");
+    expect(container.querySelector(".slz-browser-status").getAttribute("aria-label")).toBe("Latest saved market session");
+    expect(container.querySelector('[data-testid="landing-price-chip"]').parentElement.className).toContain("justify-start");
+    expect(container.querySelector('[data-testid="landing-oi-chart"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="landing-oi-chart"]').textContent).toContain("Last session");
+    expect(container.textContent).not.toContain("Illustrative sample");
+    expect(container.querySelectorAll('svg[aria-label="StrikLenz"]').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows a clear unavailable state instead of fabricated OI when a real snapshot is missing", async () => {
+    await act(async () => {
+      root.render(
+        <BrowserMock
+          snap={{ indices: {} }}
+          marketData={{ status: "unavailable", oi: null }}
+          status="unavailable"
+        />,
+      );
+    });
+
+    expect(container.querySelector('[data-testid="landing-oi-unavailable"]').textContent)
+      .toContain("Publisher OI data is not available");
+    expect(container.textContent).not.toContain("Illustrative sample");
   });
 });

@@ -3,7 +3,7 @@
  * Prefer inclusive "markets" language — desk tracks NSE (NIFTY/BANK) and BSE (SENSEX).
  */
 export function kiteModeBadge(mode, marketOpen) {
-  if (mode !== "kite") {
+  if (mode !== "kite" && mode !== "live") {
     return {
       label: "OFFLINE",
       short: "OFFLINE",

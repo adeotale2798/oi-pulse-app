@@ -42,6 +42,21 @@ class FakeCollection:
         return None
 
 
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    server.app.dependency_overrides.clear()
+    yield
+    server.app.dependency_overrides.clear()
+
+
+def _desk_user_client():
+    async def allow_desk_user(request: Request):
+        return "admin"
+
+    server.app.dependency_overrides[server.require_desk_user] = allow_desk_user
+    return TestClient(server.app)
+
+
 def test_mode_endpoint_accepts_valid_and_rejects_invalid(monkeypatch):
     ft = FakeTracker()
     monkeypatch.setattr(server, "tracker", ft)
@@ -78,10 +93,17 @@ def test_get_alerts_returns_empty_list_when_mongo_is_unreachable(monkeypatch):
     monkeypatch.setattr(server, "db", fake_db)
     monkeypatch.setattr(server, "tracker", FakeTracker())
 
-    client = TestClient(server.app)
+    client = _desk_user_client()
     r = client.get("/api/alerts", params={"limit": 10})
     assert r.status_code == 200
     assert r.json() == {"alerts": []}
+
+
+@pytest.mark.parametrize("path", ["/api/alerts", "/api/membership/alerts"])
+def test_alert_routes_require_authentication(path):
+    client = TestClient(server.app)
+    response = client.get(path)
+    assert response.status_code == 401
 
 
 def test_get_oi_change_offline_returns_data_status_and_anchor_prev(monkeypatch):
@@ -93,6 +115,8 @@ def test_get_oi_change_offline_returns_data_status_and_anchor_prev(monkeypatch):
     ft.last_snapshot["NIFTY"] = {
         "index": "NIFTY",
         "timestamp": cur_ts,
+        "mode": "kite",
+        "source": "live",
         "price": 12345.0,
         "atm": 12300,
         "strikes": [{"strike": 12300, "ce_oi": 100000, "pe_oi": 90000}],
@@ -102,6 +126,8 @@ def test_get_oi_change_offline_returns_data_status_and_anchor_prev(monkeypatch):
     prev_doc = {
         "index": "NIFTY",
         "timestamp": prev_ts,
+        "mode": "kite",
+        "source": "live",
         "price": 12340.0,
         "atm": 12300,
         "strikes": [{"strike": 12300, "ce_oi": 90000, "pe_oi": 95000}],
@@ -124,7 +150,7 @@ def test_get_oi_change_offline_returns_data_status_and_anchor_prev(monkeypatch):
     monkeypatch.setattr(server, "db", fake_db)
     monkeypatch.setattr(server, "is_market_open", lambda: False)
 
-    client = TestClient(server.app)
+    client = _desk_user_client()
     r = client.get("/api/oi/NIFTY/change", params={"minutes": 5})
     assert r.status_code == 200
     payload = r.json()
@@ -132,13 +158,50 @@ def test_get_oi_change_offline_returns_data_status_and_anchor_prev(monkeypatch):
     assert "data_status" in payload
     ds = payload["data_status"]
     assert ds["is_live"] is False
-    assert ds["stale_reason"] == "missing_kite_credentials"
+    assert ds["stale_reason"] == "publisher_feed_unavailable"
     assert ds["data_date"] is not None
     assert ds.get("label") == "OFFLINE"
     assert "as_of" in ds
     # previous should be present and match our prev_doc timestamp
     assert payload["previous"]["timestamp"] == prev_doc["timestamp"]
+    assert "mode" not in payload["current"]
+    assert "source" not in payload["current"]
+    assert "mode" not in payload["previous"]
+    assert "source" not in payload["previous"]
     assert "also_windows" in payload
+
+
+def test_public_feed_payloads_hide_provider_metadata():
+    status = server._public_status_payload({
+        "mode": "kite",
+        "has_kite_credentials": True,
+        "kite_ok": True,
+        "kite_token_issue": False,
+        "kite_user_id": "private-user",
+        "kite_maintenance": {"active": True, "message": "Provider-specific bulletin", "url": "https://provider.test"},
+        "metrics": {"poll_cycles": 4},
+    })
+    assert status["mode"] == "live"
+    assert status["publisher_feed_configured"] is True
+    assert status["publisher_feed_live"] is True
+    assert "kite_user_id" not in status
+    assert "kite_maintenance" not in status
+    assert status["broker_maintenance"]["message"] == "Market data service maintenance may affect live updates."
+
+    tickers = server._public_ticker_payload({
+        "mode": "kite",
+        "tickers": [{"index": "NIFTY", "source": "kite", "ltp": 25000}],
+    })
+    assert tickers["mode"] == "live"
+    assert tickers["tickers"] == [{"index": "NIFTY", "ltp": 25000, "is_live": True}]
+
+    extras = server._public_extra_tickers_payload({
+        "gift_nifty": {"source": "yahoo", "note": "Proxy via NIFTY; enable Kite LIVE"},
+        "windows": {"gift": {"kite_symbol": "NSEIX:GIFT NIFTY"}},
+    })
+    assert "source" not in extras["gift_nifty"]
+    assert extras["gift_nifty"]["note"] == "Proxy reference used; it may differ from the live index."
+    assert "kite_symbol" not in extras["windows"]["gift"]
 
 
 def test_timeframe_anchor_strict_window(monkeypatch):
@@ -151,7 +214,7 @@ def test_timeframe_anchor_strict_window(monkeypatch):
     monkeypatch.setattr(server, "tracker", ft)
     monkeypatch.setattr(server, "db", fake_db)
     monkeypatch.setattr(server, "is_market_open", lambda: False)
-    client = TestClient(server.app)
+    client = _desk_user_client()
     # request minutes=5 -> no previous inside 5 min window
     r = client.get("/api/oi/NIFTY/change", params={"minutes": 5})
     assert r.status_code == 200
@@ -203,7 +266,7 @@ def test_change_batches_also_windows(monkeypatch):
     monkeypatch.setattr(server, "tracker", ft)
     monkeypatch.setattr(server, "db", type("DB", (), {"oi_snapshots": MultiWindowCollection()}))
     monkeypatch.setattr(server, "is_market_open", lambda: False)
-    client = TestClient(server.app)
+    client = _desk_user_client()
     r = client.get("/api/oi/NIFTY/change", params={"minutes": 15, "also": "1,3"})
     assert r.status_code == 200
     payload = r.json()
@@ -265,13 +328,146 @@ def test_change_15min_uses_snapshot_from_15_min_ago_not_warmup(monkeypatch):
     monkeypatch.setattr(server, "tracker", ft)
     monkeypatch.setattr(server, "db", type("DB", (), {"oi_snapshots": Store()}))
     monkeypatch.setattr(server, "is_market_open", lambda: False)
-    client = TestClient(server.app)
+    client = _desk_user_client()
     r = client.get("/api/oi/NIFTY/change", params={"minutes": 15})
     assert r.status_code == 200
     payload = r.json()
     assert payload["previous"]["timestamp"] == old["timestamp"]
     assert payload["history_ready"] is True
     assert payload["available_history_minutes"] >= 15
+
+
+def test_core_market_data_endpoints_require_sign_in():
+    client = TestClient(server.app)
+    for path in (
+        "/api/oi/NIFTY",
+        "/api/oi/NIFTY/change",
+        "/api/history/NIFTY",
+        "/api/vrp/NIFTY",
+        "/api/expiries/NIFTY",
+        "/api/straddle/NIFTY/tick",
+        "/api/straddle/NIFTY",
+        "/api/straddle/NIFTY/history",
+    ):
+        assert client.get(path).status_code == 401
+    assert client.post("/api/telegram/huge-shift", json={
+        "index": "NIFTY",
+        "side": "PE",
+        "value": 21_000_000,
+        "direction": "build",
+        "window": 3,
+    }).status_code == 401
+
+
+def test_huge_shift_payload_rejects_unexpected_book_fields():
+    base = {
+        "index": "NIFTY",
+        "side": "PE",
+        "value": 21_000_000,
+        "direction": "build",
+        "window": 3,
+        "contributing": [{"strike": 25000, "ce_delta": 0, "pe_delta": 21_000_000}],
+    }
+    assert server.HugeShiftIn.model_validate(base).contributing[0].strike == 25000
+
+    with pytest.raises(ValueError):
+        server.HugeShiftIn.model_validate({
+            **base,
+            "contributing": [{
+                "strike": 25000,
+                "ce_delta": 0,
+                "pe_delta": 21_000_000,
+                "quantity": 1,
+            }],
+        })
+    with pytest.raises(ValueError):
+        server.HugeShiftIn.model_validate({**base, "window": 15})
+
+
+def test_public_login_oi_preview_is_limited_to_nearby_strikes(monkeypatch):
+    ft = FakeTracker()
+    ft.mode = "kite"
+    ft.last_snapshot["NIFTY"] = {
+        "index": "NIFTY",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "kite",
+        "source": "live",
+        "price": 25000,
+        "atm": 25000,
+        "provider_metadata": {"private": True},
+        "strikes": [
+            {"strike": strike, "ce_oi": strike, "pe_oi": strike + 1, "provider_field": "hidden"}
+            for strike in range(23000, 27001, 250)
+        ],
+    }
+    monkeypatch.setattr(server, "tracker", ft)
+    result = TestClient(server.app).get("/api/public/login-preview/oi")
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["current"]["index"] == "NIFTY"
+    assert len(payload["current"]["strikes"]) == 9
+    assert all(set(row) <= {"strike", "ce_oi", "pe_oi", "ce_volume", "pe_volume", "ce_ltp", "pe_ltp"}
+               for row in payload["current"]["strikes"])
+    assert "provider_metadata" not in payload["current"]
+    assert "source" not in payload["current"]
+    assert payload["previous"] is None
+
+
+def test_market_data_page_visibility_is_enforced(monkeypatch):
+    class SettingsTracker:
+        settings = {"visible_pages": ["oi-change"], "admin_visible_pages": ["straddle"]}
+
+    monkeypatch.setattr(server, "tracker", SettingsTracker())
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/api/oi/NIFTY/change",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 12345),
+        "scheme": "http",
+    })
+    asyncio.run(server._enforce_market_data_access(request, "guest"))
+    with pytest.raises(server.HTTPException) as guest_error:
+        asyncio.run(server._enforce_market_data_access(request, "admin"))
+    assert guest_error.value.status_code == 403
+
+    straddle_request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/api/straddle/NIFTY",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 12345),
+        "scheme": "http",
+    })
+    asyncio.run(server._enforce_market_data_access(straddle_request, "admin"))
+    with pytest.raises(server.HTTPException) as hidden_guest_error:
+        asyncio.run(server._enforce_market_data_access(straddle_request, "guest"))
+    assert hidden_guest_error.value.status_code == 403
+
+
+def test_member_market_data_access_checks_the_matching_plan_feature(monkeypatch):
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/api/oi/NIFTY/change",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 12345),
+        "scheme": "http",
+    })
+    checked = []
+
+    async def check_feature(request, feature):
+        checked.append(feature)
+
+    monkeypatch.setattr(server, "_member_context", check_feature)
+    asyncio.run(server._enforce_market_data_access(request, "member"))
+    assert checked == ["oi_change"]
 
 
 def test_tracker_metrics_exist(monkeypatch):
@@ -284,6 +480,55 @@ def test_tracker_metrics_exist(monkeypatch):
     # don't call /api/status (depends on get_status) — just assert structure
     assert hasattr(st, "metrics")
     assert "poll_cycles" in st.metrics
+
+
+def test_guest_cas_status_hides_admin_provider_readiness(monkeypatch):
+    import cas_bridge
+
+    role = {"value": "guest"}
+    status = {
+        "plain": {
+            "mode_label": "Paper selected",
+            "last_error": "Kite token expired",
+            "live_ready_code": True,
+            "live_ready_summary": "Whitelist backend IP in Kite developer profile",
+        },
+        "live_readiness": {
+            "egress_ip": "203.0.113.1",
+            "summary": "Whitelist this address in Kite",
+        },
+        "state": {},
+        "config": {"has_token": True, "product": "NRML"},
+        "settings": {},
+    }
+
+    async def allow_role(_request: Request):
+        return role["value"]
+
+    async def no_op():
+        return None
+
+    monkeypatch.setattr(cas_bridge, "get_status", lambda _tracker: status)
+    monkeypatch.setattr(server, "_persist_cas_auto_log", no_op)
+    server.app.dependency_overrides[server.require_cas_desk_user] = allow_role
+    client = TestClient(server.app)
+    try:
+        guest_response = client.get("/api/cas/status")
+        assert guest_response.status_code == 200
+        guest_payload = guest_response.json()
+        assert "live_readiness" not in guest_payload
+        assert "has_token" not in guest_payload["config"]
+        assert "live_ready_code" not in guest_payload["plain"]
+        assert "live_ready_summary" not in guest_payload["plain"]
+        assert "kite" not in guest_response.text.lower()
+        assert "203.0.113.1" not in guest_response.text
+
+        role["value"] = "admin"
+        admin_response = client.get("/api/cas/status")
+        assert admin_response.status_code == 200
+        assert admin_response.json()["live_readiness"]["egress_ip"] == "203.0.113.1"
+    finally:
+        server.app.dependency_overrides.pop(server.require_cas_desk_user, None)
 
 
 def test_admin_settings_update_and_effect(monkeypatch):

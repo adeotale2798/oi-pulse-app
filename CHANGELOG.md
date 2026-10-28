@@ -1,5 +1,41 @@
 # Changelog
 
+## V20.76 — 2026-10-28
+
+Require authentication before returning shared reversal alerts, and enforce
+member authentication and alert entitlement on the member alerts route.
+
+## V20.75 — 2026-10-28
+
+Refresh the open Trade Journal on the configured Positions cadence so saved
+booked P&L and charges do not remain stale in an already-open calendar. Refresh
+selected current-day figures without overwriting in-progress notes, and show
+the latest refresh time or a stale-data warning.
+
+## V20.74 — 2026-10-28
+
+Require authenticated desk access and page/plan entitlement for full OI,
+history, expiry, VRP, and Straddle REST data. Keep the public login preview
+working through a limited NIFTY OI sample. Restrict Telegram huge-shift sending
+to Admin and validate and escape dynamic alert content.
+
+## V20.73 — 2026-10-28
+
+Keep Market Intel publisher names, article links, and source-agreement details
+Admin-only; return provider-neutral feed-health metadata to external clients and
+remove provider identifiers from member-facing market-data responses. Make
+“Today at a glance” collapsible with synchronized evidence across all index
+cards, and remove the separate “Today’s headline risk” panel. Also keep ADR and
+Global Markets configuration metadata, upload filenames, and holiday-source
+details out of member-facing shared-data responses.
+
+## V20.72 — 2026-10-28
+
+Use the public publisher feeds in the login dashboard preview, clearly label
+live, last-session, delayed, and unavailable data, and replace preview “S”
+chips with the StrikLenz waveform mark. Normalize raw HTML broker maintenance
+responses into concise user-facing messages.
+
 ## V20.71 — 2026-10-28
 
 Use the shared StrikLenz waveform brand mark in the motion film, matching the

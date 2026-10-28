@@ -52,13 +52,13 @@ export function buildDataTruth({
   marketOpen,
   preMarket = false,
   pollStartsAt = "09:15",
-  mode, // kite | offline
+  mode, // live | offline (legacy admin status may still use kite)
   snapshotTs,
   now = new Date(),
   pollMs = DEFAULT_POLL_MS,
 } = {}) {
   const ds = dataStatus || {};
-  const kite = mode === "kite";
+  const feedAvailable = mode === "kite" || mode === "live";
   const open = marketOpen === true;
   const asOfIso = snapshotTs || null;
   const asOfClock = formatIstClock(asOfIso, true);
@@ -74,7 +74,7 @@ export function buildDataTruth({
     Number(ds.stale_after_seconds) > 0 ? Number(ds.stale_after_seconds) : 90;
   let isLive = ds.is_live === true;
   if (ds.is_live == null) {
-    isLive = kite && open && (age == null || age <= staleAfter);
+    isLive = feedAvailable && open && (age == null || age <= staleAfter);
   }
 
   if (!asOfIso && !dataDate) {
@@ -82,12 +82,12 @@ export function buildDataTruth({
       mode: "NO_DATA",
       badge: "NO DATA",
       asOfLabel: "—",
-      detail: kite ? "Waiting for first snapshot" : "Connect the market feed for live OI",
+      detail: feedAvailable ? "Waiting for first snapshot" : "Connect the market feed for live OI",
       tone: "offline",
     };
   }
 
-  if (!kite) {
+  if (!feedAvailable) {
     return {
       mode: "OFFLINE",
       badge: "OFFLINE",

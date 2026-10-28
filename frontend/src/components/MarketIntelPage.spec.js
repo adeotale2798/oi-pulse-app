@@ -42,6 +42,8 @@ describe("MarketIntelPage direction assessment", () => {
               {
                 event_cluster_id: "supportive",
                 title: "RBI cuts repo rate",
+                source_name: "Publisher One",
+                article_url: "https://example.test/rbi",
                 impact_band: "HIGH",
                 impact_score: 78,
                 market_direction: "SUPPORTIVE",
@@ -105,6 +107,17 @@ describe("MarketIntelPage direction assessment", () => {
         return Promise.resolve({
           data: {
             indices: [{
+              index: "NIFTY",
+              risk_level: "ELEVATED",
+              direction: "SUPPORTIVE",
+              event_count: 1,
+              events: [{
+                event_cluster_id: "nifty-evidence",
+                title: "NIFTY risk headline",
+                article_url: "https://example.test/nifty",
+                independent_source_names: ["NIFTY Publisher"],
+              }],
+            }, {
               index: "BANKNIFTY",
               date: "2026-10-18",
               status: "READY",
@@ -143,6 +156,17 @@ describe("MarketIntelPage direction assessment", () => {
                   stories: [],
                 },
               ],
+            }, {
+              index: "SENSEX",
+              risk_level: "LOW",
+              direction: "UNCLEAR",
+              event_count: 1,
+              events: [{
+                event_cluster_id: "sensex-evidence",
+                title: "SENSEX risk headline",
+                article_url: "https://example.test/sensex",
+                independent_source_names: ["SENSEX Publisher"],
+              }],
             }],
           },
         });
@@ -220,7 +244,7 @@ describe("MarketIntelPage direction assessment", () => {
 
   it("renders support, pressure, mixed, and unclear news with distinct reasons and importance", async () => {
     await act(async () => {
-      root.render(<MarketIntelPage />);
+      root.render(<MarketIntelPage isAdmin />);
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -247,7 +271,7 @@ describe("MarketIntelPage direction assessment", () => {
     expect(container.textContent).toContain("HDFC Bank quarterly results beat estimates");
     expect(container.textContent).toContain("No matching news found");
     expect(container.textContent).toContain("This does not confirm that results were not published.");
-    expect(container.querySelector('[data-testid="mi-index-risk-details"]')?.open).toBe(false);
+    expect(container.querySelector('[data-testid="mi-index-risk-details"] button')?.getAttribute("aria-expanded")).toBe("false");
     expect(container.querySelector('[data-testid="mi-event-details"]')?.open).toBe(false);
     expect(container.textContent).toContain("Importance 80");
     expect(container.textContent).toContain("Likely market up");
@@ -282,5 +306,40 @@ describe("MarketIntelPage direction assessment", () => {
     expect(container.querySelectorAll('[data-testid="mi-direction"]')[1]?.querySelector("svg")?.getAttribute("class")).toContain("h-3");
     expect(container.querySelectorAll('[data-testid="mi-direction"]')[2]?.querySelector("svg")).toBeNull();
     expect(container.querySelectorAll('[data-testid="mi-direction"]')[3]?.querySelector("svg")).toBeNull();
+
+    await act(async () => {
+      container.querySelector('[data-testid="mi-index-risk-details"] button').click();
+    });
+    expect(container.textContent).toContain("NIFTY Publisher");
+    expect(container.textContent).toContain("SENSEX Publisher");
+    expect(container.textContent).toContain("Publisher One");
+
+    await act(async () => {
+      container.querySelectorAll('[data-testid="mi-index-risk-details"] button')[1].click();
+    });
+    expect(container.textContent).not.toContain("NIFTY Publisher");
+    expect(container.textContent).not.toContain("SENSEX Publisher");
+
+    await act(async () => {
+      container.querySelector('[data-testid="mi-index-risk-toggle"]').click();
+    });
+    expect(container.querySelector('[data-testid="mi-index-risk-toggle"]')?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector('[data-testid="mi-index-risk-cards"]')).toBeNull();
+  });
+
+  it("hides publisher names and article links from external users", async () => {
+    await act(async () => {
+      root.render(<MarketIntelPage />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).not.toContain("Publisher One");
+    expect(container.textContent).not.toContain("Publisher Two");
+    expect(container.textContent).not.toContain("NIFTY Publisher");
+    expect(container.textContent).not.toContain("Open source");
+    expect(container.querySelectorAll('a[href^="https://example.test/"]')).toHaveLength(0);
+    expect(container.textContent).not.toContain("independent source");
   });
 });

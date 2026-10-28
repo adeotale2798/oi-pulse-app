@@ -327,7 +327,7 @@ function DeskAiPreview({ snapshot }) {
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 px-3 py-2 text-[10px] text-slate-500">
           <span>{hasCapturedEvents ? `${eventCount} captured index events` : `${SAMPLE_EVENTS.length} illustrative events`}</span>
-          <span>{market?.quote_source ? `Cash source: ${market.quote_source}` : "Illustrative sample source"}</span>
+          <span>{market?.quote_source ? "Captured cash market references" : "Illustrative market references"}</span>
           {market?.updated_at && !sample && <span>Updated {new Date(market.updated_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</span>}
         </div>
       </div>

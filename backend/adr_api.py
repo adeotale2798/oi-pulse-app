@@ -8,6 +8,29 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
+_PRIVATE_ADR_SOURCE_FIELDS = {
+    "provider",
+    "providername",
+    "providersymbol",
+    "providerextra",
+    "vendor",
+    "vendorname",
+    "apikeyconfigured",
+}
+
+
+def _remove_private_adr_source_metadata(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_remove_private_adr_source_metadata(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return {
+        key: _remove_private_adr_source_metadata(item)
+        for key, item in value.items()
+        if str(key).replace("_", "").lower() not in _PRIVATE_ADR_SOURCE_FIELDS
+    }
+
+
 class PrefsIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: Optional[bool] = None
@@ -75,12 +98,16 @@ def mount(api_router, *, require_admin, require_desk_user):
             if "key" in k.lower() or "token" in k.lower() or k.endswith("_enc"):
                 prefs.pop(k, None)
         snap["prefs"] = prefs
+        if _user != "admin":
+            # Keep provider setup details available to Admin, not desk members.
+            snap = _remove_private_adr_source_metadata(snap)
         return snap
 
     @api_router.get("/adrs/history/{adr_id}")
     async def adrs_history(adr_id: str, range: str = "1D", _user: str = Depends(require_desk_user)):
         docs = await adr_mod.history(_db(), adr_id, range)
-        return {"items": docs, "range": range}
+        result = {"items": docs, "range": range}
+        return result if _user == "admin" else _remove_private_adr_source_metadata(result)
 
     @api_router.get("/adrs/config")
     async def adrs_config_get(_admin: bool = Depends(require_admin)):

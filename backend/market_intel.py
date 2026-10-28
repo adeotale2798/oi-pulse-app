@@ -32,6 +32,36 @@ PREF_COL = "mi_user_prefs"
 SOURCE_TYPES = ("API", "RSS", "FIRECRAWL", "OFFICIAL_FEED")
 STATUSES = ("HEALTHY", "WARNING", "FAILED", "DISABLED")
 STORE_MIN_IMPACT = 50
+PUBLIC_SOURCE_METADATA_FIELDS = {
+    "source",
+    "source_name",
+    "source_names",
+    "source_id",
+    "source_key",
+    "source_type",
+    "source_url",
+    "sourceUrl",
+    "sourceName",
+    "article_url",
+    "articleUrl",
+    "url",
+    "publisher",
+    "publishers",
+    "provider",
+    "provider_name",
+    "vendor",
+    "vendor_name",
+    "quote_source",
+    "kite_symbol",
+    "provider_symbol",
+    "providerSymbol",
+    "sources",
+    "independent_sources",
+    "independent_source_names",
+    "independent_source_count",
+    "source_count",
+    "source_direction_agreement",
+}
 _constit_cache: Dict[str, Any] = {"t": 0.0, "terms": []}
 
 DEFAULT_INGEST_S = 60
@@ -39,6 +69,37 @@ DEFAULT_KEYED_SOURCE_INTERVAL_S = 300
 DEFAULT_RETENTION_DAYS = 5
 DEFAULT_MIN_HISTORY_DAYS = 2
 BOOT_DELAY_S = 90  # do not compete with OI/Kite boot
+
+
+def remove_public_source_metadata(value):
+    """Keep configured news providers and original article URLs private to Admin."""
+    if isinstance(value, list):
+        return [remove_public_source_metadata(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    sanitized = {
+        key: remove_public_source_metadata(item)
+        for key, item in value.items()
+        if key not in PUBLIC_SOURCE_METADATA_FIELDS
+    }
+    if sanitized.get("direction_basis") == "SOURCES":
+        sanitized["direction_basis"] = "COMBINED"
+    if "disclaimer" in sanitized:
+        sanitized["disclaimer"] = (
+            "Risk scores rank mapped event exposure; they are not probabilities, "
+            "predicted index moves, or trading signals. Direction is tentative."
+        )
+    reason = sanitized.get("direction_reason")
+    if isinstance(reason, str):
+        sanitized["direction_reason"] = reason.replace(
+            "Independent publishers disagree on direction; treat as mixed evidence.",
+            "Available news signals point in mixed directions; treat the read as uncertain.",
+        ).replace(
+            "Independent publishers' directional reads agree.",
+            "Available news signals agree on direction.",
+        )
+    return sanitized
 
 FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
 

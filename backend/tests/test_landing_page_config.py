@@ -280,6 +280,24 @@ def test_public_plan_preview_filters_features_by_plan_entitlement(monkeypatch):
     assert result["snapshot"] == snapshot
 
 
+def test_plan_preview_snapshot_removes_market_intel_attribution():
+    snapshot = server._normalize_landing_plan_preview_snapshot({
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "market_intel": {
+            "status": "captured",
+            "data": {"items": [{
+                "title": "Captured story",
+                "source_name": "Publisher One",
+                "article_url": "https://publisher.test/story",
+                "source_count": 3,
+            }]},
+        },
+    })
+
+    item = snapshot["market_intel"]["data"]["items"][0]
+    assert item == {"title": "Captured story"}
+
+
 def test_public_plan_preview_cannot_restore_legacy_recommendation_features(monkeypatch):
     configured = {
         "membership": {
