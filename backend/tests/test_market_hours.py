@@ -119,6 +119,28 @@ def test_mcx_non_agri_close_follows_us_dst():
     assert index_in_session("GOLD", _d(2026, 8, 15, 20, 0)) is False  # Saturday
 
 
+def test_positions_resolve_mcx_session_group_without_oi_enablement():
+    from market_hours import position_session_group
+
+    assert position_session_group({
+        "exchange": "MCX",
+        "tradingsymbol": "GOLDM26OCT90000PE",
+    }) == "mcx_non_agri"
+    assert position_session_group({
+        "exchange": "MCX",
+        "tradingsymbol": "COTTON26OCT1500CE",
+        "index": "COTTON",
+    }, configs={"COTTON": {"session_group": "mcx_select_agri"}}) == "mcx_select_agri"
+    assert position_session_group({
+        "exchange": "MCX",
+        "tradingsymbol": "COTTON26OCT1500CE",
+    }, configs={"COTTON": {"session_group": "mcx_select_agri"}}) == "mcx_select_agri"
+    assert position_session_group({
+        "exchange": "NFO",
+        "tradingsymbol": "NIFTY26OCT25000CE",
+    }) is None
+
+
 def test_pre_market_cas_and_display_open_are_distinct():
     from market_hours import (
         is_pre_market,

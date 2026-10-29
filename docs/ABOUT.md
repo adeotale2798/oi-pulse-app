@@ -121,6 +121,7 @@ examples, never a member's private alert history.
 | GET/PUT | `/membership/journal/{day}` | Pro-only private day P&L summary, reflection, tags, rating, and notes; never reads the admin journal |
 | GET | `/membership/journal-period?from=YYYY-MM-DD&to=YYYY-MM-DD` | Caller-owned aggregate period totals for the same Pro journal |
 | POST/DELETE | `/membership/journal/{day}/screenshot` | Add/remove a screenshot from the authenticated member's private journal day |
+| POST | `/journal/sync` | Admin-only forced refresh of current Kite positions and charges into the Admin journal; reports when EOD rules keep P&L frozen |
 | GET | `/membership/alerts` | Authenticated Premium/Pro alerts filtered by that member's indices/types/threshold |
 | POST | `/membership/alerts/oi-shift` | Persist an entitled member's detected OI-shift alert to that member's expiring inbox |
 | POST | `/membership/alerts/{id}/ack` | Acknowledge one caller-owned alert |

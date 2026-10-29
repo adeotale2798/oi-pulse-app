@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FileText,
   ImagePlus,
+  RefreshCw,
   Save,
   Trash2,
   Trophy,
@@ -19,6 +20,7 @@ import {
   fetchJournalYear,
   fetchJournalDay,
   fetchJournalPeriod,
+  syncJournal,
   saveJournalDay,
   addJournalScreenshot,
   deleteJournalScreenshot,
@@ -223,6 +225,7 @@ export default function TradeJournalModal({
   const [dayDoc, setDayDoc] = useState(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [memberUnavailable, setMemberUnavailable] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
   const [refreshError, setRefreshError] = useState("");
@@ -487,6 +490,68 @@ export default function TradeJournalModal({
     setSelected(iso);
     const d = await (memberMode ? fetchMemberJournalDay : fetchJournalDay)(iso);
     applyDayPayload(iso, d);
+  };
+
+  const syncBrokerJournal = async () => {
+    if (memberMode || syncing || walkthroughMode) return;
+    setSyncing(true);
+    setRefreshError("");
+    try {
+      const synced = await syncJournal();
+      if (!synced?.ok || !synced.day || !synced.date) {
+        throw new Error("The server did not confirm the broker journal sync");
+      }
+
+      const requests = [
+        { key: "month", load: () => fetchJournalMonth(year, month) },
+        { key: "year", load: () => fetchJournalYear(year) },
+      ];
+      if (periodFrom && periodTo && periodFrom <= periodTo) {
+        requests.push({
+          key: "period",
+          load: () => fetchJournalPeriod(periodFrom, periodTo, periodIndex),
+        });
+      }
+      const results = await Promise.allSettled(requests.map(({ load }) => load()));
+      let failed = false;
+      results.forEach((result, index) => {
+        if (result.status !== "fulfilled") {
+          failed = true;
+          return;
+        }
+        switch (requests[index].key) {
+          case "month":
+            setData(result.value);
+            break;
+          case "year":
+            setYearData(result.value);
+            break;
+          case "period":
+            setPeriodData(result.value);
+            break;
+          default:
+            break;
+        }
+      });
+      if (selected === synced.date) {
+        applyDayPayload(synced.date, synced.day, { preserveNotes: true });
+      }
+      setLastRefreshedAt(new Date());
+      setRefreshError(failed ? "Broker sync completed, but some journal views could not be refreshed." : "");
+      if (failed) {
+        toast.error("Broker sync completed, but some journal views could not be refreshed.");
+      } else if (synced.pnl_frozen) {
+        toast.success("Broker positions and charges synced; journal P&L remains EOD-locked");
+      } else {
+        toast.success("Broker positions and charges synced to the journal");
+      }
+    } catch (error) {
+      const message = error?.response?.data?.detail || error.message || "Could not sync broker data to the journal";
+      setRefreshError(message);
+      toast.error(message);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   // Re-read saved snapshots; backend reconciliation does not push updates into this modal.
@@ -782,20 +847,37 @@ export default function TradeJournalModal({
             </DialogDescription>
           </DialogHeader>
           {!walkthroughMode ? (
-            <div
-              className={`mt-1 text-[10px] ${refreshError ? "text-rose-700" : "text-slate-500"}`}
-              role="status"
-              aria-live="polite"
-              data-testid="journal-refresh-status"
-            >
-              {refreshError || (lastRefreshedAt
-                ? `Journal refreshed ${lastRefreshedAt.toLocaleTimeString("en-IN", {
-                    timeZone: "Asia/Kolkata",
-                    hour: "numeric",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })} IST`
-                : "Loading saved journal data…")}
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <div
+                  className={`min-w-0 text-[10px] ${refreshError ? "text-rose-700" : "text-slate-500"}`}
+                  role="status"
+                  aria-live="polite"
+                  data-testid="journal-refresh-status"
+              >
+                  {refreshError || (lastRefreshedAt
+                    ? `Journal refreshed ${lastRefreshedAt.toLocaleTimeString("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                        hour: "numeric",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })} IST`
+                    : "Loading saved journal data…")}
+              </div>
+              {!memberMode ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 rounded-full px-2.5 text-[10px]"
+                    data-testid="journal-sync"
+                    onClick={syncBrokerJournal}
+                    disabled={syncing}
+                    aria-label={syncing ? "Syncing broker data to journal" : "Sync broker data to journal"}
+                  >
+                    <RefreshCw className={`mr-1 h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+                    {syncing ? "Syncing…" : "Sync now"}
+                  </Button>
+              ) : null}
             </div>
           ) : null}
           <div className="mt-3 flex gap-1 rounded-full bg-white border border-slate-200 p-0.5 w-fit shadow-sm">

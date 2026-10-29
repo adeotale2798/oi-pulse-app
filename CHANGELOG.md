@@ -1,5 +1,24 @@
 # Changelog
 
+## V20.79 — 2026-10-29
+
+Add an Admin Journal **Sync now** action that force-fetches Kite positions and
+charges, saves them through the existing journal reconciliation rules, and
+refreshes the visible month, year, and period totals.
+
+## V20.78 — 2026-10-29
+
+Keep the broker-backed journal open through 23:59 IST so late position and P&L
+updates are captured before EOD freeze, independent of MCX OI enablement.
+
+## V20.77 — 2026-10-29
+
+Keep Positions updating through MCX trading sessions, with a low-rate scan for
+new after-hours commodity trades and instrument-specific live refresh cadence.
+Keep journal open/total P&L current through the latest MCX close regardless of
+the OI enable switch, and centralize the cross-exchange booked/unbooked total
+calculation without changing its existing accounting rules.
+
 ## V20.76 — 2026-10-28
 
 Require authentication before returning shared reversal alerts, and enforce

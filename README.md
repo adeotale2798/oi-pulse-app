@@ -21,7 +21,7 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **Sell Candidates (Admin-only)** | Admin strike-ranking surface; not available to members or guests |
 | **Build-up** | Fresh OI adding vs covering |
 | **Market Intelligence** | News with a simple index risk, tentative direction, and main headline first; shows today's NSE-scheduled constituent results with a precise result-news found / not found match |
-| **Positions** | Live F&O book (admin publisher session, or guest’s own broker) |
+| **Positions** | Live F&O and MCX broker book (admin publisher session, or guest’s own broker); the P&L journal follows the MCX session even when MCX OI polling is disabled |
 | **Alerts / Activity** | Server reversal alerts + session tape; newly arriving high-impact Market Intel stories also show an in-app alert and, when enabled, a browser notification while the desk is in the background |
 | **Events / Index Risk** | Scheduled constituent calendar plus current Market Intel event exposure for the selected index (upload stamps stay admin-only) |
 | **Straddle** | ATM straddle premium path |
