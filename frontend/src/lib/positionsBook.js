@@ -7,6 +7,7 @@ import { api } from "./api";
 import { publishTodayPnl } from "./todayPnl";
 import {
   shouldPollPositionsBook,
+  shouldLivePollPositionsBook,
   openLiveCount,
   POSITIONS_BOOK_LIVE_MS,
   clampPositionsBookPollMs,
@@ -15,6 +16,7 @@ import {
 
 export {
   shouldPollPositionsBook,
+  shouldLivePollPositionsBook,
   openLiveCount,
   POSITIONS_BOOK_LIVE_MS,
   clampPositionsBookPollMs,
@@ -118,15 +120,15 @@ export function fetchPositionsBook({ force = false, settleExpiry = false } = {})
 function scheduleNext() {
   if (startCount <= 0) return;
   if (timer) clearTimeout(timer);
-  const session = shouldPollPositionsBook();
+  const liveSession = shouldLivePollPositionsBook(new Date(), lastPayload);
   const ms = positionsBookPollDelayMs({
     hasPayload: Boolean(lastPayload),
-    sessionOpen: session,
+    sessionOpen: liveSession,
     pollMs,
     requestStartedAt: lastRequestStartedAt,
   });
   timer = setTimeout(() => {
-    const liveNow = shouldPollPositionsBook();
+    const liveNow = shouldPollPositionsBook(new Date(), lastPayload);
     const pull = liveNow || !lastPayload;
     const done = () => scheduleNext();
     if (pull) {
@@ -137,13 +139,13 @@ function scheduleNext() {
   }, ms);
 }
 
-/** Admin Positions auto-refresh (ms). Used while the cash session is live. */
+/** Admin Positions cadence (ms) while a tracked exchange session is live. */
 export function setPositionsBookPollMs(ms) {
   pollMs = clampPositionsBookPollMs(ms);
   if (startCount > 0) scheduleNext();
 }
 
-/** Keep GET /positions alive on every dashboard page while the cash session is live. */
+/** Keep GET /positions alive for NSE/MCX sessions and low-rate MCX discovery. */
 export function startPositionsBookPolling() {
   startCount += 1;
   if (startCount !== 1) return;

@@ -460,6 +460,43 @@ def _session_group(uid: str, cfg: Optional[dict] = None) -> str:
         return "nse"
 
 
+def position_session_group(position: Dict[str, Any], configs: Optional[dict] = None) -> Optional[str]:
+    """Resolve an MCX broker leg to its exchange session group, independent of OI enablement."""
+    exchange = str(position.get("exchange") or "").upper()
+    segment = str(position.get("segment") or "").upper()
+    if not exchange.startswith("MCX") and not segment.startswith("MCX"):
+        return None
+
+    symbol = str(position.get("tradingsymbol") or "").upper().replace(" ", "")
+    uid = str(position.get("index") or "").strip().upper()
+    from universe import MCX_MINI_PREFIXES, match_symbol_prefix, session_group_for
+
+    for major, prefixes in MCX_MINI_PREFIXES.items():
+        if any(symbol.startswith(prefix) for prefix in prefixes):
+            uid = major
+            break
+    if not uid:
+        uid = match_symbol_prefix(symbol) or ""
+    if not uid:
+        uid = next(
+            (
+                str(key).strip().upper()
+                for key in sorted(configs or {}, key=lambda value: len(str(value)), reverse=True)
+                if symbol.startswith(str(key).strip().upper().replace(" ", ""))
+            ),
+            "",
+        )
+
+    cfg = (configs or {}).get(uid) or {}
+    explicit_group = str(position.get("session_group") or cfg.get("session_group") or "").lower()
+    if explicit_group.startswith("mcx"):
+        return explicit_group
+    return session_group_for(
+        uid,
+        {**position, "exchange": exchange or "MCX", "segment": segment or "MCX-OPT"},
+    )
+
+
 def session_display_bounds_for_group(group: str, dt: datetime) -> Tuple[dtime, dtime]:
     g = str(group or "nse").lower()
     if g == "mcx_non_agri":

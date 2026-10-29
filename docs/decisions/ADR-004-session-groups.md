@@ -10,11 +10,11 @@ Journal heatmap only rendered NIFTY / SENSEX / BANKNIFTY. Kite positions already
 
 1. Catalog `session_group`: `nse` | `mcx_non_agri` | `mcx_select_agri` | `mcx_agri`.
 2. `_poll_once` fetches only names `index_in_session`. `oi_session_open` is true if **any** enabled id is in session.
-3. Journal EOD lock uses the **latest** enabled close + 5 minutes. Year heatmap always has an Others row; `booked_index_pnl.OTHER` holds non-desk booked P&L.
+3. Journal snapshots reconcile the complete Kite book through 23:59 IST, then freeze open/total P&L. Year heatmap always has an Others row; `booked_index_pnl.OTHER` holds non-desk booked P&L.
 4. Adding a name is the DEVELOPMENT.md checklist (hours, poll, Positions, journal Others, merge to main).
 
 ## Consequences
 
 - Enabling Gold does not keep NIFTY polling in the evening.
-- Evening commodity exits still journal if Gold is enabled (lock after MCX close).
+- Evening commodity exits and late broker-book updates are journalled before the 23:59 IST freeze, regardless of the MCX OI enable switch.
 - Agri names, when catalogued, get 17:00 / 21:00 without another blunt clock.

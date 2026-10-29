@@ -348,6 +348,44 @@ def booked_today_from_row(row: Optional[dict]) -> float:
     return 0.0
 
 
+def pnl_today_from_rows(rows: Optional[list]) -> dict:
+    """Aggregate Kite-style total, booked, and unbooked P&L across every exchange leg."""
+    valid_rows = [row for row in (rows or []) if isinstance(row, dict)]
+
+    def row_day_pnl(row: dict) -> float:
+        if row.get("exited"):
+            for key in ("booked_pnl", "realised", "pnl"):
+                try:
+                    value = float(row.get(key))
+                except (TypeError, ValueError):
+                    continue
+                if value == value:
+                    return value
+            return 0.0
+        try:
+            return float(row.get("pnl") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    open_rows = [row for row in valid_rows if not row.get("exited")]
+    exited_rows = [row for row in valid_rows if row.get("exited")]
+    open_mark = round(sum(row_day_pnl(row) for row in open_rows), 2)
+    exited = round(sum(row_day_pnl(row) for row in exited_rows), 2)
+    total = round(open_mark + exited, 2)
+    booked = round(sum(booked_today_from_row(row) for row in valid_rows), 2)
+    unbooked = round(total - booked, 2)
+    return {
+        "open_count": len(open_rows),
+        "exited_count": len(exited_rows),
+        "partial_count": sum(1 for row in open_rows if row.get("partial")),
+        "open": unbooked,
+        "exited": exited,
+        "booked": booked,
+        "unbooked": unbooked,
+        "total": total,
+    }
+
+
 # NSE options tick is ₹0.05. Leftover expiry hedges often sit there because
 # the auction did not fill; Zerodha RMS squares them after close. Kite Connect
 # can still list net qty until the next session (forum: leftover expiry P&L

@@ -5831,11 +5831,12 @@ async def get_positions(
     )
     from kite_positions import (
         apply_live_ltp_to_open_rows,
-        booked_today_from_row,
         lot_sizes_by_tradingsymbol,
         merge_kite_net_day,
+        pnl_today_from_rows,
         settle_expiry_floor_hedges,
     )
+    from market_hours import position_session_group
     from universe import match_symbol_prefix
 
     # Net quantity is authoritative for open vs exited. Day rows only enrich
@@ -5908,11 +5909,14 @@ async def get_positions(
             else:
                 side_bias = "squared"
         display_name = format_fno_option_label(ts, parsed=parsed or None)
+        position_context = {**p, **parsed}
+        session_group = position_session_group(position_context, configs=INDEX_CONFIG)
         # Mirror Kite Positions: flat legs show Qty 0 / Avg 0.00 with Closed tag.
         out.append({
             "tradingsymbol": ts,
             "display_name": display_name,
             "exchange": p.get("exchange"),
+            **({"session_group": session_group} if session_group else {}),
             "product": p.get("product"),
             "quantity": 0 if exited else qty,
             "overnight_quantity": int(p.get("overnight_quantity", 0) or 0),
@@ -5977,41 +5981,6 @@ async def get_positions(
             except Exception as e:
                 logger.warning("positions %s kite.quote failed: %s", label, e)
 
-    # Tile totals from Kite Booked / Unbooked / P&L — before quote MTM on open legs.
-    def _row_day_pnl(r: dict) -> float:
-        if r.get("exited"):
-            for key in ("booked_pnl", "realised", "pnl"):
-                try:
-                    v = float(r.get(key))
-                except (TypeError, ValueError):
-                    continue
-                if v == v:  # not NaN
-                    return v
-            return 0.0
-        try:
-            return float(r.get("pnl") or 0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    open_n = sum(1 for r in out if not r.get("exited"))
-    exited_n = sum(1 for r in out if r.get("exited"))
-    partial_n = sum(1 for r in out if r.get("partial") and not r.get("exited"))
-    open_pnl = round(sum(_row_day_pnl(r) for r in out if not r.get("exited")), 2)
-    exited_pnl = round(sum(_row_day_pnl(r) for r in out if r.get("exited")), 2)
-    booked_today = round(sum(booked_today_from_row(r) for r in out), 2)
-    # Kite Total P&L = sum of the P/L column. Booked is realised on closed +
-    # still-open partials. Unbooked is the rest (not raw API unrealised — that
-    # field is often the whole MTM).
-    kite_total = round(open_pnl + exited_pnl, 2)
-    unbooked = round(kite_total - booked_today, 2)
-    pnl_today = {
-        "open": unbooked,
-        "exited": exited_pnl,
-        "booked": booked_today,
-        "unbooked": unbooked,
-        "total": kite_total,
-    }
-
     apply_live_ltp_to_open_rows(out, quotes)
 
     _, close_hm = display_hours()
@@ -6023,20 +5992,13 @@ async def get_positions(
         force=force_settle,
     )
     leftover_open = sum(1 for r in out if r.get("can_settle_in_book"))
-    open_n = sum(1 for r in out if not r.get("exited"))
-    exited_n = sum(1 for r in out if r.get("exited"))
-    partial_n = sum(1 for r in out if r.get("partial") and not r.get("exited"))
-    open_pnl = round(sum(_row_day_pnl(r) for r in out if not r.get("exited")), 2)
-    exited_pnl = round(sum(_row_day_pnl(r) for r in out if r.get("exited")), 2)
-    booked_today = round(sum(booked_today_from_row(r) for r in out), 2)
-    kite_total = round(open_pnl + exited_pnl, 2)
-    unbooked = round(kite_total - booked_today, 2)
+    pnl_today = pnl_today_from_rows(out)
+    open_n = pnl_today["open_count"]
+    exited_n = pnl_today["exited_count"]
+    partial_n = pnl_today["partial_count"]
     pnl_today = {
-        "open": unbooked,
-        "exited": exited_pnl,
-        "booked": booked_today,
-        "unbooked": unbooked,
-        "total": kite_total,
+        key: pnl_today[key]
+        for key in ("open", "exited", "booked", "unbooked", "total")
     }
 
     for idx in indices_needed:
@@ -6456,7 +6418,9 @@ async def _snapshot_trade_journal(
     force_lock: bool = False,
     allow_locked_update: bool = False,
     live_session: bool = False,
-) -> None:
+    force_charges: bool = False,
+    charge_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
     """Upsert today's booked P&L + brokerage.
 
     Locked days may reconcile same-day booked P&L; open/total P&L and journal notes stay frozen.
@@ -6465,7 +6429,7 @@ async def _snapshot_trade_journal(
     actually printing (Muhurat, or any surprise session with fills/quotes).
     """
     if db is None:
-        return
+        return False
     now = now_ist()
     day = journal.journal_session_ymd(now)
     calendar_session = journal.iso_is_trading_day(day)
@@ -6473,9 +6437,9 @@ async def _snapshot_trade_journal(
         live_session = await _journal_live_session_today(day)
     if not calendar_session and not live_session:
         await _purge_closed_session_journal_autos()
-        return
+        return False
     if payload.get("error") and not (payload.get("positions") or payload.get("pnl_today")):
-        return
+        return False
     try:
         snap = journal.snapshot_from_positions(payload, date=day)
         existing = await db.trade_journal.find_one({"date": day})
@@ -6490,7 +6454,11 @@ async def _snapshot_trade_journal(
             if gap is not None:
                 snap["inferred_cashflow"] = gap
         need_charges = existing is None or existing.get("charges_total") is None
-        charges = await _maybe_journal_charges(force=force_lock or need_charges)
+        charges = charge_payload
+        if charges is None:
+            charges = await _maybe_journal_charges(
+                force=force_lock or force_charges or need_charges
+            )
         if journal.charges_usable(charges):
             journal.apply_charges(snap, charges)
         fields = journal.apply_snapshot(
@@ -6498,13 +6466,14 @@ async def _snapshot_trade_journal(
             enabled_indices=_journal_enabled_indices(), allow_locked_update=allow_locked_update,
         )
         if not fields:
-            return
+            return True
         ops = journal.mongo_upsert_ops(fields)
         await db.trade_journal.update_one(
             {"date": day},
             ops,
             upsert=True,
         )
+        return True
     except Exception:
         logger = logging.getLogger("server")
         logger.exception("trade journal snapshot failed for %s", day)
@@ -6519,6 +6488,60 @@ async def _snapshot_trade_journal(
             )
         except Exception:
             pass
+        return False
+
+
+@api_router.post("/journal/sync")
+async def journal_sync(_admin: bool = Depends(require_admin)):
+    """Fetch the Admin Kite book and charges, then persist the current journal snapshot.
+
+    Manual sync uses the existing EOD and same-day reconciliation rules.
+    """
+    if db is None:
+        raise HTTPException(503, "Journal storage is unavailable")
+
+    positions = await get_positions(None, "admin")
+    if (
+        positions.get("error")
+        or not positions.get("kite_connected")
+        or positions.get("token_issue")
+    ):
+        raise HTTPException(502, positions.get("error") or "Broker positions could not be refreshed")
+
+    charges = await _maybe_journal_charges(force=True)
+    if not journal.charges_usable(charges):
+        raise HTTPException(502, "Broker charges could not be refreshed; retry the journal sync")
+
+    saved = await _snapshot_trade_journal(
+        positions,
+        allow_locked_update=True,
+        force_charges=True,
+        charge_payload=charges,
+    )
+    if not saved:
+        raise HTTPException(503, "Broker data was fetched, but the journal snapshot could not be saved")
+
+    day = journal.journal_session_ymd()
+    doc = await db.trade_journal.find_one({"date": day}, {"_id": 0})
+    if not doc:
+        raise HTTPException(503, "Journal sync completed without a saved session record")
+    expected_charges = journal.apply_charges({}, charges)
+    stored_charges = journal.apply_charges({}, {
+        "brokerage": doc.get("brokerage"),
+        "charges_total": doc.get("charges_total"),
+    })
+    if (
+        stored_charges["brokerage"] != expected_charges["brokerage"]
+        or stored_charges["charges_total"] != expected_charges["charges_total"]
+    ):
+        raise HTTPException(503, "Journal snapshot was saved, but fresh broker charges could not be reconciled")
+    return {
+        "ok": True,
+        "date": day,
+        "positions_count": len(positions.get("positions") or []),
+        "pnl_frozen": bool(doc.get("eod_locked")),
+        "day": journal.public_day(doc, include_images=True),
+    }
 
 
 async def _snapshot_member_trade_journal(member_id: str, payload: Dict[str, Any]) -> None:

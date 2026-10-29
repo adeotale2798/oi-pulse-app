@@ -4,7 +4,9 @@ import {
   api,
   fetchJournalDay,
   fetchJournalMonth,
+  fetchJournalYear,
   fetchJournalPeriod,
+  syncJournal,
 } from "@/lib/api";
 import TradeJournalModal from "./TradeJournalModal";
 
@@ -16,6 +18,7 @@ jest.mock("@/lib/api", () => ({
   fetchJournalMonth: jest.fn(),
   fetchJournalYear: jest.fn(),
   fetchJournalPeriod: jest.fn(),
+  syncJournal: jest.fn(),
   fetchJournalDay: jest.fn(),
   saveJournalDay: jest.fn(),
   addJournalScreenshot: jest.fn(),
@@ -61,6 +64,7 @@ jest.mock("lucide-react", () => {
     ChevronRight: Icon,
     FileText: Icon,
     ImagePlus: Icon,
+    RefreshCw: Icon,
     Save: Icon,
     Trash2: Icon,
     Trophy: Icon,
@@ -185,6 +189,12 @@ describe("TradeJournalModal local archive calendar", () => {
     global.IS_REACT_ACT_ENVIRONMENT = true;
     api.get.mockResolvedValue({ data: { trade_cycle_saving_enabled: true } });
     api.post.mockResolvedValue({ data: { trade_cycle_saving_enabled: true } });
+    syncJournal.mockResolvedValue({
+      ok: true,
+      date: "2026-10-29",
+      positions_count: 2,
+      day: { date: "2026-10-29", booked_pnl: 125, legs: [] },
+    });
     fetchJournalMonth.mockResolvedValue({
       today: "2026-10-07",
       days: [],
@@ -192,6 +202,7 @@ describe("TradeJournalModal local archive calendar", () => {
       tags: [],
     });
     fetchJournalPeriod.mockResolvedValue({ stats: {} });
+    fetchJournalYear.mockResolvedValue({ stats: {}, heatmap: {} });
   });
 
   afterEach(() => {
@@ -269,6 +280,20 @@ describe("TradeJournalModal local archive calendar", () => {
     });
 
     expect(fetchJournalMonth).toHaveBeenCalledTimes(2);
+    expect(fetchJournalPeriod).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="journal-refresh-status"]').textContent).toContain("Journal refreshed");
+  });
+
+  it("manually syncs the broker book and charges before refreshing journal views", async () => {
+    await act(async () => root.render(
+      <TradeJournalModal open onOpenChange={() => {}} />,
+    ));
+
+    await act(async () => container.querySelector('[data-testid="journal-sync"]').click());
+
+    expect(syncJournal).toHaveBeenCalledTimes(1);
+    expect(fetchJournalMonth).toHaveBeenCalledTimes(2);
+    expect(fetchJournalYear).toHaveBeenCalledTimes(2);
     expect(fetchJournalPeriod).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[data-testid="journal-refresh-status"]').textContent).toContain("Journal refreshed");
   });

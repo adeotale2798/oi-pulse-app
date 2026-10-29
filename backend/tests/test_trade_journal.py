@@ -2,6 +2,9 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
+from fastapi import Request
+from fastapi.testclient import TestClient
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 from trade_journal import (
@@ -272,6 +275,89 @@ def test_internal_journal_positions_poll_can_run_without_http_request(monkeypatc
     assert asyncio.run(server._member_session_from_request(None)) is None
 
 
+def test_admin_manual_journal_sync_fetches_positions_and_charges(monkeypatch):
+    import server
+
+    class JournalCollection:
+        async def find_one(self, query, *_args, **_kwargs):
+            assert "date" in query
+            return {"date": query["date"], "booked_pnl": 120, "brokerage": 20, "charges_total": 35}
+
+    positions = {"kite_connected": True, "positions": [{"tradingsymbol": "GOLDM"}]}
+    charges = {"brokerage": 20, "charges_total": 35, "source": "kite"}
+    snapshot_args = {}
+
+    async def get_positions(_request, role):
+        assert _request is None
+        assert role == "admin"
+        return positions
+
+    async def get_charges(*, force=False):
+        assert force is True
+        return charges
+
+    async def save_snapshot(payload, **kwargs):
+        snapshot_args["payload"] = payload
+        snapshot_args.update(kwargs)
+        return True
+
+    async def allow_admin(_request: Request):
+        return True
+
+    monkeypatch.setattr(server, "db", SimpleNamespace(trade_journal=JournalCollection()))
+    monkeypatch.setattr(server, "get_positions", get_positions)
+    monkeypatch.setattr(server, "_maybe_journal_charges", get_charges)
+    monkeypatch.setattr(server, "_snapshot_trade_journal", save_snapshot)
+    server.app.dependency_overrides[server.require_admin] = allow_admin
+    try:
+        response = TestClient(server.app).post("/api/journal/sync")
+    finally:
+        server.app.dependency_overrides.pop(server.require_admin, None)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    assert response.json()["positions_count"] == 1
+    assert snapshot_args["payload"] is positions
+    assert snapshot_args["allow_locked_update"] is True
+    assert snapshot_args["force_charges"] is True
+    assert snapshot_args["charge_payload"] is charges
+
+
+def test_admin_manual_journal_sync_does_not_save_when_charges_are_unavailable(monkeypatch):
+    import server
+
+    snapshot_called = False
+
+    async def get_positions(_request, _role):
+        return {"kite_connected": True, "positions": []}
+
+    async def no_charges(*, force=False):
+        assert force is True
+        return None
+
+    async def save_snapshot(*_args, **_kwargs):
+        nonlocal snapshot_called
+        snapshot_called = True
+        return True
+
+    async def allow_admin(_request: Request):
+        return True
+
+    monkeypatch.setattr(server, "db", SimpleNamespace(trade_journal=object()))
+    monkeypatch.setattr(server, "get_positions", get_positions)
+    monkeypatch.setattr(server, "_maybe_journal_charges", no_charges)
+    monkeypatch.setattr(server, "_snapshot_trade_journal", save_snapshot)
+    server.app.dependency_overrides[server.require_admin] = allow_admin
+    try:
+        response = TestClient(server.app).post("/api/journal/sync")
+    finally:
+        server.app.dependency_overrides.pop(server.require_admin, None)
+
+    assert response.status_code == 502
+    assert "charges could not be refreshed" in response.json()["detail"].lower()
+    assert snapshot_called is False
+
+
 def test_sanitize_clips_and_tags():
     out = sanitize_journal_fields({
         "went_well": "a" * 9000,
@@ -324,25 +410,42 @@ def test_month_bounds():
     assert month_bounds(2026, 12) == ("2026-12-01", "2027-01-01")
 
 
-def test_should_lock_eod_at_1546_on_weekday():
+def test_should_lock_eod_waits_for_mcx_close_even_when_oi_is_disabled():
     ist = timezone(timedelta(hours=5, minutes=30))
     before = datetime(2026, 8, 13, 15, 45, tzinfo=ist)
     at = datetime(2026, 8, 13, 15, 46, tzinfo=ist)
     after = datetime(2026, 8, 13, 16, 5, tzinfo=ist)
     sunday = datetime(2026, 8, 16, 16, 0, tzinfo=ist)
     assert should_lock_eod(before) is False
-    assert should_lock_eod(at) is True
-    assert should_lock_eod(after) is True
+    assert should_lock_eod(at) is False
+    assert should_lock_eod(after) is False
     assert should_lock_eod(sunday) is False
 
 
-def test_should_lock_eod_waits_for_mcx_when_gold_enabled():
+def test_should_lock_eod_waits_until_2359_independent_of_oi_enablement():
     ist = timezone(timedelta(hours=5, minutes=30))
     eve = datetime(2026, 8, 13, 16, 0, tzinfo=ist)
-    late = datetime(2026, 8, 13, 23, 35, tzinfo=ist)
-    assert should_lock_eod(eve) is True
+    just_before = datetime(2026, 8, 13, 23, 58, tzinfo=ist)
+    late = datetime(2026, 8, 13, 23, 59, tzinfo=ist)
+    assert should_lock_eod(eve) is False
     assert should_lock_eod(eve, enabled_indices=["NIFTY", "GOLD"]) is False
-    assert should_lock_eod(late, enabled_indices=["NIFTY", "GOLD"]) is True
+    assert should_lock_eod(just_before) is False
+    assert should_lock_eod(just_before, enabled_indices=["NIFTY"]) is False
+    assert should_lock_eod(datetime(2026, 8, 13, 23, 35, tzinfo=ist)) is False
+    assert should_lock_eod(late) is True
+    assert should_lock_eod(late, enabled_indices=["NIFTY"]) is True
+
+
+def test_should_lock_eod_uses_2359_for_standard_time_and_keeps_session_anchor():
+    ist = timezone(timedelta(hours=5, minutes=30))
+    just_before_close = datetime(2026, 11, 6, 23, 58, tzinfo=ist)
+    after_close = datetime(2026, 11, 6, 23, 59, tzinfo=ist)
+    after_midnight = datetime(2026, 11, 7, 0, 0, tzinfo=ist)
+    saturday_morning = datetime(2026, 11, 7, 9, 0, tzinfo=ist)
+    assert should_lock_eod(just_before_close) is False
+    assert should_lock_eod(after_close) is True
+    assert should_lock_eod(after_midnight) is True
+    assert should_lock_eod(saturday_morning) is False
 
 
 def test_weekend_journal_autos_are_not_trading_days():
@@ -410,17 +513,22 @@ def test_should_lock_eod_muhurat_after_session_close():
     before = datetime(2025, 10, 21, 14, 49, tzinfo=ist)
     at = datetime(2025, 10, 21, 14, 50, tzinfo=ist)
     after_regular = datetime(2025, 10, 21, 15, 45, tzinfo=ist)
+    just_before_cutoff = datetime(2025, 10, 21, 23, 58, tzinfo=ist)
+    cutoff = datetime(2025, 10, 21, 23, 59, tzinfo=ist)
     morning = datetime(2025, 10, 21, 13, 0, tzinfo=ist)
     republic = datetime(2026, 1, 26, 16, 0, tzinfo=ist)
     sunday_listed = datetime(2026, 11, 8, 20, 0, tzinfo=ist)
     assert should_lock_eod(morning) is False
     assert should_lock_eod(before) is False
-    assert should_lock_eod(at) is True
-    assert should_lock_eod(after_regular) is True
+    assert should_lock_eod(at) is False
+    assert should_lock_eod(after_regular) is False
+    assert should_lock_eod(just_before_cutoff) is False
+    assert should_lock_eod(cutoff) is True
     assert should_lock_eod(republic) is False
     assert should_lock_eod(sunday_listed) is False
-    assert should_lock_eod(republic, live_session=True) is False  # before 20:00
-    assert should_lock_eod(datetime(2026, 1, 26, 20, 0, tzinfo=ist), live_session=True) is True
+    assert should_lock_eod(republic, live_session=True) is False
+    assert should_lock_eod(datetime(2026, 1, 26, 23, 58, tzinfo=ist), live_session=True) is False
+    assert should_lock_eod(datetime(2026, 1, 26, 23, 59, tzinfo=ist), live_session=True) is True
 
 
 def test_apply_snapshot_does_not_clobber_locked_or_empty():
@@ -454,11 +562,14 @@ def test_apply_snapshot_does_not_clobber_locked_or_empty():
     assert locked["booked_pnl"] == 500.5
 
 
-def test_apply_snapshot_locks_live_book_at_close():
+def test_apply_snapshot_keeps_live_book_through_mcx_close():
     snap = snapshot_from_positions(_payload(), date="2026-08-13")
     ist = timezone(timedelta(hours=5, minutes=30))
-    close = datetime(2026, 8, 13, 15, 46, tzinfo=ist)
-    out = apply_snapshot({}, snap, now=close)
+    nse_close = datetime(2026, 8, 13, 15, 46, tzinfo=ist)
+    live = apply_snapshot({}, snap, now=nse_close)
+    assert live.get("eod_locked", False) is False
+    close = datetime(2026, 8, 13, 23, 59, tzinfo=ist)
+    out = apply_snapshot(live, snap, now=close)
     assert out["eod_locked"] is True
     assert out["frozen_pnl"] == 500.5
     assert out["booked_pnl"] == 500.5
@@ -836,7 +947,7 @@ def test_locked_day_accepts_same_calendar_day_booked_reconciliation_only():
             },
         ],
     }, date="2026-08-18")
-    after_close = datetime(2026, 8, 18, 16, 10, tzinfo=IST)
+    after_close = datetime(2026, 8, 18, 23, 59, tzinfo=IST)
 
     fields = apply_snapshot(
         existing,
@@ -973,7 +1084,7 @@ def test_period_stats_uses_member_aggregate_trade_counts_without_legs():
 
 def test_mongo_upsert_ops_no_path_conflict_when_locking():
     snap = snapshot_from_positions(_payload(), date="2026-09-16")
-    locked = apply_snapshot({}, snap, now=datetime(2026, 9, 16, 15, 50, tzinfo=IST))
+    locked = apply_snapshot({}, snap, now=datetime(2026, 9, 16, 23, 59, tzinfo=IST))
     assert locked["eod_locked"] is True
     ops = mongo_upsert_ops(locked)
     set_keys = set(ops["$set"])
@@ -985,8 +1096,8 @@ def test_mongo_upsert_ops_no_path_conflict_when_locking():
 
 def test_consecutive_session_snapshots_keep_separate_dates():
     """Two trading days must not collapse onto one Mongo date key."""
-    d1 = apply_snapshot({}, snapshot_from_positions(_payload(), date="2026-09-15"), now=datetime(2026, 9, 15, 15, 50, tzinfo=IST))
-    d2 = apply_snapshot({}, snapshot_from_positions(_payload(), date="2026-09-16"), now=datetime(2026, 9, 16, 15, 50, tzinfo=IST))
+    d1 = apply_snapshot({}, snapshot_from_positions(_payload(), date="2026-09-15"), now=datetime(2026, 9, 15, 23, 59, tzinfo=IST))
+    d2 = apply_snapshot({}, snapshot_from_positions(_payload(), date="2026-09-16"), now=datetime(2026, 9, 16, 23, 59, tzinfo=IST))
     assert d1["date"] == "2026-09-15"
     assert d2["date"] == "2026-09-16"
     store = {}

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from market_hours import (
@@ -25,10 +25,8 @@ from account_equity import (
     pnl_after_charges,
 )
 
-# Index F&O P&L locks at 15:46 IST; same-calendar-day booked corrections may still reconcile.
-EOD_LOCK_IST = dtime(15, 46)
-# Fallback if special-session close is missing (evening Muhurat).
-SPECIAL_SESSION_LOCK_IST = dtime(20, 0)
+# Keep the account journal live for the complete IST trading date.
+JOURNAL_EOD_LOCK_IST = dtime(23, 59)
 HEATMAP_INDICES = HEATMAP_IDS
 
 MAX_NOTE_CHARS = 8000
@@ -215,7 +213,10 @@ def snapshot_from_positions(
             "realised": round(booked_v, 2),
             "pnl": round(pnl_v, 2),
         }
-        for k in ("entry_time", "exit_time", "entry_source", "exit_source", "carried", "token_gap", "partials"):
+        for k in (
+            "entry_time", "exit_time", "entry_source", "exit_source", "carried",
+            "token_gap", "partials", "exchange", "session_group",
+        ):
             if r.get(k) is not None:
                 leg[k] = r.get(k)
         legs.append(leg)
@@ -261,21 +262,40 @@ def snapshot_from_positions(
 def should_lock_eod(dt=None, *, live_session: bool = False, enabled_indices=None) -> bool:
     """True when today's EOD snapshot should be locked in Mongo.
 
-    Index F&O: 15:46 IST — that print is the day, then we start the next session.
-    MCX majors enabled: wait until that commodity's close + 5 min.
-    Muhurat / surprise live sessions: that session's close + 5 min / 20:00.
+    Keep the account journal live through 23:59 IST so late Kite book updates
+    are included, regardless of MCX OI enablement or the instrument's close.
     """
     dt = dt or now_ist()
-    if is_trading_day(dt):
-        if is_special_session_day(dt):
-            return dt.time() >= eod_lock_time(dt, enabled_indices=enabled_indices)
-        ids = {str(x).upper() for x in (enabled_indices or [])}
-        if ids & set(MCX_MAJOR_IDS):
-            return dt.time() >= eod_lock_time(dt, enabled_indices=enabled_indices)
-        return dt.time() >= EOD_LOCK_IST
-    if live_session:
-        return dt.time() >= SPECIAL_SESSION_LOCK_IST
-    return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=IST)
+    else:
+        dt = dt.astimezone(IST)
+    if live_session and not is_trading_day(dt):
+        return dt.time() >= JOURNAL_EOD_LOCK_IST
+
+    session_day = session_anchor_date(dt)
+    session_dt = datetime.combine(session_day, dtime(12, 0), tzinfo=IST)
+    if not is_trading_day(session_dt):
+        return bool(live_session and dt.time() >= JOURNAL_EOD_LOCK_IST)
+
+    ids = {str(x).upper() for x in (enabled_indices or [])}
+    if is_special_session_day(session_dt):
+        lock_time = eod_lock_time(session_dt, enabled_indices=ids)
+    else:
+        lock_time = eod_lock_time(
+            session_dt,
+            enabled_indices=ids | set(MCX_MAJOR_IDS),
+        )
+    lock_time = max(lock_time, JOURNAL_EOD_LOCK_IST)
+    deadline = datetime.combine(session_day, lock_time, tzinfo=IST)
+    if lock_time <= dtime(9, 0):
+        deadline += timedelta(days=1)
+
+    if dt.date() != session_day and (
+        dt.date() != session_day + timedelta(days=1) or dt.time() >= dtime(9, 0)
+    ):
+        return False
+    return dt >= deadline
 
 
 def snapshot_is_empty(snap: Optional[Dict[str, Any]]) -> bool:
