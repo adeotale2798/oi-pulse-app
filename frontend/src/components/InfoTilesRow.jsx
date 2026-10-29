@@ -55,7 +55,7 @@ export default function InfoTilesRow({
       all.push({
         id: "impact",
         Component: MarketImpactBadge,
-        props: { activeIndex, onOpenIndexEvents },
+        props: { activeIndex, isAdmin: !!isAdmin, onOpenIndexEvents },
       });
     }
     return all;

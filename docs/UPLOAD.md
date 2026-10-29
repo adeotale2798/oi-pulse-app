@@ -153,7 +153,7 @@ that same export format; manual CSV upload remains available.
 `days_remaining` is calendar days from **IST today** (not the server TZ). The Index Impact tile and Index Risk board only **show** rows with `days_remaining >= 0`; past dates stay in the API payload. The tile lists every upcoming type (results, board meetings, dividends, AGMs, …), not only results/board meetings. An empty list usually means the uploaded NSE calendar is already in the past — upload a current NSE export or wait for the
 next automatic refresh.
 
-The Index Impact tile fetches this endpoint immediately when the selected index changes; it does not wait for a deferred background delay. While waiting it shows a loading state, and on request failure it reports that events are unavailable instead of implying the calendar is empty.
+The Index Impact tile fetches this endpoint immediately when the selected index changes; it does not wait for a deferred background delay. Index Impact and Index Risk coalesce duplicate requests and reuse successful responses for up to 15 seconds, with Admin-only join diagnostics kept in a separate cache. While waiting the tile shows a loading state, and on request failure it reports that events are unavailable instead of implying the calendar is empty. The API reads event rows, constituents, upload metadata, and auth state concurrently; constituent fuzzy matching narrows candidates while retaining the existing matching rules.
 
 Index Risk separates event timing from the constituent's index share (for
 example, “Today · Index weight >5%”). Weight is the company's share of the

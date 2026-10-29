@@ -1,5 +1,18 @@
 # Changelog
 
+## V20.81 — 2026-10-29
+
+Show enabled and recently traded broker instruments separately in the Admin
+Journal, keep instrument-specific booked P&L attributed by Kite symbol, and
+withhold instrument percentages when whole-book charges cannot be allocated.
+Reduce Index Impact wait time by parallelizing its data reads, indexing fuzzy
+event joins, and sharing short-lived role-separated event requests.
+
+## V20.80 — 2026-10-29
+
+Keep the product version visible to everyone while limiting the About and
+release-details panel to authenticated Admin sessions.
+
 ## V20.79 — 2026-10-29
 
 Add an Admin Journal **Sync now** action that force-fetches Kite positions and

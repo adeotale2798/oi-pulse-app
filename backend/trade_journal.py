@@ -15,7 +15,7 @@ from market_hours import (
     eod_lock_time,
     session_anchor_date,
 )
-from universe import DESK_IDS, HEATMAP_IDS, MCX_MAJOR_IDS, match_symbol_prefix
+from universe import HEATMAP_IDS, MCX_MAJOR_IDS, match_symbol_prefix
 from account_equity import (
     apply_period_equity,
     attach_live_funds,
@@ -517,9 +517,42 @@ def apply_snapshot(
     return out
 
 
-def year_heatmap(days: List[Dict[str, Any]], year: int) -> Dict[str, Any]:
+def year_heatmap(
+    days: List[Dict[str, Any]],
+    year: int,
+    enabled_indices: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Keep enabled underlyings and broker instruments traded during this year."""
     days = [d for d in days if include_on_journal_calendar(d)]
-    by_index = {idx: [0.0] * 12 for idx in HEATMAP_INDICES}
+    indices = []
+    for value in HEATMAP_INDICES if enabled_indices is None else enabled_indices:
+        idx = str(value or "").strip().upper()
+        if idx and idx not in ("ALL", "OTHER", "UNKNOWN") and idx not in indices:
+            indices.append(idx)
+    for d in days:
+        date_s = str(d.get("date") or "")
+        if len(date_s) < 4 or date_s[:4] != str(year):
+            continue
+        for leg in d.get("legs") or []:
+            if not isinstance(leg, dict):
+                continue
+            idx = _leg_index_label(leg)
+            if idx != "OTHER" and idx not in indices:
+                indices.append(idx)
+        for idx, amount in _booked_index_pnl(d).items():
+            if (
+                idx != "OTHER"
+                and idx not in indices
+                and (idx not in HEATMAP_INDICES or abs(_num(amount)) > 0.009)
+            ):
+                indices.append(idx)
+    enabled_order = [
+        str(value or "").strip().upper()
+        for value in (HEATMAP_INDICES if enabled_indices is None else enabled_indices)
+    ]
+    enabled = [idx for idx in enabled_order if idx in indices]
+    indices = enabled + sorted(idx for idx in indices if idx not in enabled)
+    by_index = {idx: [0.0] * 12 for idx in indices}
     other = [0.0] * 12
     month_nets = [0.0] * 12
     month_made = [0.0] * 12
@@ -566,7 +599,7 @@ def year_heatmap(days: List[Dict[str, Any]], year: int) -> Dict[str, Any]:
             "month": m,
             "net_pnl": round(month_nets[i], 2),
             "trading_days": month_days[i],
-            "by_index": {idx: round(by_index[idx][i], 2) for idx in HEATMAP_INDICES},
+            "by_index": {idx: round(by_index[idx][i], 2) for idx in indices},
             "other": round(other[i], 2),
             "funds_base": m_base,
             "booked_pct": equity_booked_pct(month_made[i], m_base),
@@ -574,8 +607,8 @@ def year_heatmap(days: List[Dict[str, Any]], year: int) -> Dict[str, Any]:
         })
     return {
         "year": year,
-        "indices": list(HEATMAP_INDICES),
-        "by_index": {idx: [round(v, 2) for v in by_index[idx]] for idx in HEATMAP_INDICES},
+        "indices": indices,
+        "by_index": {idx: [round(v, 2) for v in by_index[idx]] for idx in indices},
         "other": [round(v, 2) for v in other],
         "month_nets": [round(v, 2) for v in month_nets],
         "months": months,
@@ -661,8 +694,9 @@ def period_stats(
     start: str,
     end: str,
     index: Optional[str] = None,
+    enabled_indices: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """From–to booked profit, Kite charges, and trade win % (optional index filter)."""
+    """From–to booked profit, Kite charges, and trade win % (optional instrument filter)."""
     want = str(index or "").strip().upper()
     if want in ("", "ALL", "ALL_INDICES", "*"):
         want = None
@@ -685,8 +719,34 @@ def period_stats(
     win_days = 0
     lose_days = 0
     by_index: Dict[str, float] = {}
+    instrument_counts_available = True
+    available_indices = []
+    for value in HEATMAP_INDICES if enabled_indices is None else enabled_indices:
+        idx = str(value or "").strip().upper()
+        if idx and idx not in ("ALL", "OTHER", "UNKNOWN") and idx not in available_indices:
+            available_indices.append(idx)
+    has_other = False
 
     for d in rows:
+        for leg in d.get("legs") or []:
+            if not isinstance(leg, dict):
+                continue
+            idx = _leg_index_label(leg)
+            if idx == "OTHER":
+                has_other = True
+            elif idx not in available_indices:
+                available_indices.append(idx)
+        instrument_pnl = _booked_index_pnl(d)
+        for idx, amount in instrument_pnl.items():
+            if idx == "OTHER":
+                if abs(_num(amount)) > 0.009:
+                    has_other = True
+            elif (
+                idx not in available_indices
+                and (idx not in HEATMAP_INDICES or abs(_num(amount)) > 0.009)
+            ):
+                available_indices.append(idx)
+
         legs = _booked_legs(d)
         if want:
             legs = [leg for leg in legs if _leg_matches_index(leg, want)]
@@ -695,8 +755,9 @@ def period_stats(
                 for leg in legs
             ), 2)
             if not legs:
-                ip = _booked_index_pnl(d)
-                day_booked = round(_num(ip.get(want if want != "OTHER" else "OTHER")), 2)
+                day_booked = round(_num(instrument_pnl.get(want)), 2)
+                if want in instrument_pnl:
+                    instrument_counts_available = False
         else:
             day_booked = round(day_pnl(d), 2)
         if (
@@ -733,6 +794,10 @@ def period_stats(
 
     trade_n = wins + losses
     win_rate = round(100.0 * wins / trade_n, 2) if trade_n else 0.0
+    if want and not instrument_counts_available:
+        wins = None
+        losses = None
+        win_rate = None
     day_win_rate = round(100.0 * win_days / traded_days, 2) if traded_days else 0.0
     booked = round(booked, 2)
     charges = round(charges, 2)
@@ -750,17 +815,16 @@ def period_stats(
         "win_trades": wins,
         "loss_trades": losses,
         "win_rate": win_rate,
+        "trade_counts_available": instrument_counts_available,
         "win_days": win_days,
         "lose_days": lose_days,
         "day_win_rate": day_win_rate,
         "trading_days": traded_days,
         "by_index": by_index,
+        "indices": available_indices + (["OTHER"] if has_other else []),
     }
-    apply_period_equity(
-        out,
-        rows,
-        out["booked_after_charges"] if out["booked_after_charges"] is not None else booked,
-    )
+    if not want:
+        apply_period_equity(out, rows, out["booked_after_charges"])
     return out
 
 
@@ -946,20 +1010,21 @@ def _leg_index_label(leg: Dict[str, Any]) -> str:
     if raw and raw not in ("OTHER", "UNKNOWN"):
         return raw
     ts = str(leg.get("tradingsymbol") or leg.get("display_name") or "").strip()
-    prefix = match_symbol_prefix(ts)
-    if prefix:
-        return prefix
+    symbol_label = _symbol_instrument_label(ts)
+    if symbol_label:
+        return symbol_label
     return raw or "OTHER"
 
 
 def _heatmap_index(leg: Dict[str, Any]) -> str:
-    """Named heatmap rows (desk + MCX majors); FINNIFTY/stocks stay OTHER."""
-    raw = str(leg.get("index") or "").strip().upper()
-    if raw in HEATMAP_INDICES:
-        return raw
-    ts = str(leg.get("tradingsymbol") or leg.get("display_name") or "").strip()
+    """Keep booked P&L attributed to its broker instrument, including stocks."""
+    return _leg_index_label(leg)
+
+
+def _symbol_instrument_label(tradingsymbol: str) -> Optional[str]:
+    ts = re.sub(r"\s+", "", str(tradingsymbol or "").upper())
     prefix = match_symbol_prefix(ts)
-    if prefix in HEATMAP_INDICES:
+    if prefix:
         return prefix
     try:
         from fno_symbol import parse_fno_option_symbol
@@ -967,25 +1032,24 @@ def _heatmap_index(leg: Dict[str, Any]) -> str:
     except Exception:
         parsed = None
     if parsed:
-        idx = str(parsed.get("index") or "").upper()
-        if idx in HEATMAP_INDICES:
+        idx = str(parsed.get("index") or "").strip().upper()
+        if idx:
             return idx
-    compact = ts.upper().replace(" ", "")
-    for name in sorted(HEATMAP_INDICES, key=len, reverse=True):
-        if compact.startswith(name):
-            return name
-    return "OTHER"
+    stock_option = re.match(r"^(.+?)(\d{2}[A-Z]{3}\d{2,6})(CE|PE)$", ts)
+    return stock_option.group(1) if stock_option else None
 
 
 def _fold_heatmap_pnl(ip: Dict[str, float]) -> Dict[str, float]:
-    """Named heatmap buckets plus OTHER for FINNIFTY, stocks, minis, etc."""
+    """Preserve broker instrument labels and reserve OTHER for unidentifiable rows."""
     out = {k: 0.0 for k in HEATMAP_INDICES}
     other = 0.0
     for k, v in (ip or {}).items():
         key = str(k).upper()
         amt = _num(v)
-        if key in HEATMAP_INDICES:
-            out[key] = round(out[key] + amt, 2)
+        if key == "OTHER":
+            other += amt
+        elif key and key != "UNKNOWN":
+            out[key] = round(out.get(key, 0.0) + amt, 2)
         else:
             other += amt
     out["OTHER"] = round(other, 2)

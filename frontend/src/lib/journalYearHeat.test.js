@@ -26,8 +26,9 @@ assert.equal(heatmapIndexFromLeg({ tradingsymbol: "SENSEX26AUG76800CE" }), "SENS
 assert.equal(heatmapIndexFromLeg({ tradingsymbol: "BANKNIFTY26AUG52000PE" }), "BANKNIFTY");
 assert.equal(heatmapIndexFromLeg({ index: "NIFTY", tradingsymbol: "BANKNIFTY26AUG52000PE" }), "NIFTY");
 assert.equal(heatmapIndexFromLeg({ tradingsymbol: "GOLD26AUG76000CE" }), "GOLD");
-assert.equal(heatmapIndexFromLeg({ tradingsymbol: "FINNIFTY26AUG25000CE" }), "OTHER");
-assert.equal(heatmapIndexFromLeg({ tradingsymbol: "RELIANCE26AUG1400CE" }), "OTHER");
+assert.equal(heatmapIndexFromLeg({ tradingsymbol: "FINNIFTY26AUG25000CE" }), "FINNIFTY");
+assert.equal(heatmapIndexFromLeg({ tradingsymbol: "RELIANCE26AUG1400CE" }), "RELIANCE");
+assert.equal(heatmapIndexFromLeg({ tradingsymbol: "TATAMOTORS26OCT700CE" }), "TATAMOTORS");
 
 const sensexDay = {
   year: 2026,
@@ -50,5 +51,32 @@ const heat2 = overlayMonthOnYearHeat(yearHeat, sensexDay, 2026, 8);
 assert.equal(heat2.by_index.NIFTY[7], 2100);
 assert.equal(heat2.by_index.SENSEX[7], 21000);
 assert.equal(heat2.month_nets[7], 23100);
+
+const stockDay = {
+  year: 2026,
+  month: 8,
+  days: [{
+    date: "2026-08-14",
+    booked_pnl: 500,
+    exited_count: 1,
+    legs: [{
+      index: "OTHER",
+      tradingsymbol: "TATAMOTORS26OCT700CE",
+      exited: true,
+      realised: 500,
+    }],
+  }],
+};
+const heat3 = overlayMonthOnYearHeat({
+  year: 2026,
+  indices: ["NIFTY"],
+  by_index: { NIFTY: Array(12).fill(0) },
+  month_nets: Array(12).fill(0),
+  other: Array(12).fill(0),
+  months: Array.from({ length: 12 }, (_, i) => ({ month: i + 1 })),
+}, stockDay, 2026, 8);
+assert.deepEqual(heat3.indices, ["NIFTY", "TATAMOTORS"]);
+assert.equal(heat3.by_index.TATAMOTORS[7], 500);
+assert.equal(heat3.other[7], 0);
 
 console.log("journalYearHeat.test.js: ok");
