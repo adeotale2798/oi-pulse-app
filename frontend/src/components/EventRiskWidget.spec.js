@@ -1,6 +1,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@/lib/api";
+import { clearIndexEventsCache } from "@/lib/indexEventsApi";
 import EventRiskWidget from "./EventRiskWidget";
 
 jest.mock("@/lib/api", () => ({
@@ -22,6 +23,7 @@ describe("EventRiskWidget weight colors", () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     localStorage.removeItem("oi_event_risk_dismissed");
+    clearIndexEventsCache();
     api.get.mockResolvedValue({ data: { events: bandEvents } });
     container = document.createElement("div");
     document.body.appendChild(container);

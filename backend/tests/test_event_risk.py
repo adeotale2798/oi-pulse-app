@@ -179,6 +179,69 @@ def test_join_contained_company_name():
     assert rows[0]["symbol"] == "HINDUNILVR"
 
 
+def test_indexed_fuzzy_matching_keeps_long_name_and_symbol_matches():
+    constituents = [
+        _c("TCS", "Tata Consultancy Services Limited", 4.0),
+        _c("TATAMOTORS", "Tata Motors Limited", 3.0),
+    ]
+    events = [
+        _e("name", "", "Consultancy Services", "Dividend", "2026-09-01"),
+        _e("symbol", "TATAMOTORSX", "Unrelated Company Name", "AGM", "2026-09-02"),
+    ]
+
+    rows = build_index_event_dataset(constituents, events, "NIFTY")
+
+    assert {row["id"]: row["symbol"] for row in rows} == {
+        "name": "TCS",
+        "symbol": "TATAMOTORS",
+    }
+
+
+def test_fetch_events_for_index_reads_projected_data_concurrently():
+    import asyncio
+    import event_risk_service as ers
+
+    constituent = _c("HDFCBANK", "HDFC Bank Limited", 12.5)
+    event = _e("1", "HDFCBANK", "HDFC Bank Limited", "Quarterly Results", "2026-12-01")
+    event["purpose_raw"] = "Financial Results"
+    event["details"] = ""
+    active_reads = 0
+    max_active_reads = 0
+    find_calls = []
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self, length):
+            nonlocal active_reads, max_active_reads
+            active_reads += 1
+            max_active_reads = max(max_active_reads, active_reads)
+            await asyncio.sleep(0)
+            active_reads -= 1
+            return self.rows[:length]
+
+    class Collection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def find(self, query, projection):
+            find_calls.append((query, projection))
+            return Cursor(self.rows)
+
+    class Database:
+        index_constituents = Collection([constituent])
+        nse_events = Collection([event])
+
+    joined, coverage = asyncio.run(ers.fetch_events_for_index(Database(), "NIFTY"))
+
+    assert joined[0]["symbol"] == "HDFCBANK"
+    assert coverage["matched_rows"] == 1
+    assert max_active_reads == 2
+    assert find_calls[0][1]["normalized_name"] == 1
+    assert find_calls[1][1]["event_date"] == 1
+
+
 def test_join_does_not_glue_hdfc_to_hdfcbank():
     constituents = [_c("HDFCBANK", "HDFC Bank Limited", 12.0)]
     events = [_e("1", "HDFC", "Housing Development Finance Corporation", "AGM", "2026-09-01")]

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { fetchIndexEvents } from "@/lib/indexEventsApi";
 import { Calendar, AlertTriangle, TrendingUp, Users, Building2, Clock, ChevronDown, ChevronUp, X } from "lucide-react";
 import {
   eventDisplayName,
@@ -126,11 +126,11 @@ export default function EventRiskWidget({
     if (!activeIndex) return;
     let cancelled = false;
     setLoading(true); setErr(null);
-    api.get(`/events/${activeIndex}`)
-      .then((r) => {
+    fetchIndexEvents(activeIndex, { includeJoin: isAdmin, force: refreshKey > 0 })
+      .then((data) => {
         if (cancelled) return;
-        setEvents(r.data?.events || []);
-        setJoinInfo(r.data?.join || null);
+        setEvents(data.events || []);
+        setJoinInfo(data.join || null);
       })
       .catch((e) => { if (!cancelled) setErr(e?.response?.data?.detail || e.message || "Failed to load events"); })
       .finally(() => { if (!cancelled) setLoading(false); });

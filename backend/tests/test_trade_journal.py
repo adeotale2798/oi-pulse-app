@@ -722,8 +722,7 @@ def test_year_heatmap_infers_index_from_symbol():
     assert h["other"][7] == 0
 
 
-def test_snapshot_and_heatmap_others_for_non_desk():
-    """Enabled MCX majors get their own heatmap row; FINNIFTY/stocks stay Others."""
+def test_snapshot_and_heatmap_keep_individual_non_desk_instruments():
     snap = snapshot_from_positions(
         {
             "exited_count": 3,
@@ -760,13 +759,43 @@ def test_snapshot_and_heatmap_others_for_non_desk():
     )
     assert snap["legs"][0]["index"] == "GOLD"
     assert snap["booked_index_pnl"]["GOLD"] == 400
-    assert snap["booked_index_pnl"]["OTHER"] == 500
+    assert snap["booked_index_pnl"]["FINNIFTY"] == 300
+    assert snap["booked_index_pnl"]["RELIANCE"] == 200
+    assert snap["booked_index_pnl"]["OTHER"] == 0
     assert snap["booked_index_pnl"].get("NIFTY", 0) == 0
     h = year_heatmap([snap], 2026)
     assert h["by_index"]["GOLD"][7] == 400
-    assert h["other"][7] == 500
+    assert h["by_index"]["FINNIFTY"][7] == 300
+    assert h["by_index"]["RELIANCE"][7] == 200
+    assert h["other"][7] == 0
     assert h["by_index"]["NIFTY"][7] == 0
     assert h["month_nets"][7] == 900
+
+
+def test_year_heatmap_includes_enabled_and_traded_instruments_only():
+    days = [
+        {
+            "date": "2026-08-13",
+            "booked_pnl": 750,
+            "exited_count": 2,
+            "legs": [
+                {"index": "GOLD", "exited": True, "realised": 250},
+                {
+                    "index": "OTHER",
+                    "tradingsymbol": "TATAMOTORS26OCT700CE",
+                    "exited": True,
+                    "realised": 500,
+                },
+            ],
+        },
+    ]
+
+    heat = year_heatmap(days, 2026, enabled_indices=["NIFTY", "GOLD"])
+
+    assert heat["indices"] == ["NIFTY", "GOLD", "TATAMOTORS"]
+    assert heat["by_index"]["GOLD"][7] == 250
+    assert heat["by_index"]["TATAMOTORS"][7] == 500
+    assert heat["other"][7] == 0
 
 
 def test_snapshot_fills_index_from_tradingsymbol():
@@ -1059,6 +1088,55 @@ def test_period_stats_from_to_and_index_filter():
     assert nifty["booked_after_charges"] is None
 
 
+def test_period_stats_attributes_stock_pnl_and_does_not_claim_instrument_net_after_charges():
+    days = [
+        {
+            "date": "2026-08-17",
+            "booked_pnl": 350,
+            "exited_count": 2,
+            "charges_total": 40,
+            "brokerage": 10,
+            "legs": [
+                {"index": "GOLD", "exited": True, "realised": 100},
+                {
+                    "index": "OTHER",
+                    "tradingsymbol": "TATAMOTORS26OCT700CE",
+                    "exited": True,
+                    "realised": 250,
+                },
+            ],
+        },
+        {
+            "date": "2026-08-16",
+            "booked_pnl": 999,
+            "exited_count": 1,
+            "legs": [{
+                "index": "OTHER",
+                "tradingsymbol": "RELIANCE26OCT1400CE",
+                "exited": True,
+                "realised": 999,
+            }],
+        },
+    ]
+
+    result = period_stats(
+        days,
+        start="2026-08-17",
+        end="2026-08-17",
+        index="TATAMOTORS",
+        enabled_indices=["NIFTY", "GOLD"],
+    )
+
+    assert result["indices"] == ["NIFTY", "GOLD", "TATAMOTORS"]
+    assert result["booked_pnl"] == 250
+    assert result["win_trades"] == 1
+    assert result["loss_trades"] == 0
+    assert result["charges_total"] == 40
+    assert result["brokerage"] == 10
+    assert result["booked_after_charges"] is None
+    assert result.get("booked_pct") is None
+
+
 def test_period_stats_uses_member_aggregate_trade_counts_without_legs():
     result = period_stats(
         [{
@@ -1080,6 +1158,28 @@ def test_period_stats_uses_member_aggregate_trade_counts_without_legs():
     assert result["loss_trades"] == 1
     assert result["win_rate"] == 50
     assert result["day_win_rate"] == 100
+
+
+def test_period_stats_marks_instrument_trade_counts_unavailable_without_legs():
+    result = period_stats(
+        [{
+            "date": "2026-08-17",
+            "booked_pnl": 100,
+            "exited_count": 1,
+            "booked_index_pnl": {"TATAMOTORS": 100},
+        }],
+        start="2026-08-17",
+        end="2026-08-17",
+        index="TATAMOTORS",
+        enabled_indices=["NIFTY"],
+    )
+
+    assert result["indices"] == ["NIFTY", "TATAMOTORS"]
+    assert result["booked_pnl"] == 100
+    assert result["trade_counts_available"] is False
+    assert result["win_trades"] is None
+    assert result["loss_trades"] is None
+    assert result["win_rate"] is None
 
 
 def test_mongo_upsert_ops_no_path_conflict_when_locking():

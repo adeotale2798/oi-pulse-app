@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, TrendingUp, ChevronDown } from "lucide-react";
-import { api } from "@/lib/api";
+import { fetchIndexEvents } from "@/lib/indexEventsApi";
 import usePortaledMenu from "@/hooks/usePortaledMenu";
 import {
   upcomingIndexEvents,
@@ -29,7 +29,7 @@ const INDEX_LABEL = {
 
 const MENU_WIDTH = 288;
 
-export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open, onOpenChange }) {
+export default function MarketImpactBadge({ activeIndex, isAdmin = false, onOpenIndexEvents, open, onOpenChange }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
@@ -52,10 +52,9 @@ export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open
     setEvents([]);
     setLoading(true);
     setUnavailable(false);
-    api
-      .get(`/events/${activeIndex}`, { timeout: 8000 })
-      .then((r) => {
-        if (!cancelled) setEvents(r.data.events || []);
+    fetchIndexEvents(activeIndex, { includeJoin: isAdmin })
+      .then((data) => {
+        if (!cancelled) setEvents(data.events || []);
       })
       .catch(() => {
         if (!cancelled) {
@@ -70,7 +69,7 @@ export default function MarketImpactBadge({ activeIndex, onOpenIndexEvents, open
     return () => {
       cancelled = true;
     };
-  }, [activeIndex]);
+  }, [activeIndex, isAdmin]);
 
   const upcoming = useMemo(() => upcomingIndexEvents(events), [events]);
   const pastOnly = events.length > 0 && upcoming.length === 0;

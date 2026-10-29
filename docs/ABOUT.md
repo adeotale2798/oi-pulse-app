@@ -234,7 +234,7 @@ turns it back on.
 | GET | `/holidays` | Holiday rows; upload-origin metadata is Admin-only |
 | POST | `/admin/upload/reuse/{upload_type}` | Admin confirms that one existing data category remains current; stored rows are unchanged |
 | GET | `/upload/meta` | Admin-only upload timestamps and freshness advisories (Nifty / Bank / Sensex / events / holidays) |
-| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps); source filenames and join-coverage diagnostics are Admin-only |
+| GET | `/events/{index}` / `/constituents/{index}` | Stored event/constituent data (+ upload timestamps); source filenames and join-coverage diagnostics are Admin-only. Index Impact and Index Risk share brief role-separated frontend request caching. |
 
 ### Auth
 `/auth/login`, `/auth/remember-login`, `/auth/logout`, `/auth/change-password`, `/auth/guest`, `/auth/state`, `/auth/public-access`, `/auth/guests*`, `/auth/access-requests*`, `/auth/blocked-ips*`, `/auth/access-request/{id}`.

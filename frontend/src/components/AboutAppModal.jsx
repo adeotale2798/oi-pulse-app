@@ -11,23 +11,34 @@ export default function AboutAppModal() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener(ABOUT_EVENT, onOpen);
-    return () => window.removeEventListener(ABOUT_EVENT, onOpen);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return undefined;
     let cancelled = false;
-    api.get("/auth/state")
-      .then((r) => {
-        if (!cancelled) setIsAdmin(!!r.data?.is_admin);
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false);
-      });
-    return () => { cancelled = true; };
-  }, [open]);
+    let checkingAdmin = false;
+    // Keep release details closed unless the server confirms the Admin session.
+    const onOpen = async () => {
+      if (checkingAdmin) return;
+      checkingAdmin = true;
+      try {
+        const response = await api.get("/auth/state");
+        const admin = response.data?.is_admin === true;
+        if (!cancelled) {
+          setIsAdmin(admin);
+          setOpen(admin);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false);
+          setOpen(false);
+        }
+      } finally {
+        checkingAdmin = false;
+      }
+    };
+    window.addEventListener(ABOUT_EVENT, onOpen);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(ABOUT_EVENT, onOpen);
+    };
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

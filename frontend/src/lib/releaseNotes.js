@@ -1,8 +1,31 @@
 /**
- * In-app version notes. Guests see `user` only (what changed on the desk).
- * Admins also see `admin` (ops, APIs, storage). Keep in lockstep with CHANGELOG.md.
+ * Admin-only in-app version notes. `user` describes desk changes; `admin`
+ * describes ops, APIs, and storage. Keep in lockstep with CHANGELOG.md.
  */
 export const RELEASE_NOTES = [
+  {
+    version: "20.81",
+    date: "2026-10-29",
+    user: [
+      "The Admin Journal now shows enabled underlyings and instruments traded in the selected period, with booked P&L attributed to each broker symbol.",
+      "Instrument percentages are no longer presented as after-charges when broker charges apply to the whole book.",
+      "Index Impact and Index Risk share event loads and show results as soon as the event and constituent data are available.",
+    ],
+    admin: [
+      "Index Impact now fetches event rows, constituents, upload metadata, and auth state concurrently; fuzzy matching uses indexed candidates while preserving match order.",
+      "Event responses are briefly cached separately for Admin diagnostics and public event data.",
+    ],
+  },
+  {
+    version: "20.80",
+    date: "2026-10-29",
+    user: [
+      "The version number remains visible to everyone; the About and release-details panel is now Admin-only.",
+    ],
+    admin: [
+      "Release details require a server-confirmed Admin session; failed or unavailable auth checks keep the panel closed.",
+    ],
+  },
   {
     version: "20.37",
     date: "2026-10-15",
