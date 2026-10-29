@@ -6698,7 +6698,7 @@ async def _journal_year_payload(y: int) -> Dict[str, Any]:
     return {
         "year": y,
         "today": journal.ist_ymd(),
-        "heatmap": journal.year_heatmap(days, y),
+        "heatmap": journal.year_heatmap(days, y, enabled_indices=_journal_enabled_indices()),
         "stats": journal.month_stats(days),
     }
 
@@ -6730,13 +6730,20 @@ async def journal_period(
     days = [journal.public_day(d, include_images=False) for d in docs]
     days = [d for d in days if d]
     want = (index or "").strip().upper() or None
+    stats = journal.period_stats(
+        days,
+        start=start,
+        end=end,
+        index=want,
+        enabled_indices=_journal_enabled_indices(),
+    )
     return {
         "from": start,
         "to": end,
         "index": want or "ALL",
         "today": journal.ist_ymd(),
-        "stats": journal.period_stats(days, start=start, end=end, index=want),
-        "indices": list(journal.HEATMAP_INDICES),
+        "stats": stats,
+        "indices": stats["indices"],
     }
 
 
@@ -7764,13 +7771,15 @@ async def get_index_events(index: str, request: Request):
     idx_code = _ACTIVE_INDEX_ALIASES.get(key)
     if not idx_code:
         raise HTTPException(400, f"Unknown index '{index}'")
-    events, coverage = await ers.fetch_events_for_index(db, idx_code)
-    meta = await ers.fetch_upload_meta(db)
+    (events, coverage), meta, is_admin = await asyncio.gather(
+        ers.fetch_events_for_index(db, idx_code),
+        ers.fetch_upload_meta(db),
+        _is_admin_request(request),
+    )
     events_meta = meta.get("events") or {}
     idx_key = {"NIFTY": "nifty50", "BANKNIFTY": "banknifty", "SENSEX": "sensex"}.get(idx_code)
     constituents_meta = meta.get(idx_key) or {} if idx_key else {}
     # Coverage diagnostics can identify unmatched names, so expose them only to Admin.
-    is_admin = await _is_admin_request(request)
     return {
         "index": idx_code,
         "count": len(events),

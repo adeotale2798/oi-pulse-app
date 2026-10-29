@@ -35,7 +35,7 @@ import {
 import { toast } from "sonner";
 import { holidayCellLabel, holidayShortName, isHoliday, isJournalSessionDayIST, isSpecialSessionIST, nextTradingDayIST, previousTradingDayIST } from "@/lib/holidays";
 import { overlayMonthOnYearHeat } from "@/lib/journalYearHeat";
-import { HEATMAP_IDS, INDEX_SHORT, DESK_IDS } from "@/lib/universe";
+import { HEATMAP_IDS, INDEX_SHORT } from "@/lib/universe";
 import { journalSavePayload, resolveJournalSaveDoc } from "@/lib/journalSave";
 import { compactPnl, exactPnl, fmtInr } from "@/lib/journalMoney";
 import { bookedPct, fmtBookedPct, madeAfterCharges, weekEquity } from "@/lib/journalPct";
@@ -767,7 +767,11 @@ export default function TradeJournalModal({
   }, [yearData, heat]);
   const focused = !!(selected && dayDoc && tab === "calendar");
   const periodStats = periodData?.stats || {};
-  const periodChips = memberMode ? ["ALL"] : ["ALL", ...DESK_IDS];
+  const periodChips = memberMode ? ["ALL"] : ["ALL", ...(periodData?.indices || [])];
+  useEffect(() => {
+    if (memberMode || periodIndex === "ALL" || !Array.isArray(periodData?.indices)) return;
+    if (!periodData.indices.includes(periodIndex)) setPeriodIndex("ALL");
+  }, [memberMode, periodData, periodIndex]);
   const selectedArchiveDay = archiveView ? localArchive?.byDate?.[selected] : null;
   // Uploaded cycle records remain in this tab's React state and never enter journal APIs.
   const importArchive = (archive) => {
@@ -977,7 +981,7 @@ export default function TradeJournalModal({
                         periodIndex === id ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-slate-600 border-slate-200"
                       }`}
                     >
-                      {id === "ALL" ? "All indices" : (INDEX_SHORT[id] || id)}
+                      {id === "ALL" ? "All instruments" : (INDEX_SHORT[id] || id)}
                     </button>
                   ))}
                 </div>
@@ -1000,7 +1004,11 @@ export default function TradeJournalModal({
                       {privacy ? "··" : fmtBookedPct(periodStats.booked_pct, { signed: true })}{memberMode ? " of wallet · charges excluded" : " of wallet after charges"}
                     </div>
                   ) : (
-                    <div className="text-[10px] text-slate-400 mt-0.5">% after we store a wallet snapshot</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      {periodStats.charges_are_all_indices
+                        ? "Instrument % after charges unavailable: charges apply to the whole book"
+                        : "% after we store a wallet snapshot"}
+                    </div>
                   )}
                 </div>
                 <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
@@ -1015,10 +1023,12 @@ export default function TradeJournalModal({
                 <div className="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-2">
                   <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Win %</div>
                   <div className="text-[15px] sm:text-lg font-bold font-mono-data text-slate-900 leading-tight">
-                    {Number(periodStats.win_rate || 0).toFixed(2)}%
+                    {periodStats.trade_counts_available === false ? "—" : `${Number(periodStats.win_rate || 0).toFixed(2)}%`}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {periodStats.win_trades || 0} wins · {periodStats.loss_trades || 0} losses
+                    {periodStats.trade_counts_available === false
+                      ? "Trade counts unavailable for aggregate-only records"
+                      : `${periodStats.win_trades || 0} wins · ${periodStats.loss_trades || 0} losses`}
                   </div>
                 </div>
                 <div className="rounded-xl border border-violet-100 bg-violet-50/50 px-3 py-2">
@@ -1027,7 +1037,11 @@ export default function TradeJournalModal({
                     {memberMode ? (periodStats.trading_days || 0) : privacy ? "••••" : (periodStats.booked_after_charges == null ? "—" : <Money v={periodStats.booked_after_charges} />)}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    {memberMode ? "Charges excluded from P&L" : `${periodStats.trading_days || 0} booked days`}
+                    {memberMode
+                      ? "Charges excluded from P&L"
+                      : periodStats.charges_are_all_indices
+                        ? "Whole-book charges cannot be allocated by instrument"
+                        : `${periodStats.trading_days || 0} booked days`}
                   </div>
                 </div>
               </div>
@@ -1499,7 +1513,7 @@ export default function TradeJournalModal({
                 <table className="w-full text-[11px] min-w-[40rem]">
                   <thead>
                     <tr className="text-slate-600 bg-slate-50">
-                      <th className="text-left p-2 font-medium">Index</th>
+                      <th className="text-left p-2 font-medium">Index / instrument</th>
                       {MONTH_SHORT.map((m, i) => (
                         <th key={m} className="p-2 font-medium">
                           <button
@@ -1525,14 +1539,16 @@ export default function TradeJournalModal({
                         ))}
                       </tr>
                     ))}
-                    <tr data-testid="journal-heatmap-others">
-                      <td className="p-2 font-semibold text-slate-500">Others</td>
-                      {(heat.other || Array(12).fill(0)).map((v, i) => (
-                        <td key={i} className={`p-1.5 text-center font-mono-data font-semibold ${heatCell(v, heatMax)}`}>
-                          {Math.abs(Number(v) || 0) < 0.01 ? "—" : (privacy ? "••••" : exactPnl(v))}
-                        </td>
-                      ))}
-                    </tr>
+                    {(heat.other || []).some((v) => Math.abs(Number(v) || 0) >= 0.01) ? (
+                      <tr data-testid="journal-heatmap-others">
+                        <td className="p-2 font-semibold text-slate-500">Others</td>
+                        {(heat.other || Array(12).fill(0)).map((v, i) => (
+                          <td key={i} className={`p-1.5 text-center font-mono-data font-semibold ${heatCell(v, heatMax)}`}>
+                            {Math.abs(Number(v) || 0) < 0.01 ? "—" : (privacy ? "••••" : exactPnl(v))}
+                          </td>
+                        ))}
+                      </tr>
+                    ) : null}
                     <tr className="border-t border-slate-100">
                       <td className="p-2 font-semibold">Month</td>
                       {(heat?.month_nets || Array(12).fill(0)).map((v, i) => (

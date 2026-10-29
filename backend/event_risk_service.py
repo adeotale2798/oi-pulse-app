@@ -15,8 +15,9 @@ Everything here is pure logic + Mongo I/O. HTTP glue lives in server.py.
 
 from __future__ import annotations
 
-import io
+import asyncio
 import calendar
+import io
 import re
 import uuid
 from datetime import datetime, timezone, date, timedelta
@@ -556,11 +557,18 @@ def _names_close(a: str, b: str) -> bool:
     return False
 
 
+def _ngrams(value: str, size: int):
+    return (value[start : start + size] for start in range(max(0, len(value) - size + 1)))
+
+
 def match_event_constituent(
     ev: Dict[str, Any],
     constituents: List[Dict[str, Any]],
     by_symbol: Dict[str, Dict[str, Any]],
     by_name: Dict[str, Dict[str, Any]],
+    *,
+    name_ngrams: Optional[Dict[str, List[int]]] = None,
+    symbol_prefixes: Optional[Dict[str, List[int]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Join an NSE calendar row to an index constituent (symbol, then name, then close)."""
     sym = ev.get("symbol") or ""
@@ -570,11 +578,25 @@ def match_event_constituent(
     if name and name in by_name:
         return by_name[name]
     if name:
-        for c in constituents:
+        if name_ngrams is None:
+            name_candidates = enumerate(constituents)
+        else:
+            indexes = {
+                index
+                for gram in _ngrams(name, 8)
+                for index in name_ngrams.get(gram, [])
+            }
+            name_candidates = ((index, constituents[index]) for index in sorted(indexes))
+        for _, c in name_candidates:
             if _names_close(name, c.get("normalized_name") or ""):
                 return c
     if sym:
-        for c in constituents:
+        if symbol_prefixes is None or len(sym) < 8:
+            symbol_candidates = enumerate(constituents)
+        else:
+            indexes = symbol_prefixes.get(sym[:8], [])
+            symbol_candidates = ((index, constituents[index]) for index in indexes)
+        for _, c in symbol_candidates:
             if _symbols_close(sym, c.get("symbol") or ""):
                 return c
     return None
@@ -589,6 +611,15 @@ def join_coverage(
     matched_ids = {r.get("id") for r in joined}
     matched_syms = {r.get("symbol") for r in joined if r.get("symbol")}
     near: List[Dict[str, Any]] = []
+    symbol_prefixes: Dict[str, List[int]] = {}
+    name_prefixes: Dict[str, List[int]] = {}
+    for index, c in enumerate(constituents):
+        symbol = c.get("symbol") or ""
+        name = c.get("normalized_name") or ""
+        if len(symbol) >= 4:
+            symbol_prefixes.setdefault(symbol[:4], []).append(index)
+        if len(name) >= 8:
+            name_prefixes.setdefault(name[:8], []).append(index)
     for ev in events:
         if ev.get("id") in matched_ids:
             continue
@@ -597,7 +628,11 @@ def join_coverage(
         es = ev.get("symbol") or ""
         en = ev.get("normalized_name") or ""
         hint = None
-        for c in constituents:
+        candidates = set(symbol_prefixes.get(es[:4], [])) if len(es) >= 4 else set()
+        if len(en) >= 8:
+            candidates.update(name_prefixes.get(en[:8], []))
+        for index in sorted(candidates):
+            c = constituents[index]
             cs = c.get("symbol") or ""
             cn = c.get("normalized_name") or ""
             if es and cs and es[:4] == cs[:4] and len(es) >= 4 and len(cs) >= 4:
@@ -629,12 +664,29 @@ def build_index_event_dataset(
     """
     by_symbol = {c["symbol"]: c for c in constituents if c.get("symbol")}
     by_name = {c["normalized_name"]: c for c in constituents if c.get("normalized_name")}
+    name_ngrams: Dict[str, List[int]] = {}
+    symbol_prefixes: Dict[str, List[int]] = {}
+    for index, c in enumerate(constituents):
+        normalized_name = c.get("normalized_name") or ""
+        if len(normalized_name) >= 10:
+            for gram in set(_ngrams(normalized_name, 8)):
+                name_ngrams.setdefault(gram, []).append(index)
+        symbol = c.get("symbol") or ""
+        if len(symbol) >= 8:
+            symbol_prefixes.setdefault(symbol[:8], []).append(index)
 
     today = now_ist().date()
     out: List[Dict[str, Any]] = []
 
     for ev in events:
-        match = match_event_constituent(ev, constituents, by_symbol, by_name)
+        match = match_event_constituent(
+            ev,
+            constituents,
+            by_symbol,
+            by_name,
+            name_ngrams=name_ngrams,
+            symbol_prefixes=symbol_prefixes,
+        )
 
         if not match:
             continue
@@ -778,8 +830,12 @@ async def fetch_upload_meta(db) -> Dict[str, Any]:
     }
     now = datetime.now(timezone.utc)
     out: Dict[str, Any] = {}
-    for key, (doc_id, stale_after) in keys.items():
-        meta = await db.settings.find_one({"_id": doc_id}) or {}
+    rows = await asyncio.gather(*(
+        db.settings.find_one({"_id": doc_id})
+        for doc_id, _ in keys.values()
+    ))
+    for (key, (_, stale_after)), result in zip(keys.items(), rows):
+        meta = result or {}
         uploaded_at = meta.get("uploaded_at")
         confirmed_at = meta.get("confirmed_at")
         freshness_at = confirmed_at or uploaded_at
@@ -809,9 +865,35 @@ async def fetch_upload_meta(db) -> Dict[str, Any]:
 
 
 async def fetch_events_for_index(db, index_code: str):
-    constituents = await db.index_constituents.find(
-        {"index": index_code}, {"_id": 0}
-    ).to_list(length=500)
-    events = await db.nse_events.find({}, {"_id": 0}).to_list(length=5000)
+    constituents_cursor = db.index_constituents.find(
+        {"index": index_code},
+        {
+            "_id": 0,
+            "symbol": 1,
+            "company_name": 1,
+            "normalized_name": 1,
+            "weightage": 1,
+            "industry": 1,
+            "isin": 1,
+        },
+    )
+    events_cursor = db.nse_events.find(
+        {},
+        {
+            "_id": 0,
+            "id": 1,
+            "symbol": 1,
+            "company_name": 1,
+            "normalized_name": 1,
+            "event_type": 1,
+            "purpose_raw": 1,
+            "details": 1,
+            "event_date": 1,
+        },
+    )
+    constituents, events = await asyncio.gather(
+        constituents_cursor.to_list(length=500),
+        events_cursor.to_list(length=5000),
+    )
     joined = build_index_event_dataset(constituents, events, index_code)
     return joined, join_coverage(constituents, events, joined)

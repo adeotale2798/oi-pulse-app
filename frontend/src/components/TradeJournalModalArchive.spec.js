@@ -284,6 +284,45 @@ describe("TradeJournalModal local archive calendar", () => {
     expect(container.querySelector('[data-testid="journal-refresh-status"]').textContent).toContain("Journal refreshed");
   });
 
+  it("shows enabled and period-traded instruments as journal filters", async () => {
+    fetchJournalPeriod
+      .mockResolvedValueOnce({
+        from: "2026-10-01",
+        to: "2026-10-29",
+        indices: ["NIFTY", "GOLD", "TATAMOTORS"],
+        stats: {
+          indices: ["NIFTY", "GOLD", "TATAMOTORS"],
+          trade_counts_available: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        from: "2026-10-01",
+        to: "2026-10-29",
+        indices: ["NIFTY", "GOLD", "TATAMOTORS"],
+        stats: {
+          indices: ["NIFTY", "GOLD", "TATAMOTORS"],
+          charges_are_all_indices: true,
+          booked_after_charges: null,
+          booked_pct: null,
+          trade_counts_available: false,
+        },
+      });
+
+    await act(async () => root.render(
+      <TradeJournalModal open onOpenChange={() => {}} />,
+    ));
+
+    expect(container.querySelector('[data-testid="journal-period-index-NIFTY"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="journal-period-index-GOLD"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="journal-period-index-TATAMOTORS"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="journal-period-index-BANKNIFTY"]')).toBeNull();
+
+    await act(async () => container.querySelector('[data-testid="journal-period-index-TATAMOTORS"]').click());
+    expect(container.textContent).toContain("Instrument % after charges unavailable");
+    expect(container.textContent).toContain("Whole-book charges cannot be allocated by instrument");
+    expect(container.textContent).toContain("Trade counts unavailable for aggregate-only records");
+  });
+
   it("manually syncs the broker book and charges before refreshing journal views", async () => {
     await act(async () => root.render(
       <TradeJournalModal open onOpenChange={() => {}} />,
