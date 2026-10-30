@@ -1,5 +1,11 @@
 # Changelog
 
+## V21.07 — 2026-10-30
+
+Bound the initial Admin Settings load to 10 seconds. If the request fails or
+times out, show a clear error with Retry and a dashboard link instead of leaving
+the page blank or loading indefinitely.
+
 ## V21.06 — 2026-10-30
 
 Restore sell-candidate analysis, the OI posture card, and conditional sell-side

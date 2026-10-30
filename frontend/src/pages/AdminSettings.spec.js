@@ -52,6 +52,7 @@ describe("Admin guest sign-in setting", () => {
       await Promise.resolve();
     });
 
+    expect(api.get).toHaveBeenCalledWith("/admin/platform/config", { timeout: 10000 });
     const guestToggle = container.querySelector('[aria-label="Allow guest sign-in"]');
     expect(guestToggle).not.toBeNull();
     expect(guestToggle.getAttribute("aria-pressed")).toBe("false");
@@ -185,5 +186,31 @@ describe("Admin guest sign-in setting", () => {
         }),
       }),
     }));
+  });
+
+  it("shows a clear load error and retries the configuration request", async () => {
+    api.get
+      .mockRejectedValueOnce({ code: "ECONNABORTED" })
+      .mockResolvedValueOnce({ data: { brokers: [] } });
+
+    await act(async () => {
+      root.render(<AdminSettings />);
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="admin-settings-load-error"]').textContent)
+      .toContain("took too long to load");
+    const retry = container.querySelector('[data-testid="admin-settings-retry"]');
+    expect(retry).not.toBeNull();
+    expect(container.querySelector('a[href="/dashboard"]').textContent).toContain("Return to dashboard");
+
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+    });
+
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="admin-settings-load-error"]')).toBeNull();
+    expect(container.textContent).toContain("Admin Settings");
   });
 });
