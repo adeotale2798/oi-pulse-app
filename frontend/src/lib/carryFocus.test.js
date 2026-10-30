@@ -27,21 +27,22 @@ assert.match(
 );
 
 const pe = writerBiasLine({ index: "NIFTY", bias: { bullish: true, pct: 40 } });
-assert.equal(pe.comfortable, "PE");
-assert.equal(pe.short, "Puts sit better");
-assert.match(pe.text, /put writers/i);
+assert.equal(pe.oiLeader, "PE");
+assert.equal(pe.short, "PE OI lead");
+assert.match(pe.text, /PE OI increased relative to CE OI/i);
 
 const ce = writerBiasLine({ index: "SENSEX", bias: { bullish: false, pct: 30 } });
-assert.equal(ce.comfortable, "CE");
-assert.equal(ce.short, "Calls sit better");
-assert.match(ce.text, /call writers/i);
+assert.equal(ce.oiLeader, "CE");
+assert.equal(ce.short, "CE OI lead");
+assert.match(ce.text, /CE OI increased relative to PE OI/i);
 
 const vix = vixCarryPoints(19.2);
 assert.equal(vix.pts, 18);
 
-const advice = sellerCarryAdvice({ band: "REDUCE", vix: 19, giftPct: -0.09, focusCount: 2 });
+const advice = sellerCarryAdvice({ band: "REDUCE", vix: 19, giftPct: -0.09, focusCount: 2, isAdmin: true });
 assert.match(advice, /session OI/);
-assert.match(sellerCarryAdvice({ band: "DO_NOT_CARRY" }), /unhedged premium/);
+assert.match(sellerCarryAdvice({ band: "DO_NOT_CARRY", isAdmin: true }), /unhedged premium/);
+assert.doesNotMatch(sellerCarryAdvice({ band: "DO_NOT_CARRY" }), /unhedged premium|sell|short/i);
 
 const book = summarizeBook([
   { index: "NIFTY", side: "CE", quantity: -75, exited: false },
@@ -63,9 +64,9 @@ const kase = carryCase({
 assert.ok(kase.whyNot.some((s) => /weekend/i.test(s) || /Friday/i.test(s)));
 assert.ok(kase.results.length >= 1);
 assert.ok(kase.why.length >= 1);
-assert.ok(kase.why.some((s) => /call writers dominating/i.test(s)));
-assert.ok(kase.why.some((s) => /aligned with session writers/i.test(s)), "4 CE vs 1 PE should align with call-writer tape");
-assert.ok(!kase.whyNot.some((s) => /supports PE shorts/i.test(s)));
+assert.ok(kase.why.some((s) => /CE OI increased relative to PE OI/i.test(s)));
+assert.ok(kase.why.some((s) => /current short mix is heavier in CE; session OI lead is CE/i.test(s)));
+assert.ok(!kase.why.some((s) => /sit better|sit with the tape/i.test(s)));
 
 const fight = carryCase({
   weekday: 2,
@@ -78,8 +79,8 @@ const fight = carryCase({
   ]),
 });
 assert.ok(
-  fight.whyNot.some((s) => /short more PE while call writers dominate/i.test(s)),
-  "more PE lots against a call-writer tape is a why-not",
+  fight.why.some((s) => /current short mix is heavier in PE; session OI lead is CE/i.test(s)),
+  "the panel reports book mix and OI leadership without recommending a side",
 );
 
 console.log("carryFocus.test.js ok");

@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 from desk_guide import maybe_guide
 import pytest
+from starlette.requests import Request
 
 
 def test_compact_strips_noise_and_caps_lists():
@@ -77,9 +78,7 @@ def test_compact_strips_noise_and_caps_lists():
     assert snap["memory"]["buckets"][0]["direction"] == "short"
     assert "cycle_id" not in str(snap["memory"])
     assert "owner_id" not in str(snap["memory"])
-    assert snap["sells"][0]["s"] == "NIFTY 24300 CE"
-    assert "token" not in snap["sells"][0]
-    assert "chain" not in snap["sells"][0]
+    assert "sells" not in snap
     assert "SECRET" not in str(snap["results"])
     assert snap["oi"][0]["idx"] == "NIFTY"
     assert "strikes" not in snap["oi"][0]
@@ -149,7 +148,7 @@ def test_rules_guide_uses_outside_tape_not_oi_dump():
         "outside": {
             "movers": [{
                 "symbol": "RELIANCE", "pct": -1.8, "weightage": 9.1, "index": "NIFTY",
-                "note": "9.1% wt dumping — index can slip the put wall; do not add PE shorts",
+                "note": "9.1% wt fell sharply — downside pressure; nearby support may be tested",
             }],
             "news": [{"title": "RBI holds rates, rupee slides"}],
         },
@@ -158,6 +157,7 @@ def test_rules_guide_uses_outside_tape_not_oi_dump():
     assert "RBI" in text
     assert "PCR 1.25" in text
     assert "WHAT CHANGED" in text or "TAPE" in text or "DO" in text
+    assert "do not add PE shorts" not in text.lower()
     assert "Why carry" not in text
 
 
@@ -188,6 +188,23 @@ def test_carry_desk_radar_guides_differ():
     assert carry != desk
     assert radar != desk
     assert compact_snapshot({"surface": "desk-panel"})["surface"] == "desk"
+
+
+@pytest.mark.parametrize("role", ["guest", "member"])
+def test_desk_guide_rejects_non_admin_trade_guidance(role):
+    from fastapi.testclient import TestClient
+    import server
+
+    async def non_admin_role(request: Request):
+        return role
+
+    server.app.dependency_overrides[server.require_desk_user] = non_admin_role
+    try:
+        response = TestClient(server.app).post("/api/desk-guide", json={})
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Trade guidance is available to Admin only"
+    finally:
+        server.app.dependency_overrides.pop(server.require_desk_user, None)
 
 
 def test_carry_outside_keeps_impact_only():
@@ -488,7 +505,9 @@ def test_desk_guide_uses_oi_journal_and_greeks():
     assert "BOOK" in text
     assert "JOURNAL" in text
     assert "DO" in text
-    assert "CE shorts" in text
+    assert "CE shorts" not in text
+    assert "prefer CE shorts" not in text
+    assert "prefer PE shorts" not in text
 
     halt = compose_rules_guide({
         "surface": "desk",
@@ -560,8 +579,10 @@ def test_named_hold_cut_and_sells_memory():
         "sells": [{"s": "NIFTY 24300 CE", "why": "IV Rank 72, fresh writing"}],
         "oi": [{"idx": "NIFTY", "ceChg": 1, "peChg": 9}],
     })
-    assert "Sell ideas (your ranker)" in desk
-    assert "IV Rank 72" in desk
+    assert "Sell ideas (your ranker)" not in desk
+    assert "IV Rank 72" not in desk
+    assert "prefer CE shorts" not in desk
+    assert "prefer PE shorts" not in desk
 
     radar = compose_rules_guide({
         "surface": "positions",

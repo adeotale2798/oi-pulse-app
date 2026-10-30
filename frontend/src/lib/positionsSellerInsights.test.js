@@ -18,6 +18,7 @@ const good = computeBookVerdict({
   pnl: 1200,
 });
 assert.equal(good.band, "GOOD", "flat + theta book is GOOD");
+assert.equal(good.headline, "Book risk profile looks balanced");
 
 const weak = computeBookVerdict({
   netDelta: 45,
@@ -29,7 +30,8 @@ const weak = computeBookVerdict({
   pnl: -800,
 });
 assert.equal(weak.band, "WEAK", "directional stressed book is WEAK");
-assert.ok(weak.bullets.some((b) => /bullish/i.test(b)), "positive delta is bullish");
+assert.ok(weak.bullets.some((b) => /positive directional exposure/i.test(b)), "positive delta is reported neutrally");
+assert.ok(!weak.bullets.some((b) => /sell more|new short|entry signal/i.test(b)));
 
 const bear = computeBookVerdict({
   netDelta: -88,
@@ -40,7 +42,7 @@ const bear = computeBookVerdict({
   itmShortCount: 0,
   pnl: 200,
 });
-assert.ok(bear.bullets.some((b) => /bearish/i.test(b)), "negative delta is bearish");
+assert.ok(bear.bullets.some((b) => /negative directional exposure/i.test(b)), "negative delta is reported neutrally");
 
 assert.equal(
   effectiveAdjustThreshold(60, { expiryDayMode: true, anyExpiryDay: true, nowMs: Date.parse("2026-08-10T08:00:00Z") }),

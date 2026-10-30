@@ -1,5 +1,5 @@
 # StrikLenz — About the Project
-StrikLenz is a live NSE Open Interest dashboard for **NIFTY**, **SENSEX**, and **BANKNIFTY**. It polls Zerodha Kite Connect, stores strike-level OI snapshots in MongoDB, and surfaces change charts, alerts, sell candidates, straddles, and session replay.
+StrikLenz is a live NSE Open Interest dashboard for **NIFTY**, **SENSEX**, and **BANKNIFTY**. It polls Zerodha Kite Connect, stores strike-level OI snapshots in MongoDB, and surfaces change charts, alerts, straddles, and session replay. Ranked sell candidates and conditional sell-side guidance are restricted to the authenticated Admin workspace; guests and paid members do not receive them.
 
 Product story (what / why / edge / config): **[README.md](../README.md)**. Versioning: **[VERSIONING.md](./VERSIONING.md)**. Optional desk LLM: **[AI.md](./AI.md)**. Click the logo or version label in the app for the same About panel.
 
@@ -14,7 +14,7 @@ Stack: **React (CRA/craco) + FastAPI + Motor/MongoDB + Kite Connect**.
 | **Admin** | `POST /api/auth/login` with username/password (`ADMIN_USERNAME` / `ADMIN_PASSWORD` in `backend/.env`) | `X-Admin-Token` (session TTL; optionally expires at market close) |
 | **Remember me** | `POST /api/auth/remember-login` with 24h IP-bound device token | Issues a fresh admin session |
 | **Guest** | Guest sign-in must be enabled in Admin Settings and Public access must be ON; full name required. If **Require approval** is ON (default), Access Control must approve every new access request. A lost/expired token requires a fresh request; an IP address or display name never restores access. If approval is OFF, a guest session is minted immediately | `X-Guest-Token` |
-| **Member** | Google OAuth; Basic, Premium, or Pro entitlement. Basic keeps the internal plan ID `normal` for compatibility. Member sessions are durable and do not depend on the guest Public switch | `X-Member-Token` (legacy browser clients send the same token as `X-Guest-Token`) |
+| **Member** | Google OAuth; Basic, Premium, or Pro entitlement. Basic keeps the internal plan ID `normal` for compatibility. The browser persists the session token, its 30-day expiry refreshes while active, and repeat sign-in with the same Google identity restores the same member record. Member access does not depend on the guest Public switch | `X-Member-Token` (legacy browser clients send the same token as `X-Guest-Token`) |
 | **Blocked IP** | Admin can block/unblock IPs; blocked clients cannot enter as guest | — |
 
 Auth state: `GET /api/auth/state` (public flag, guest sign-in and Google availability, admin/guest/member flags, member plan/features and plan availability, signup/provider availability, pending request count, and public walkthrough availability).
@@ -38,7 +38,14 @@ that the offer ID is present but cannot inspect the provider-side discount.
 The separate `/admin/subscriptions` screen lists members and supports
 admin plan overrides, suspension, linked broker account status, Pro trade-cycle
 storage opt-in, and a redacted audit history of plan, payment, suspension, and
-broker-credential changes. Google members manage their own alert/display preferences at
+broker-credential changes. The separate Admin-only
+`/admin/membership-analytics` dashboard shows recent joiners, signup-to-paid
+conversion, current plan mix, paid-cohort retention, optional signup
+attribution, estimated MRR, and verified actual collections/refunds. The
+dashboard defaults to the last seven India-market calendar days and supports
+7/30/90-day or custom ranges. Historical amounts and attribution are
+incomplete; they are not inferred from browser or checkout data.
+Google members manage their own alert/display preferences at
 `/account`; Pro members also have a private journal at `/account/journal`.
 Alert sound controls are hidden for members unless their plan entitlement is
 enabled in Admin Settings. The private journal calendar is scoped to the
@@ -126,9 +133,10 @@ examples, never a member's private alert history.
 | POST | `/membership/alerts/oi-shift` | Persist an entitled member's detected OI-shift alert to that member's expiring inbox |
 | POST | `/membership/alerts/{id}/ack` | Acknowledge one caller-owned alert |
 | POST | `/billing/checkout` | Creates a Razorpay subscription; entitlement is not granted by the browser |
-| POST | `/billing/cancel` | Immediately cancel through Razorpay and return the member to Basic |
+| POST | `/billing/cancel` | Immediately cancel through Razorpay and return the member to Basic; accepts an optional allowlisted cancellation reason |
 | POST | `/billing/razorpay/webhook` | Signature-verified subscription lifecycle updates; provider events, not checkout return pages, grant access |
 | GET | `/admin/subscription-health` | Admin-only current accessible members by plan, all-time billing totals, and up to 50 actionable member rows per disabled-Basic/payment-attention list, with total/truncation counts |
+| GET | `/admin/membership-analytics?days=7` or `?from=YYYY-MM-DD&to=YYYY-MM-DD` | Admin-only membership growth, signup funnel, active plan mix, observed paid-cohort retention/attrition, acquisition labels, estimated MRR, and signed-provider revenue data with monthly reconciliation totals; period billing/checkout reads are date-bounded in India Standard Time, cohort conversion is scoped to the selected signup cohort, and processing time/record counts are returned for capacity monitoring |
 | GET | `/admin/members/{id}/audit` | Admin-only redacted audit history for a member |
 | GET/PATCH | `/admin/members*` | Admin-only subscriber management; `GET /admin/members?member_id=...` loads one targeted member; overrides/suspensions do not delete member-owned data |
 
@@ -136,8 +144,9 @@ The account page displays a redacted, caller-only subscription history, pending 
 failure, refund, and access-end states and lets members begin a replacement
 checkout once overlapping paid access has ended. Renewal and payment-failure
 reminders are currently in-account only; no outbound email provider is
-configured. Members can resume a still-pending hosted checkout when Razorpay
-returns its checkout URL.
+configured. Cancellation optionally records one fixed category in the Admin
+audit without free-text notes. Members can resume a still-pending hosted
+checkout when Razorpay returns its checkout URL.
 
 Publisher credentials remain the source for shared OI and market pages. A Pro
 member's encrypted app key, secret, and daily access token are stored against
@@ -273,7 +282,7 @@ No synthetic OI backfill in production Fresh Pull — only real Kite ticks (or e
 
 - **Header** — LIVE/OFFLINE, tickers, Fresh Pull (admin), Kite API, Public toggle. Today P&L is **admin-only** (never on the public header).
 - **Sidebar** — index chips with last-pull times (stale flash if inactive & >2 min behind), expiries, strike range
-- **Main tabs** — OI Change chart, Strike Table, Build-up, Positions, Alerts, Holidays; Sell Candidates is Admin-only
+- **Main tabs** — OI Change chart, Strike Table, Build-up, Positions, Alerts, Holidays
 - **Right panel** — Alerts / Suggestions / Activity (hidden on phones; use Alerts tab / FAB)
 - **Replay** — scrub last ~3h; huge-shift modal can **Jump to HH:MM** bookmark
 

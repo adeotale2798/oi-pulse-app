@@ -24,3 +24,20 @@ def test_adrs_is_allowed_dashboard_page():
     start = text.index("DASHBOARD_PAGE_KEYS")
     block = text[start:text.index("}", start)]
     assert '"adrs"' in block
+    assert '"sell-candidates"' in block
+
+
+def test_settings_sanitizer_keeps_sell_candidates_admin_only():
+    from server import _sanitize_settings_catalog_values
+
+    settings = {
+        "visible_pages": ["oi-change", "sell-candidates"],
+        "admin_visible_pages": ["sell-candidates", "open-interest"],
+        "show_suggestion": True,
+    }
+
+    _sanitize_settings_catalog_values(settings)
+
+    assert settings["visible_pages"] == ["oi-change"]
+    assert settings["admin_visible_pages"] == ["sell-candidates", "open-interest"]
+    assert settings["show_suggestion"] is True

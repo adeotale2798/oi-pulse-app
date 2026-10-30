@@ -18,7 +18,7 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **OI Change** | Call vs Put OI delta vs a chosen lookback (1m … session), with a compact GEX guide, snapshot time, and estimated rupee hedging notional per 1% move in Indian units. GEX uses valid option legs within a fixed ±3% spot band and the configured contract lot size; it remains a noisy estimate (watch areas, not support/resistance; dealer sign is an assumption). After expiry, it can show the last valid same-session snapshot, clearly timestamped. On phones, GEX opens in a short bottom sheet with the current reading and direction check first; thresholds and strike areas expand on demand. The separate up/down lean requires price, OI-change and dashboard-bias agreement; otherwise it says there is no clear direction. |
 | **Open Interest** | Strike bars, writer-defense map, last-pull truth |
 | **Strike Table** | Compact CE/PE grid with optional gamma / institution chips |
-| **Sell Candidates (Admin-only)** | Admin strike-ranking surface; not available to members or guests |
+| **Sell Candidates** | Internal Admin-only analysis; never shown to guests or paid members |
 | **Build-up** | Fresh OI adding vs covering |
 | **Market Intelligence** | News with a simple index risk, tentative direction, and main headline first; shows today's NSE-scheduled constituent results with a precise result-news found / not found match |
 | **Positions** | Live F&O and MCX broker book (admin publisher session, or guest’s own broker); the P&L journal follows the MCX session even when MCX OI polling is disabled |
@@ -30,6 +30,7 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **Trade journal** | Admin daily P&L journal; Pro users get a separate private notes journal |
 
 Guests never share the publisher positions token. If **Positions** is ticked Public, they connect their own broker for *their* book. Charts always stay on the publisher OI feed.
+OI measurements, alerts, and market context are informational for customers. Ranked sell candidates and conditional sell-side guidance are restricted to the authenticated Admin workspace and are not provided to guests or paid members.
 
 ---
 
@@ -51,7 +52,7 @@ React desk  ◄── /api/config + /api/settings ──┘
 1. NSE pre-market starts at **09:00 IST**; OI polling starts at **09:15** and runs through the configured close (default 15:40). The desk labels the 09:00–09:15 period **Pre-market**, not stale. GIFT Nifty keeps its own sessions.
 2. **Change windows** compare the latest snapshot to one ~N minutes earlier (never yesterday’s session).
 3. **Fresh Pull** (admin) wipes today’s OI board and takes one live tick per enabled index.
-4. **Auth**: admin password session (`X-Admin-Token`); Google sign-in creates a durable member session; guest sign-in (`X-Guest-Token`) is separately controlled by the Admin Settings → Google Sign-In guest switch and the Public access window. Guest sign-in defaults off; disabling it blocks new guest entry without revoking existing sessions. Member login remains independent of the guest-access switch.
+4. **Auth**: admin password session (`X-Admin-Token`); Google sign-in creates a browser-persisted member session that refreshes its 30-day expiry while active and reconnects to the same member record by Google's stable identity; guest sign-in (`X-Guest-Token`) is separately controlled by the Admin Settings → Google Sign-In guest switch and the Public access window. Guest sign-in defaults off; disabling it blocks new guest entry without revoking existing sessions. Member login remains independent of the guest-access switch.
 
 ## Membership
 
@@ -94,6 +95,25 @@ provider reports the previous subscription as ended. Admin → Subscriptions &
 members includes current accessible member counts by plan and all-time
 subscription charges, cancellations, failed payments, and Basic accounts
 blocked because Basic is disabled.
+The separate Admin-only **Membership Analytics** dashboard is available at
+`/admin/membership-analytics`. It provides a recent-joiner list with current
+subscription state and a direct member-management link, a signup → checkout →
+verified-charge funnel, selectable 7/30/90-day or custom ranges, current plan
+mix, observed paid-cohort retention/attrition, optional UTM/referrer-host
+attribution, and a monthly collection reconciliation worksheet with CSV export.
+Estimated MRR uses current configured regular cadence prices for provider-active
+paid subscriptions (including suspended accounts that may still be billed, but
+excluding Admin-granted entitlements); actual collections and refunds use
+signature-verified, deduplicated provider payment events. Period billing reads
+are bounded to the selected date range. Paid conversion checks only subscriptions
+belonging to that signup cohort from signup through now; earlier cumulative
+refunds are loaded only for payments refunded in the selected range. The
+dashboard exposes processing time and record counts for
+Admin capacity monitoring. “Not active now” is cohort attrition, not a period
+churn rate; charges are not classified as renewals unless the stored history
+can support that distinction. Members may optionally provide a structured
+cancellation reason; no free-text reason is collected. Older events may not
+include amounts or first-paid dates, and the dashboard labels those gaps.
 Subscriber preferences are stored
 per member; member OI-shift events are stored in a member-scoped, expiring
 collection and daily alert history is cleared at 09:00 IST. Non-admin dashboard
@@ -122,6 +142,17 @@ endpoints. Optional screenshots support, but do not replace, the functional
 previews. Admin
 Settings → Subscriptions manages plan overrides, suspension, linked broker
 identity, and the opt-in to persist Pro trade cycles.
+
+Public **Terms**, **Privacy**, **Subscriptions & refunds**, and **Market risk**
+pages are linked from the landing and sign-in pages at `/legal/terms`,
+`/legal/privacy`, `/legal/subscriptions`, and `/legal/risk`. They describe the
+current app behavior, including broker-connected order risk, data categories
+and retention, and the lack of member self-service account/journal deletion or
+in-app refund requests. Each page flags that the operator identity, support and
+privacy/billing request channels, retention process, and legal review are not
+yet complete. They are product disclosures, not proof of legal compliance;
+confirm the operator's legal identity, support/refund process, and applicable
+regulatory wording with qualified Indian counsel before commercial launch.
 
 The walkthrough keeps OI Change separate from Open Interest, Strike Table,
 Build-up, and Straddle. Its OI chart uses paired call/put bars; the public

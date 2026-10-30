@@ -28,7 +28,10 @@ def test_material_heavyweight():
     assert is_material_move(0.4, 0.3) is False
     assert score_mover(9, -2) > score_mover(1, -2)
     note = seller_note(-2.0, 9.0)
-    assert "PE" in note or "put" in note.lower() or "dump" in note.lower()
+    assert "fell sharply" in note
+    assert "support" in note
+    assert "do not add" not in note.lower()
+    assert "shorts" not in note.lower()
 
 
 def test_quote_dict_and_tuple_compat():

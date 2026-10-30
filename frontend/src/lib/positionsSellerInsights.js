@@ -1,4 +1,4 @@
-// Non-directional seller insights for the Positions desk (pure helpers).
+// Existing-book risk summaries for the Positions desk (pure helpers).
 
 import { intrinsicValue, minutesToCloseIST } from "./blackScholes.js";
 
@@ -6,7 +6,6 @@ export const POSITIONS_TOGGLE_KEY = "oiPositionsSellerToggles";
 
 export const DEFAULT_POSITIONS_TOGGLES = {
   bookVerdict: true,
-  sellIdeas: true,
   decayBook: true,
   expiryDayMode: true,
   deltaHedge: true,
@@ -65,7 +64,7 @@ export function effectiveAdjustThreshold(basePct, { expiryDayMode, anyExpiryDay,
 }
 
 /**
- * Book quality verdict for a non-directional seller.
+ * Summarize current book risk without suggesting new positions.
  * @returns {{ band: 'GOOD'|'MIXED'|'WEAK', score: number, bullets: string[], headline: string }}
  */
 export function computeBookVerdict({
@@ -84,22 +83,22 @@ export function computeBookVerdict({
   const signed = Number(netDelta).toFixed(1);
   if (absD < 10) {
     score += 20;
-    bullets.push(`Net Δ ${signed} — nearly flat (not betting the market up or down).`);
+    bullets.push(`Net Δ ${signed} — nearly flat directional exposure.`);
   } else if (netDelta > 0) {
     const mild = absD < 30;
     score += mild ? 5 : -20;
     bullets.push(
       mild
-        ? `Net Δ +${signed} — mildly bullish (you want Nifty/Sensex up). A small hedge may help.`
-        : `Net Δ +${signed} — bullish (you want the market up; you get hurt if it falls). Flatten before selling more.`,
+        ? `Net Δ +${signed} — mildly positive directional exposure.`
+        : `Net Δ +${signed} — positive directional exposure; downside sensitivity is elevated.`,
     );
   } else {
     const mild = absD < 30;
     score += mild ? 5 : -20;
     bullets.push(
       mild
-        ? `Net Δ ${signed} — mildly bearish (you want Nifty/Sensex down). A small hedge may help.`
-        : `Net Δ ${signed} — bearish (you want the market down; you get hurt if it rises). Flatten before selling more.`,
+        ? `Net Δ ${signed} — mildly negative directional exposure.`
+        : `Net Δ ${signed} — negative directional exposure; upside sensitivity is elevated.`,
     );
   }
 
@@ -115,26 +114,26 @@ export function computeBookVerdict({
     const adjRatio = adjustCount / shortCount;
     if (adjRatio === 0) {
       score += 10;
-      bullets.push(`All ${shortCount} sold option(s) still OK — market is away.`);
+      bullets.push(`${shortCount} short option(s) are outside the configured adjustment threshold.`);
     } else if (adjRatio <= 0.35) {
       score -= 5;
-      bullets.push(`${adjustCount}/${shortCount} sold option(s) too close — check those first.`);
+      bullets.push(`${adjustCount}/${shortCount} short option(s) are inside the configured adjustment threshold.`);
     } else {
       score -= 20;
-      bullets.push(`${adjustCount}/${shortCount} sold option(s) too close — book is under pressure.`);
+      bullets.push(`${adjustCount}/${shortCount} short option(s) are inside the configured adjustment threshold.`);
     }
   } else {
-    bullets.push("No open sold options — nothing collecting premium yet.");
+    bullets.push("No open short options.");
   }
 
   if (itmShortCount > 0) {
     score -= 15;
-    bullets.push(`${itmShortCount} sold option(s) already in the money — higher exercise risk.`);
+    bullets.push(`${itmShortCount} short option(s) are in the money; exercise risk is elevated.`);
   }
 
   if (premiumLeft != null && premiumLeft > 0 && shortCount > 0) {
     score += 5;
-    bullets.push(`~₹${Math.round(premiumLeft)} still to earn on sold options (decay runway).`);
+    bullets.push(`Estimated premium remaining on short options: ~₹${Math.round(premiumLeft)}.`);
   }
 
   if (pnl > 0) score += 5;
@@ -147,10 +146,10 @@ export function computeBookVerdict({
 
   const headline =
     band === "GOOD"
-      ? "Book looks seller-friendly"
+      ? "Book risk profile looks balanced"
       : band === "WEAK"
         ? "Book needs attention"
-        : "Book is mixed — manage risk";
+        : "Book risk profile is mixed";
 
   return { band, score, bullets, headline };
 }

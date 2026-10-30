@@ -195,8 +195,8 @@ DEFAULT_SETTINGS = {
     "visible_pages": ["oi-change", "open-interest", "strike-table", "buildup", "positions", "alerts", "activity", "holidays", "straddle", "index-events", "market-intel", "adrs"],
     # Admin's own dashboard tabs (independent of guest visibility)
     "admin_visible_pages": [
-        "oi-change", "open-interest", "strike-table", "sell-candidates", "buildup",
-        "positions", "alerts", "activity", "holidays", "straddle", "index-events", "cas", "market-intel", "adrs",
+        "oi-change", "open-interest", "strike-table", "buildup",
+        "sell-candidates", "positions", "alerts", "activity", "holidays", "straddle", "index-events", "cas", "market-intel", "adrs",
     ],
     # Sidebar Strike Range steppers — off by default (ATM quick-picks cover most use)
     "show_strike_range": False,
@@ -291,8 +291,14 @@ def coerce_settings_types(settings: Dict[str, Any]) -> Dict[str, Any]:
 
 def overlay_settings_doc(settings: Dict[str, Any], doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if doc:
-        settings.update({k: v for k, v in doc.items() if k != "_id"})
+        settings.update({
+            k: v for k, v in doc.items()
+            if k not in ("_id", ADMIN_RECOMMENDATIONS_MIGRATION_KEY)
+        })
     return coerce_settings_types(settings)
+
+
+ADMIN_RECOMMENDATIONS_MIGRATION_KEY = "_admin_recommendations_restored_v21_06"
 
 
 class OITracker:
@@ -365,7 +371,38 @@ class OITracker:
             )
         except Exception:
             doc = None
+        doc = dict(doc or {})
+        recommendations_migrated = bool(
+            doc.pop(ADMIN_RECOMMENDATIONS_MIGRATION_KEY, False)
+        )
         overlay_settings_doc(self.settings, doc)
+        if not recommendations_migrated:
+            # V21.05 removed these Admin controls; restore them once for existing
+            # desks, then preserve any later visibility choice made by Admin.
+            admin_pages = self.settings.get("admin_visible_pages")
+            if not isinstance(admin_pages, list):
+                admin_pages = list(DEFAULT_SETTINGS["admin_visible_pages"])
+            else:
+                admin_pages = list(dict.fromkeys(
+                    page for page in admin_pages if isinstance(page, str)
+                ))
+            if "sell-candidates" not in admin_pages:
+                admin_pages.append("sell-candidates")
+            self.settings["admin_visible_pages"] = admin_pages
+            self.settings["show_suggestion"] = True
+            try:
+                await self.db.settings.update_one(
+                    {"_id": "alerts"},
+                    {"$set": {
+                        "admin_visible_pages": admin_pages,
+                        "show_suggestion": True,
+                        ADMIN_RECOMMENDATIONS_MIGRATION_KEY: True,
+                    }},
+                    upsert=True,
+                )
+                logger.info("Restored sell-side analysis to the Admin desk")
+            except Exception as e:
+                logger.warning("Could not persist Admin recommendation settings: %s", e)
         # Product default: do NOT kick admin at market close. Persist so UI +
         # /auth/state stay consistent after upgrades from the old True default.
         if self.settings.get("expire_admin_on_market_close") is True:
@@ -526,7 +563,7 @@ class OITracker:
             "market_open_ist", "market_close_ist", "second_session_ist",
             "expire_admin_on_market_close", "admin_session_ttl_minutes",
             "alert_enabled_indices", "alert_indices_override_date",
-            "show_strike_range", "show_writer_defense", "show_suggestion",
+            "show_strike_range", "show_writer_defense",
             "show_chart_signals", "position_mark_glow_after_close", "position_mark_glow_pct",
             "alert_toast_opacity",
             "overnight_popup_opacity", "market_intel_popup_opacity", "indicative_popup_opacity",

@@ -13,6 +13,15 @@ const ALERT_TYPES = [
   ["market_intel", "Market Intel"],
   ["event", "Events"],
 ];
+const CANCELLATION_REASONS = [
+  ["price", "Price"],
+  ["not_using", "Not using it enough"],
+  ["missing_features", "Missing features"],
+  ["technical_issue", "Technical issue"],
+  ["broker_setup", "Broker setup was difficult"],
+  ["switching", "Switching to another service"],
+  ["other", "Other"],
+];
 
 function formatProviderDate(value) {
   const parsed = typeof value === "number" ? value * 1000 : Date.parse(value);
@@ -50,6 +59,7 @@ export default function AccountSettings() {
   const [saving, setSaving] = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [removeBrokerBusy, setRemoveBrokerBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -142,7 +152,7 @@ export default function AccountSettings() {
     if (!window.confirm("Cancel your subscription now? Paid access will end immediately and your account will return to Basic.")) return;
     setCancelBusy(true);
     try {
-      await api.post("/billing/cancel");
+      await api.post("/billing/cancel", cancelReason ? { reason: cancelReason } : {});
       toast.success("Subscription cancelled. Your account is now on Basic.");
       await load();
     } catch (error) {
@@ -241,10 +251,24 @@ export default function AccountSettings() {
             </Link>
           )}
           {subscription.id && ["active", "authenticated"].includes(subscription.status) && (
-            <button type="button" disabled={cancelBusy} onClick={cancelSubscription}
-              className="ml-2 mt-4 rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">
-              {cancelBusy ? "Cancelling…" : "Cancel subscription"}
-            </button>
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label htmlFor="subscription-cancel-reason" className="text-sm font-medium text-slate-700">
+                Optional cancellation reason
+                <select
+                  id="subscription-cancel-reason"
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  className="mt-1 block min-w-56 rounded-lg border border-slate-300 bg-white px-3 py-2"
+                >
+                  <option value="">Prefer not to say</option>
+                  {CANCELLATION_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <button type="button" disabled={cancelBusy} onClick={cancelSubscription}
+                className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">
+                {cancelBusy ? "Cancelling…" : "Cancel subscription"}
+              </button>
+            </div>
           )}
           {paymentNeedsAttention && (
             <p role="status" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">

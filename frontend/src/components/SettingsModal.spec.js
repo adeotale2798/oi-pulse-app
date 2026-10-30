@@ -232,9 +232,14 @@ describe("SettingsModal mobile layout and independent saves", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("keeps Sell Candidates unavailable publicly and removes legacy public visibility on save", async () => {
+  it("keeps Sell Candidates Admin-only and persists the Admin suggestion toggle", async () => {
     api.get.mockResolvedValueOnce({
-      data: { ...savedDesk, visible_pages: ["oi-change", "sell-candidates"] },
+      data: {
+        ...savedDesk,
+        visible_pages: ["oi-change", "sell-candidates"],
+        admin_visible_pages: ["open-interest", "sell-candidates"],
+        show_suggestion: true,
+      },
     });
     const modal = await renderAdminSettings();
 
@@ -242,10 +247,15 @@ describe("SettingsModal mobile layout and independent saves", () => {
       modal.querySelector('[data-testid="settings-pane-pages"]').click();
     });
 
-    const publicPageControl = modal.querySelector('[data-testid="visible-page-sell-candidates"]');
-    expect(publicPageControl.disabled).toBe(true);
-    expect(publicPageControl.getAttribute("aria-checked")).toBe("false");
-    expect(modal.textContent).toContain("Admin-only candidate analysis; unavailable to guests and members.");
+    const publicCandidates = modal.querySelector('[data-testid="visible-page-sell-candidates"]');
+    expect(publicCandidates).not.toBeNull();
+    expect(publicCandidates.disabled).toBe(true);
+    expect(modal.querySelector('[data-testid="admin-page-sell-candidates"]')).not.toBeNull();
+    const showSuggestion = modal.querySelector('[data-testid="show-suggestion"]');
+    expect(showSuggestion.getAttribute("aria-checked")).toBe("true");
+    await act(async () => {
+      showSuggestion.click();
+    });
 
     await act(async () => {
       modal.querySelector('[data-testid="visible-page-open-interest"]').click();
@@ -256,6 +266,8 @@ describe("SettingsModal mobile layout and independent saves", () => {
 
     expect(api.post).toHaveBeenCalledWith("/settings", expect.objectContaining({
       visible_pages: ["oi-change", "open-interest"],
+      admin_visible_pages: ["open-interest", "sell-candidates"],
+      show_suggestion: false,
     }));
   });
 });

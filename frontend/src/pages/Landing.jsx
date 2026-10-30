@@ -790,11 +790,15 @@ function CTA({ copy }) {
 function Footer({ showFaqLink, copy }) {
   return (
     <footer className="border-t border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-5 py-8 sm:flex-row">
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-5 py-8 sm:flex-row sm:justify-between">
         <Logo />
-        <p className="text-sm text-slate-500">© {new Date().getFullYear()} {BRAND.name}. {copy.footer_disclaimer}</p>
-        <div className="flex items-center gap-4 text-sm text-slate-500">
+        <p className="text-center text-sm text-slate-500 sm:text-left">© {new Date().getFullYear()} {BRAND.name}. {copy.footer_disclaimer}</p>
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm text-slate-500">
           {showFaqLink && <a href="#faq" className="hover:text-slate-800">FAQ</a>}
+          <Link to="/legal/terms" className="hover:text-slate-800">Terms</Link>
+          <Link to="/legal/privacy" className="hover:text-slate-800">Privacy</Link>
+          <Link to="/legal/subscriptions" className="hover:text-slate-800">Subscriptions & refunds</Link>
+          <Link to="/legal/risk" className="hover:text-slate-800">Market risk</Link>
           <Link to="/login" className="hover:text-slate-800">Login</Link>
         </div>
       </div>

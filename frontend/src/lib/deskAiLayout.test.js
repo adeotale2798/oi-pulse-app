@@ -8,14 +8,14 @@ assert.match(firstSentence("DO\n  Capital event: booked -11.05% of wallet. Stop 
 const g = parseGuideSections(`TAPE
   NIFTY PCR 0.71
 DO
-  Hold CE shorts with the call-writer tape
-  Theta still paying
+  PE OI change is stronger than CE OI change
+  Theta is positive
 DON'T
-  Do not add PE shorts
-  VIX 19 — size down
+  Treat an old snapshot as live data
+  VIX 19 — overnight gap typically wider
 `);
-assert.equal(g.do[0], "Hold CE shorts with the call-writer tape");
-assert.ok(g.dont.some((s) => /PE shorts/i.test(s)));
+assert.equal(g.do[0], "PE OI change is stronger than CE OI change");
+assert.ok(g.dont.some((s) => /old snapshot/i.test(s)));
 
 const scenarios = parseGuideSections(`BASE CASE
 - Hold only if the deterministic band remains unchanged
@@ -32,7 +32,7 @@ WATCH NEXT
 DO
 - Keep risk defined
 DON'T
-- Add new overnight shorts
+- Treat an old snapshot as live data
 `);
 assert.match(scenarios.scenarios.baseCase[0], /deterministic band/);
 assert.match(scenarios.scenarios.gapUp[0], /gaps higher/);
@@ -41,7 +41,7 @@ assert.match(scenarios.scenarios.reassessIf[0], /GIFT proxy/);
 assert.match(scenarios.scenarios.contraryCase[0], /contradicts/);
 assert.match(scenarios.scenarios.watchNext[0], /live data/);
 assert.equal(scenarios.do[0], "Keep risk defined");
-assert.equal(scenarios.dont[0], "Add new overnight shorts");
+assert.equal(scenarios.dont[0], "Treat an old snapshot as live data");
 assert.equal(formatEvidenceAsOf("not a timestamp"), "time unavailable");
 assert.match(formatSessionDate("2026-09-29"), /29.*2026/);
 assert.equal(formatSessionDate("2026-99-99"), "2026-99-99");

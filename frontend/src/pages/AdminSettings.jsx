@@ -322,9 +322,14 @@ export default function AdminSettings() {
             <h2 className="font-bold text-emerald-950">Member accounts</h2>
             <p className="mt-0.5 text-xs text-emerald-800">Manage subscribers, plan overrides, linked broker account status, and trade-cycle storage consent.</p>
           </div>
-          <Link to="/admin/subscriptions" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
-            Open subscriptions
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/admin/membership-analytics" className="rounded-lg border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100">
+              Membership analytics
+            </Link>
+            <Link to="/admin/subscriptions" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+              Open subscriptions
+            </Link>
+          </div>
         </section>
         <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6">
           <h2 className="text-lg font-bold text-slate-900">Public entry connection</h2>

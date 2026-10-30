@@ -5,6 +5,11 @@ import { ArrowRight, Loader2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import "@/styles/landing.css";
 import { api, fetchTickers, persistGuestAuth } from "@/lib/api";
+import {
+  captureMembershipAttribution,
+  clearMembershipAttribution,
+  readMembershipAttribution,
+} from "@/lib/membershipAttribution";
 import OiPulseLogo from "@/components/OiPulseLogo";
 import BrowserMock from "@/components/landing/BrowserMock";
 
@@ -151,8 +156,14 @@ export default function Login() {
     setExchanging(true);
     (async () => {
       try {
-        const { data } = await api.post("/auth/google/exchange", { code, redirect_uri: redirectUri });
+        const attribution = readMembershipAttribution();
+        const { data } = await api.post("/auth/google/exchange", {
+          code,
+          redirect_uri: redirectUri,
+          ...(Object.keys(attribution).length ? { attribution } : {}),
+        });
         if (data?.token) {
+          clearMembershipAttribution();
           persistGuestAuth({ token: data.token, name: data.name, expiresInSeconds: data.expires_in_seconds, expiresAt: data.expires_at });
           toast.success(`Welcome, ${data.name || "trader"}`);
           window.history.replaceState({}, "", "/login");
@@ -177,6 +188,11 @@ export default function Login() {
 
   const doGoogle = async () => {
     try {
+      captureMembershipAttribution(
+        window.location.search,
+        document.referrer,
+        window.location.hostname,
+      );
       const bytes = new Uint8Array(24);
       window.crypto.getRandomValues(bytes);
       const state = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -425,6 +441,12 @@ export default function Login() {
             <span className="mt-0.5 text-emerald-600">✓</span>
             <p className="text-[11px] leading-5 text-slate-400">Information only, not investment advice.</p>
           </div>
+          <nav aria-label="Trust and legal pages" className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
+            <Link to="/legal/terms" className="hover:text-slate-800">Terms</Link>
+            <Link to="/legal/privacy" className="hover:text-slate-800">Privacy</Link>
+            <Link to="/legal/subscriptions" className="hover:text-slate-800">Subscriptions & refunds</Link>
+            <Link to="/legal/risk" className="hover:text-slate-800">Market risk</Link>
+          </nav>
         </div>
       </div>
     </div>

@@ -1140,7 +1140,7 @@ export default function Header({
                   }}
                 >
                   <Settings2 className="w-4 h-4" />
-                  Broker & Payments
+                  Subscriptions/Analytics
                 </DropdownMenuItem>
                 <DropdownMenuCheckboxItem
                   checked={!!publicLandingEnabled}
@@ -1355,7 +1355,7 @@ export default function Header({
                 ? "bg-slate-900 text-white hover:bg-slate-800"
                 : "bg-emerald-600 text-white hover:bg-emerald-700"
             }`}
-            title={mobileToolsOpen ? "Settings open — tap again to close" : "Settings: Public access, Broker & Payments, market feed, Fresh Pull"}
+            title={mobileToolsOpen ? "Settings open — tap again to close" : "Settings: Public access, Subscriptions/Analytics, market feed, Fresh Pull"}
           >
             <Settings2 className="w-4 h-4" />
             <span className="sr-only">Settings</span>
@@ -1394,7 +1394,7 @@ export default function Header({
             onClick={() => window.location.assign("/admin/settings")}
           >
             <Settings2 className="w-4 h-4 mr-1.5" />
-            Broker & Payments
+            Subscriptions/Analytics
           </Button>
           <Button data-testid="btn-tablet-settings" variant="outline" size="sm" className="rounded-sm" onClick={() => openAdminSheet(onOpenSettings)}>
             <Settings2 className="w-4 h-4 mr-1.5" />

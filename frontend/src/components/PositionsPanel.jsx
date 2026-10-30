@@ -47,8 +47,7 @@ import {
   dailyThetaRupees,
   minutesToCloseIST,
 } from "@/lib/blackScholes";
-import { computeSellCandidates } from "@/lib/sellCandidates";
-import { compactTopSells, compactBookFromPositions, compactTradeMemory, summarizeIndexTape } from "@/lib/deskAiTape";
+import { compactBookFromPositions, compactTradeMemory, summarizeIndexTape } from "@/lib/deskAiTape";
 import {
   loadPositionsToggles,
   savePositionsToggles,
@@ -550,12 +549,9 @@ export default function PositionsPanel({
   current,
   previous = null,
   vix,
-  vixOpen = null,
-  oiSettings,
   activeIndex,
   expiry,
   step = 50,
-  vrp = null,
   expiriesMeta = [],
   onPinNearestWeekly,
   onAdjustmentAlert,
@@ -1258,43 +1254,6 @@ export default function PositionsPanel({
     prevOiRef.current = oiMerged;
   }, [oiMerged]);
 
-  const sellIdeas = useMemo(() => {
-    if (!current?.strikes?.length) return null;
-    return computeSellCandidates({
-      current,
-      previous,
-      vixNow: vix,
-      vixOpen,
-      indexName: activeIndex,
-      lotSize: oiSettings?.lotSize?.[activeIndex],
-      step,
-      vrp,
-    });
-  }, [current, previous, vix, vixOpen, activeIndex, oiSettings?.lotSize, step, vrp]);
-
-  const sellsSnap = useMemo(() => {
-    if (dayCap.stopSellIdeas) return null;
-    return compactTopSells(sellIdeas, activeIndex);
-  }, [sellIdeas, activeIndex, dayCap.stopSellIdeas]);
-
-  const heldShortKeys = useMemo(() => {
-    const s = new Set();
-    for (const r of rows) {
-      if (!r.exited && r.isShort && r.isOpt && r.strike != null && r.side) {
-        s.add(`${r.side}:${r.strike}`);
-      }
-    }
-    return s;
-  }, [rows]);
-
-  const topSell = useMemo(() => {
-    if (!sellIdeas) return { ce: [], pe: [] };
-    return {
-      ce: (sellIdeas.candidates?.ce || []).slice(0, 3),
-      pe: (sellIdeas.candidates?.pe || []).slice(0, 3),
-    };
-  }, [sellIdeas]);
-
   const decayBook = useMemo(() => {
     return rows
       .filter((r) => !r.exited && r.isShort && r.isOpt && r.extrinsicLeft != null && r.extrinsicLeft > 0)
@@ -1383,7 +1342,6 @@ export default function PositionsPanel({
           book: packed.book,
           adjust: packed.adjust || adjustRef.current,
           oi: oiTape ? [oiTape] : undefined,
-          sells: sellsSnap,
           journal: {
             day_booked_pct: stats.dayBookedPct,
             day_booked: pnlToday?.booked_after_charges ?? stats.bookedToday,
@@ -1404,13 +1362,12 @@ export default function PositionsPanel({
       cancelled = true;
       clearInterval(id);
     };
-  }, [isAdmin, deskAiShow, deskAiRadar, deskAiAsk, oiRiskOpen, adjustSig, bookVerdict?.band, activeIndex, sellsSnap, current, previous, stats.dayBookedPct, stats.leftover, stats.wallet, stats.bookedToday, pnlToday?.booked_after_charges, rows]);
+  }, [isAdmin, deskAiShow, deskAiRadar, deskAiAsk, oiRiskOpen, adjustSig, bookVerdict?.band, activeIndex, current, previous, stats.dayBookedPct, stats.leftover, stats.wallet, stats.bookedToday, pnlToday?.booked_after_charges, rows]);
 
   const pinWeeklyDate = useMemo(() => nearestWeeklyExpiry(expiriesMeta), [expiriesMeta]);
 
   const TOGGLE_DEFS = [
     { key: "bookVerdict", label: "Book score" },
-    { key: "sellIdeas", label: "What to sell" },
     { key: "decayBook", label: "Still decaying" },
     { key: "expiryDayMode", label: "Expiry day" },
     { key: "deltaHedge", label: "Flatten tilt" },
@@ -1418,7 +1375,7 @@ export default function PositionsPanel({
     { key: "strikePressure", label: "Strike Pressure" },
   ];
   const visibleToggleDefs = TOGGLE_DEFS.filter(({ key }) => (
-    isAdmin || !["bookVerdict", "sellIdeas", "decayBook", "deltaHedge"].includes(key)
+    isAdmin || !["bookVerdict", "decayBook", "deltaHedge"].includes(key)
   ));
 
   if (!isGuest && !kiteReady) {
@@ -1967,8 +1924,8 @@ export default function PositionsPanel({
               <p className="font-semibold">{dayCap.headline}</p>
               <p className="mt-0.5 text-[11px] opacity-90">
                 Wallet % is booked P&amp;L after charges. Funds available is leftover margin, not
-                dry powder. Book score is open-short path risk — a GOOD score is not a green light
-                to sell more. Desk AI hides new sell ideas on a stop/event day.
+                dry powder. Book score describes open-position path risk, not a directional forecast.
+                On stop/event days, Desk AI focuses on risk in the existing book.
               </p>
             </div>
           </div>
@@ -2765,125 +2722,24 @@ export default function PositionsPanel({
             </div>
           )}
 
-          {isAdmin && (toggles.sellIdeas || toggles.decayBook) && (
+          {isAdmin && toggles.decayBook && decayBook.length > 0 && (
             <div
               className="rounded-md border border-slate-200 bg-slate-50/80 p-3 space-y-2"
-              data-testid="positions-sell-suggestions"
+              data-testid="positions-decay-book-container"
             >
-              {toggles.sellIdeas && (
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="text-xs font-semibold uppercase tracking-widest text-slate-600">
-                    Sell / decay ideas · {activeIndex}
-                    {current?.expiry ? ` · ${current.expiry}` : ""}
-                  </div>
-                  {dayCap.stopSellIdeas ? (
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-sm border border-rose-200 bg-rose-50 text-rose-900">
-                      Halted — capital
-                    </span>
-                  ) : sellIdeas?.verdict ? (
-                    <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-sm border ${
-                        sellIdeas.verdict.tradeable
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                          : "border-amber-200 bg-amber-50 text-amber-900"
-                      }`}
-                    >
-                      {sellIdeas.verdict.tradeable ? "OK to sell premium" : "Cautious / skip"}
-                    </span>
-                  ) : null}
-                </div>
-              )}
-
-              {toggles.decayBook && decayBook.length > 0 && (
-                <div className="text-[11px] text-slate-600" data-testid="positions-decay-book">
-                  <span className="font-semibold text-slate-700">Open shorts with extrinsic left: </span>
-                  {decayBook.map((r, i) => (
-                    <span key={r.tradingsymbol}>
-                      {i > 0 ? " · " : ""}
-                      <b className="font-mono-data">{r.strike}{r.side}</b>
-                      {" "}{privacyMode ? PRIVACY_MASK : `₹${fmt(r.extrinsicLeft, 0)}`}
-                      {!privacyMode && r.thetaInr != null && (
-                        <span className="text-emerald-700"> · Θ ₹{fmt(r.thetaInr, 0)}/d</span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {toggles.sellIdeas && dayCap.stopSellIdeas && (
-                <p className="text-[12px] text-rose-900 font-semibold" data-testid="positions-sell-ideas-halt">
-                  Capital stop — no new sell ideas. Reduce only. Book score does not override this.
-                </p>
-              )}
-
-              {toggles.sellIdeas && !dayCap.stopSellIdeas && (
-                <>
-                  {!sellIdeas?.verdict?.tradeable && sellIdeas?.verdict?.reasons?.length > 0 && (
-                    <ul className="text-[11px] text-amber-900 space-y-0.5 list-disc pl-4">
-                      {sellIdeas.verdict.reasons.slice(0, 3).map((msg) => (
-                        <li key={msg}>{msg}</li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {(topSell.ce.length > 0 || topSell.pe.length > 0) ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {["ce", "pe"].map((sideKey) => {
-                        const list = topSell[sideKey];
-                        if (!list.length) return null;
-                        return (
-                          <div key={sideKey} className="space-y-1.5">
-                            <div className={`text-[10px] font-semibold uppercase tracking-wide ${sideKey === "ce" ? "text-rose-600" : "text-emerald-700"}`}>
-                              {sideKey === "ce" ? "Calls to sell" : "Puts to sell"}
-                            </div>
-                            {list.map((c) => {
-                              const held = heldShortKeys.has(`${c.side}:${c.strike}`);
-                              const thetaDay = c.theta != null ? c.theta : null;
-                              return (
-                                <div
-                                  key={`${c.side}-${c.strike}`}
-                                  data-testid={`pos-sell-${c.side}-${c.strike}`}
-                                  className={`rounded-md border bg-white px-2.5 py-2 ${held ? "border-emerald-300 ring-1 ring-emerald-200" : "border-slate-200"}`}
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="font-mono-data text-sm font-semibold text-slate-900">
-                                      {c.strike} <span className={c.side === "CE" ? "text-rose-600" : "text-emerald-600"}>{c.side}</span>
-                                      <span className="ml-1.5 text-xs font-normal text-slate-500">₹{(c.ltp || 0).toFixed(2)}</span>
-                                    </div>
-                                    <span className="text-[10px] font-mono-data font-semibold text-slate-600">score {Math.round(c.score)}</span>
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono-data text-slate-600">
-                                    <span>IV <b>{c.iv?.toFixed?.(1) ?? "—"}%</b></span>
-                                    <span>Δ <b>{(c.delta ?? 0).toFixed(2)}</b></span>
-                                    <span>Γ <b>{((c.gamma ?? 0) * 1e4).toFixed(2)}e-4</b></span>
-                                    {thetaDay != null && <span>Θ <b className="text-emerald-700">{thetaDay.toFixed(2)}</b>/u</span>}
-                                    {c.fresh && (
-                                      <span className="inline-flex items-center gap-0.5 text-emerald-700">
-                                        <Zap className="w-3 h-3" /> fresh
-                                      </span>
-                                    )}
-                                    {held && <span className="text-emerald-800 font-semibold">already short</span>}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-slate-500 italic">
-                      {sellIdeas?.expiryStale
-                        ? "Pick a live weekly expiry in the sidebar for sell ideas."
-                        : !sellIdeas?.verdict?.tradeable
-                          ? "Chain is live — sell scoring paused while the day is Cautious / skip (see reasons above)."
-                          : !current?.strikes?.length
-                            ? "Waiting for option-chain snapshot for this expiry."
-                            : "No CE·PE cleared the sell-score threshold right now."}
-                    </div>
-                  )}
-                </>
-              )}
+              <div className="text-[11px] text-slate-600" data-testid="positions-decay-book">
+                <span className="font-semibold text-slate-700">Open shorts with extrinsic left: </span>
+                {decayBook.map((r, i) => (
+                  <span key={r.tradingsymbol}>
+                    {i > 0 ? " · " : ""}
+                    <b className="font-mono-data">{r.strike}{r.side}</b>
+                    {" "}{privacyMode ? PRIVACY_MASK : `₹${fmt(r.extrinsicLeft, 0)}`}
+                    {!privacyMode && r.thetaInr != null && (
+                      <span className="text-emerald-700"> · Θ ₹{fmt(r.thetaInr, 0)}/d</span>
+                    )}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>

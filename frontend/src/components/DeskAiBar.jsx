@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fetchOIChange, fetchJournalPeriod, fetchExtras } from "@/lib/api";
 import { upcomingHolidays, todayIST } from "@/lib/holidays";
 import { eventDisplayName } from "@/lib/carryFocus";
-import { attachDayCapital, classifyDayCapital } from "@/lib/capitalGuard";
-import { compactBookFromPositions, compactJournalFromPeriod, compactSellIdeas, compactTradeMemory, daysAgoIST, summarizeIndexTape } from "@/lib/deskAiTape";
+import { attachDayCapital } from "@/lib/capitalGuard";
+import { compactBookFromPositions, compactJournalFromPeriod, compactTradeMemory, daysAgoIST, summarizeIndexTape } from "@/lib/deskAiTape";
 import { cashSessionFocusIndex, cashSessionFocusLabel, filterCashHeavyMovers, istWeekdaySun0, overnightBiasIndices } from "@/lib/deskFocus";
 import { isOiPolling } from "@/lib/marketTimes";
 import MarketIntelCard from "@/components/MarketIntelCard";
@@ -105,20 +105,6 @@ export default function DeskAiBar({
         : null;
       const memory = compactTradeMemory(memRes?.data);
       const vix = extrasRes?.vix?.last ?? extrasRes?.vix?.ltp ?? extrasRes?.vix;
-      const focusPack = oiPacks.find((data) => String(data?.current?.index || "") === focusIndex) || oiPacks[0];
-      const dayCap = classifyDayCapital({
-        bookedPct: journal?.day_booked_pct,
-        leftover: journal?.leftover,
-        wallet: journal?.wallet,
-      });
-      const sells = !isAdmin || dayCap.stopSellIdeas
-        ? null
-        : compactSellIdeas(
-          focusIndex,
-          focusPack?.current,
-          focusPack?.also_windows?.session?.previous || focusPack?.previous,
-          vix != null ? Number(vix) : undefined,
-        );
       setIntel({ oi, book: packed.book, adjust: packed.adjust, journal });
       // Non-admin Desk AI keeps source-backed market context but never receives or renders trade guidance.
       if (!isAdmin) {
@@ -155,7 +141,6 @@ export default function DeskAiBar({
         journal,
         memory,
         market_memory: marketMemoryRes?.data || null,
-        sells,
         outside: rawOut,
       });
       setGuide(data);
