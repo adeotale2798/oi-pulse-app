@@ -12,6 +12,8 @@ import {
   PUBLIC_ENTRY_AUTH_TIMEOUT_MIN_SECONDS,
 } from "@/lib/authBoot";
 
+const ADMIN_SETTINGS_LOAD_TIMEOUT_MS = 10_000;
+
 function Field({ label, children, hint }) {
   return (
     <label className="block">
@@ -66,25 +68,41 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [walkthroughSaving, setWalkthroughSaving] = useState(false);
   const [cfg, setCfg] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [openBroker, setOpenBroker] = useState(null);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError("");
     (async () => {
       try {
-        const { data } = await api.get("/admin/platform/config");
-        setCfg(normalise(data));
+        const { data } = await api.get("/admin/platform/config", {
+          timeout: ADMIN_SETTINGS_LOAD_TIMEOUT_MS,
+        });
+        if (active) setCfg(normalise(data));
       } catch (err) {
+        if (!active) return;
         if (err?.response?.status === 401) {
           toast.error("Admin sign-in required");
           nav("/admin", { replace: true });
           return;
         }
-        toast.error("Could not load settings");
+        setLoadError(
+          err?.response?.data?.detail
+          || (["ECONNABORTED", "ETIMEDOUT"].includes(err?.code)
+            ? "Settings took too long to load. Check the backend connection and retry."
+            : "Could not load settings. Check the connection and retry.")
+        );
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [nav]);
+    return () => {
+      active = false;
+    };
+  }, [nav, loadAttempt]);
 
   function normalise(d) {
     return {
@@ -297,7 +315,28 @@ export default function AdminSettings() {
   if (loading) {
     return <div className="slz slz-light flex min-h-screen items-center justify-center text-slate-500"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading settings…</div>;
   }
-  if (!cfg) return null;
+  if (!cfg) {
+    return (
+      <main className="slz slz-light flex min-h-screen flex-col items-center justify-center gap-4 px-5 text-center">
+        <p className="max-w-md text-sm text-rose-700" role="alert" data-testid="admin-settings-load-error">
+          {loadError || "Settings are unavailable. Please retry."}
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="slz-btn-primary rounded-full px-5 py-2 text-sm font-semibold"
+            data-testid="admin-settings-retry"
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
+            Retry
+          </button>
+          <Link to="/dashboard" className="text-sm font-medium text-slate-600 underline underline-offset-4">
+            Return to dashboard
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="slz slz-light min-h-screen pb-20">
