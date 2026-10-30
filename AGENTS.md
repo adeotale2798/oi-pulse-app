@@ -1,6 +1,6 @@
 # StrikLenz — notes for humans and AI
 
-**Current version: V21.05** (`VERSION` at repo root).
+**Current version: V21.06** (`VERSION` at repo root).
 
 This is an Indian-market **open interest desk** branded **StrikLenz** (display name: repo-root `APP_NAME`). Indices: NIFTY, SENSEX, BANKNIFTY. FastAPI + MongoDB + React, live data from **Zerodha Kite Connect**.
 
@@ -25,6 +25,7 @@ Rules of the product:
 - Publisher Kite token owns **OI / charts**. Guest books use **their own** Kite login.
 - Admin daily P&L journal is **admin-only**; Pro also has a separate private member journal.
 - Admin configuration → **Public / Admin dashboard pages**: two ticks per page (guests vs admin desk).
+- Ranked sell candidates and conditional sell-side guidance are Admin-only; never expose them to guests or paid members. Keep shared alerts and customer Desk AI market-only.
 - After a finished change: bump version per `docs/VERSIONING.md`, open a PR, **merge to main**. Always. Checklist: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#ship--merge-to-main). New index/stock: [add-an-underlying checklist](docs/DEVELOPMENT.md#add-an-underlying) (hours, poll, Positions, journal Others, phone chrome). New UI: same PR on phone; do not grow header/sidebar.
 - Protected live-data rule: without explicit administrator approval for that exact
   change, do not modify Positions, OI Change, Open Interest, strike/expiry math,

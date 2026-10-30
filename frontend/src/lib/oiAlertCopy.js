@@ -33,7 +33,12 @@ export function writerTapeObservation({ bullish, bearish, side, value } = {}) {
   return "";
 }
 
-export function oiPressureCopy({ index, bullish, windowLabel, pe, ce }) {
+function adminCandidateLine(side) {
+  const label = side === "PE" ? "put-selling" : "call-selling";
+  return `Admin-only candidate read: assess ${label} only after confirming price, volatility, liquidity, and defined risk.`;
+}
+
+export function oiPressureCopy({ index, bullish, windowLabel, pe, ce, isAdmin = false }) {
   const tilt = bullish ? "Puts adding — bullish" : "Calls adding — bearish";
   const lines = [
     oiSellerRead(bullish),
@@ -44,13 +49,14 @@ export function oiPressureCopy({ index, bullish, windowLabel, pe, ce }) {
   }
   const observation = writerTapeObservation({ bullish });
   if (observation) lines.push(observation);
+  if (isAdmin) lines.push(adminCandidateLine(bullish ? "PE" : "CE"));
   return {
     title: `${index} · ${tilt}`,
     description: lines.join("\n"),
   };
 }
 
-export function oiBoardAlertCopy({ index, direction, windowLabel, strikes, pe, ce }) {
+export function oiBoardAlertCopy({ index, direction, windowLabel, strikes, pe, ce, isAdmin = false }) {
   const dir = direction || "OI reversal spike";
   const win = windowLabel || "15 mins";
   let peSum = pe;
@@ -72,60 +78,75 @@ export function oiBoardAlertCopy({ index, direction, windowLabel, strikes, pe, c
       ? writerTapeObservation({ bullish: false })
       : "";
   if (observation) bits.push(observation);
+  if (isAdmin && (bullish || /call oi building|bearish/i.test(dir))) {
+    bits.push(adminCandidateLine(bullish ? "PE" : "CE"));
+  }
   return {
     title: `${index}: ${dir} in last ${win}`,
     description: bits.join(" · "),
   };
 }
 
-export function oiPctCopy({ index, side, pct, windowLabel, pe, ce }) {
+export function oiPctCopy({ index, side, pct, windowLabel, pe, ce, isAdmin = false }) {
   const name = side === "CE" ? "Calls" : "Puts";
   const moved = pct >= 0 ? "up" : "down";
   const lines = [`Last ${windowLabel}`];
   if (pe != null && ce != null) {
     lines.push(`PE ${formatOiDelta(pe)} · CE ${formatOiDelta(ce)}`);
   }
+  if (isAdmin && Number(pct) > 0) lines.push(adminCandidateLine(side));
   return {
     title: `${index} · ${name} ${moved} ${Math.abs(Number(pct) || 0).toFixed(1)}%`,
     description: lines.join(" · "),
   };
 }
 
-export function hugeShiftCopy(side, value) {
+export function hugeShiftCopy(side, value, isAdmin = false) {
   const build = Number(value) > 0;
+  const candidateSide = side === "CE" ? "CE" : "PE";
+  const addAdminRead = (copy) => isAdmin && build
+    ? {
+      ...copy,
+      read: `${copy.read} Admin-only candidate read: assess ${candidateSide} selling only after confirming price, volatility, liquidity, and defined risk.`,
+    }
+    : copy;
   if (side === "CE" && build) {
-    return {
+    return addAdminRead({
       headline: "Calls added near ATM",
       read: "Call sellers stepping in — resistance, bearish tilt.",
       tone: "rose",
-    };
+    });
   }
   if (side === "CE" && !build) {
-    return {
+    return addAdminRead({
       headline: "Calls cut near ATM",
       read: "Call sellers leaving — resistance fading, bullish tilt.",
       tone: "emerald",
-    };
+    });
   }
   if (side === "PE" && build) {
-    return {
+    return addAdminRead({
       headline: "Puts added near ATM",
       read: "Put sellers stepping in — support, bullish tilt.",
       tone: "emerald",
-    };
+    });
   }
-  return {
+  return addAdminRead({
     headline: "Puts cut near ATM",
     read: "Put sellers leaving — support fading, bearish tilt.",
     tone: "rose",
-  };
+  });
 }
 
-export function hugeShiftToastCopy({ index, side, value, window }) {
-  const { headline } = hugeShiftCopy(side, value);
+export function hugeShiftToastCopy({ index, side, value, window, isAdmin = false }) {
+  const { headline, read } = hugeShiftCopy(side, value, isAdmin);
   const observation = writerTapeObservation({ side, value });
   return {
     title: `${index} · ${headline}`,
-    description: [window != null ? `${window} min window` : "", observation].filter(Boolean).join(" · "),
+    description: [
+      window != null ? `${window} min window` : "",
+      observation,
+      isAdmin && Number(value) > 0 ? read : "",
+    ].filter(Boolean).join(" · "),
   };
 }

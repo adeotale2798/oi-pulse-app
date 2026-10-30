@@ -51,10 +51,10 @@ function MembershipAccessNotice({ plan, availablePlans = ["premium", "pro"] }) {
 }
 
 /**
- * AuthGate — admin, durable member, and guest entry:
+ * AuthGate — admin, durable Google member, and guest entry:
  *   1. Admin login (default when public access is closed)
  *   2. Guest name prompt (when public access is open but caller has no guest token)
- *   3. Pass-through (admin or guest already authenticated)
+ *   3. Pass-through (admin, Google member, or guest already authenticated)
  *
  * Admin Remember-me restores via /auth/remember-login. Admin is NOT kicked at
  * market close unless Settings → expire_admin_on_market_close is explicitly ON.

@@ -1,13 +1,13 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import Login from "@/pages/Login";
-import { api, fetchTickers } from "@/lib/api";
+import { api, fetchTickers, persistGuestAuth } from "@/lib/api";
 
 jest.mock("react-router-dom", () => {
   const ReactModule = require("react");
   return {
     Link: ({ to, children, ...props }) => ReactModule.createElement("a", { href: to, ...props }, children),
-    useNavigate: () => jest.fn(),
+    useNavigate: () => (path) => { globalThis.__lastLoginNavigation = path; },
   };
 });
 
@@ -44,12 +44,16 @@ describe("Login guest sign-in control", () => {
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    delete globalThis.__lastLoginNavigation;
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     api.get.mockReset();
     api.post.mockReset();
     fetchTickers.mockReset();
+    persistGuestAuth.mockReset();
     fetchTickers.mockResolvedValue({ mode: "offline", tickers: [] });
     window.history.replaceState({}, "", "/login");
   });
@@ -170,5 +174,43 @@ describe("Login guest sign-in control", () => {
     const preview = container.querySelector('[data-testid="login-market-preview"]');
     expect(preview.dataset.status).toBe("unavailable");
     expect(preview.dataset.sensexPrice).toBe("");
+  });
+
+  it("persists the returned Google member session and opens the dashboard", async () => {
+    window.sessionStorage.setItem("oi_google_oauth_state", "expected-state");
+    window.history.replaceState({}, "", "/login?code=google-code&state=expected-state");
+    api.get.mockImplementation((path) => Promise.resolve({
+      data: path === "/market/status"
+        ? { is_market_open: false }
+        : path === "/public/login-preview/oi"
+          ? null
+          : { google_login_enabled: true, guest_login_enabled: false },
+    }));
+    api.post.mockResolvedValue({
+      data: {
+        token: "member-session-token",
+        name: "Returning Member",
+        email: "member@example.test",
+        expires_in_seconds: 30 * 24 * 60 * 60,
+        expires_at: "2026-11-27T00:00:00+00:00",
+      },
+    });
+
+    await act(async () => {
+      root.render(<Login />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/auth/google/exchange", expect.objectContaining({
+      code: "google-code",
+      redirect_uri: expect.stringMatching(/\/login$/),
+    }));
+    expect(persistGuestAuth).toHaveBeenCalledWith({
+      token: "member-session-token",
+      name: "Returning Member",
+      expiresInSeconds: 30 * 24 * 60 * 60,
+      expiresAt: "2026-11-27T00:00:00+00:00",
+    });
+    expect(globalThis.__lastLoginNavigation).toBe("/dashboard");
   });
 });

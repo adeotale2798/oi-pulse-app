@@ -23,6 +23,7 @@ const DASHBOARD_PAGES = [
   { id: "oi-change", label: "OI Change" },
   { id: "open-interest", label: "Open Interest" },
   { id: "strike-table", label: "Strike Table" },
+  { id: "sell-candidates", label: "Sell Candidates", hardAdmin: true },
   { id: "buildup", label: "Build-up" },
   { id: "positions", label: "Positions" },
   { id: "alerts", label: "Alerts" },
@@ -181,6 +182,7 @@ export default function SettingsModal({
             .map((p) => p.id),
           admin_visible_pages: ALL_PAGE_IDS,
           show_writer_defense: true,
+          show_suggestion: true,
           show_chart_signals: false,
           position_mark_glow_after_close: true,
           position_mark_glow_pct: 1,
@@ -226,7 +228,7 @@ export default function SettingsModal({
   };
 
   const toggleVisiblePage = (pageId) => {
-    if (HARD_ADMIN_PAGES.has(pageId)) return;
+    if (HARD_ADMIN_PAGES.has(pageId) || DASHBOARD_PAGES.find((page) => page.id === pageId)?.hardAdmin) return;
     const cur = new Set(Array.isArray(settings.visible_pages) ? settings.visible_pages : ALL_PAGE_IDS);
     for (const id of HARD_ADMIN_PAGES) cur.delete(id);
     if (cur.has(pageId)) {
@@ -325,6 +327,7 @@ export default function SettingsModal({
         show_strike_range: settings.show_strike_range,
         show_market_memory: settings.show_market_memory !== false,
         show_writer_defense: settings.show_writer_defense,
+        show_suggestion: settings.show_suggestion !== false,
         show_chart_signals: settings.show_chart_signals,
         position_mark_glow_after_close: settings.position_mark_glow_after_close !== false,
         position_mark_glow_pct: (() => {
@@ -340,7 +343,8 @@ export default function SettingsModal({
         market_intel_popup_enabled: settings.market_intel_popup_enabled !== false,
         visible_pages: Array.from(new Set(
           (Array.isArray(settings.visible_pages) ? settings.visible_pages : [])
-            .filter((id) => VALID_PAGE_IDS.has(id) && !HARD_ADMIN_PAGES.has(id)),
+            .filter((id) => VALID_PAGE_IDS.has(id) && !HARD_ADMIN_PAGES.has(id)
+              && !DASHBOARD_PAGES.find((page) => page.id === id)?.hardAdmin),
         )),
         admin_visible_pages: Array.from(new Set(
           (Array.isArray(settings.admin_visible_pages) && settings.admin_visible_pages.length
@@ -989,6 +993,8 @@ export default function SettingsModal({
                       ? "Optional Index Risk page. Unticking it does not hide the four info tiles (including Index Impact)."
                       : page.id === "positions"
                         ? "Guests connect their own broker for Positions. Charts stay on your publisher feed. Header Today P&L stays admin-only."
+                        : page.id === "sell-candidates"
+                          ? "Admin-only analysis; it is never available to guests or paid members."
                         : page.id === "cas"
                             ? "Guests can view; only admin can Activate / Live."
                             : page.id === "adrs"
@@ -1047,6 +1053,24 @@ export default function SettingsModal({
                     <div className="text-sm font-medium">Writer Defense map</div>
                     <div className="text-[10px] text-slate-500">
                       Show ATM± Put/Call OI held vs cracked on the Open Interest page only (below the OI last-pulled strip).
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className="flex items-start gap-2 py-2 px-3 rounded-sm hover:bg-slate-50 cursor-pointer border border-slate-200"
+                  data-testid="show-suggestion-row"
+                >
+                  <Checkbox
+                    data-testid="show-suggestion"
+                    className="mt-0.5"
+                    checked={settings.show_suggestion !== false}
+                    onCheckedChange={(ck) => setSettings({ ...settings, show_suggestion: !!ck })}
+                  />
+                  <div>
+                    <div className="text-sm font-medium">Admin suggestion window</div>
+                    <div className="text-[10px] text-slate-500">
+                      Show the OI posture analysis under the right panel on the Admin desk only.
                     </div>
                   </div>
                 </label>

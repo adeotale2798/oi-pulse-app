@@ -78,7 +78,7 @@ describe("public trust and legal pages", () => {
     act(() => root.render(<PublicLegalPage />));
 
     expect(container.textContent).toContain("Some Admin-only CAS workflows can submit orders");
-    expect(container.textContent).toContain("does not provide ranked sell candidates");
+    expect(container.textContent).toContain("Guests and paid members do not receive ranked sell candidates");
     expect(container.textContent).toContain("The operator's legal identity, address, governing-law selection");
   });
 

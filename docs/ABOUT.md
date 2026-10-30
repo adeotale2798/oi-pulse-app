@@ -1,5 +1,5 @@
 # StrikLenz — About the Project
-StrikLenz is a live NSE Open Interest dashboard for **NIFTY**, **SENSEX**, and **BANKNIFTY**. It polls Zerodha Kite Connect, stores strike-level OI snapshots in MongoDB, and surfaces change charts, alerts, straddles, and session replay. It does not provide ranked sell candidates or sell recommendations to any account type.
+StrikLenz is a live NSE Open Interest dashboard for **NIFTY**, **SENSEX**, and **BANKNIFTY**. It polls Zerodha Kite Connect, stores strike-level OI snapshots in MongoDB, and surfaces change charts, alerts, straddles, and session replay. Ranked sell candidates and conditional sell-side guidance are restricted to the authenticated Admin workspace; guests and paid members do not receive them.
 
 Product story (what / why / edge / config): **[README.md](../README.md)**. Versioning: **[VERSIONING.md](./VERSIONING.md)**. Optional desk LLM: **[AI.md](./AI.md)**. Click the logo or version label in the app for the same About panel.
 
@@ -14,7 +14,7 @@ Stack: **React (CRA/craco) + FastAPI + Motor/MongoDB + Kite Connect**.
 | **Admin** | `POST /api/auth/login` with username/password (`ADMIN_USERNAME` / `ADMIN_PASSWORD` in `backend/.env`) | `X-Admin-Token` (session TTL; optionally expires at market close) |
 | **Remember me** | `POST /api/auth/remember-login` with 24h IP-bound device token | Issues a fresh admin session |
 | **Guest** | Guest sign-in must be enabled in Admin Settings and Public access must be ON; full name required. If **Require approval** is ON (default), Access Control must approve every new access request. A lost/expired token requires a fresh request; an IP address or display name never restores access. If approval is OFF, a guest session is minted immediately | `X-Guest-Token` |
-| **Member** | Google OAuth; Basic, Premium, or Pro entitlement. Basic keeps the internal plan ID `normal` for compatibility. Member sessions are durable and do not depend on the guest Public switch | `X-Member-Token` (legacy browser clients send the same token as `X-Guest-Token`) |
+| **Member** | Google OAuth; Basic, Premium, or Pro entitlement. Basic keeps the internal plan ID `normal` for compatibility. The browser persists the session token, its 30-day expiry refreshes while active, and repeat sign-in with the same Google identity restores the same member record. Member access does not depend on the guest Public switch | `X-Member-Token` (legacy browser clients send the same token as `X-Guest-Token`) |
 | **Blocked IP** | Admin can block/unblock IPs; blocked clients cannot enter as guest | — |
 
 Auth state: `GET /api/auth/state` (public flag, guest sign-in and Google availability, admin/guest/member flags, member plan/features and plan availability, signup/provider availability, pending request count, and public walkthrough availability).

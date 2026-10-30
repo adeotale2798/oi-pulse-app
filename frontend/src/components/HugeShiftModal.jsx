@@ -13,9 +13,9 @@ function fmt(v) {
   return `${sign}${Math.round(abs)}`;
 }
 
-export default function HugeShiftModal({ shift, onClose, onCloseAll, onReplayAtMoment }) {
+export default function HugeShiftModal({ shift, onClose, onCloseAll, onReplayAtMoment, isAdmin = false }) {
   if (!shift) return null;
-  const meta = hugeShiftCopy(shift.side, shift.value);
+  const meta = hugeShiftCopy(shift.side, shift.value, isAdmin);
   const toneBg = meta.tone === "emerald" ? "bg-emerald-50 border-emerald-300 huge-shift-emerald" : "bg-rose-50 border-rose-300 huge-shift-rose";
   const toneText = meta.tone === "emerald" ? "text-emerald-800" : "text-rose-800";
   const bookmarkTs = shift.snapshotTs || shift.at;

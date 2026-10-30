@@ -39,9 +39,10 @@ assert.match(ce.text, /CE OI increased relative to PE OI/i);
 const vix = vixCarryPoints(19.2);
 assert.equal(vix.pts, 18);
 
-const advice = sellerCarryAdvice({ band: "REDUCE", vix: 19, giftPct: -0.09, focusCount: 2 });
+const advice = sellerCarryAdvice({ band: "REDUCE", vix: 19, giftPct: -0.09, focusCount: 2, isAdmin: true });
 assert.match(advice, /session OI/);
-assert.match(sellerCarryAdvice({ band: "DO_NOT_CARRY" }), /unhedged premium/);
+assert.match(sellerCarryAdvice({ band: "DO_NOT_CARRY", isAdmin: true }), /unhedged premium/);
+assert.doesNotMatch(sellerCarryAdvice({ band: "DO_NOT_CARRY" }), /unhedged premium|sell|short/i);
 
 const book = summarizeBook([
   { index: "NIFTY", side: "CE", quantity: -75, exited: false },

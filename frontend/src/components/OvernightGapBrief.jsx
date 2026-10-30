@@ -588,6 +588,7 @@ export default function OvernightGapBrief({
   }, [active, minimized]);
 
   const toggleCarryAi = (on) => {
+    if (!isAdmin) return;
     setCarryAi(!!on);
     writeCarryAi(!!on);
     api.post("/desk-ai", { desk_ai_carry: !!on }).catch(() => { /* local still applies */ });
@@ -630,6 +631,7 @@ export default function OvernightGapBrief({
     vix: vixNow,
     giftPct,
     focusCount: kase.results.length + kase.holidays.length,
+    isAdmin,
   });
   const orderedBiases = useMemo(() => {
     const focus = cashSessionFocusIndex(ist.weekday);
@@ -666,7 +668,7 @@ export default function OvernightGapBrief({
   };
 
   useEffect(() => {
-    if (!active || minimized || !carryAi || isPhone()) {
+    if (!isAdmin || !active || minimized || !carryAi || isPhone()) {
       setGuide(null);
       return undefined;
     }
@@ -708,7 +710,7 @@ export default function OvernightGapBrief({
       cancelled = true;
       clearInterval(id);
     };
-  }, [active, minimized, carryAi, tradeMemory]);
+  }, [isAdmin, active, minimized, carryAi, tradeMemory]);
 
   if (!active) return null;
 

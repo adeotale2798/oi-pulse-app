@@ -4,6 +4,7 @@ import Sidebar from "@/components/Sidebar";
 import OIChart from "@/components/OIChart";
 import TimeframePills from "@/components/TimeframePills";
 import AlertsPanel from "@/components/AlertsPanel";
+import SuggestionBox from "@/components/SuggestionBox";
 import GuestBanner from "@/components/GuestBanner";
 import DeskStatusRail from "@/components/DeskStatusRail";
 import KiteMaintenanceBanner from "@/components/KiteMaintenanceBanner";
@@ -49,6 +50,7 @@ import EventRiskWidget from "@/components/EventRiskWidget";
 import StraddleChart from "@/components/StraddleChart";
 import CasPanel from "@/components/CasPanel";
 import PageBrandTitle from "@/components/PageBrandTitle";
+import SellCandidatesPanel from "@/components/SellCandidatesPanel";
 import RightPanel from "@/components/RightPanel";
 import {
   loadTabOrder,
@@ -109,6 +111,7 @@ const DASHBOARD_PAGES = [
   { v: "oi-change", l: "OI Change" },
   { v: "open-interest", l: "Open Interest" },
   { v: "strike-table", l: "Strike Table" },
+  { v: "sell-candidates", l: "Sell Candidates" },
   { v: "buildup", l: "Build-up" },
   { v: "positions", l: "Positions" },
   { v: "alerts", l: "Alerts" },
@@ -625,6 +628,14 @@ export default function Dashboard({ demoMode = false }) {
     });
   }, [iepWindowOn]);
 
+  // Candidate rankings can change between OI polls as time-to-expiry decays.
+  const [sellCandidateTick, setSellCandidateTick] = useState(Date.now());
+  useEffect(() => {
+    if (!authState.is_admin) return undefined;
+    const interval = setInterval(() => setSellCandidateTick(Date.now()), 60_000);
+    return () => clearInterval(interval);
+  }, [authState.is_admin]);
+
   // VRP (Volatility Risk Premium) — one per active index. Fetched on index
   // change and refreshed every 5 minutes (EOD data doesn't change intraday).
   const [vrp, setVrp] = useState(null);
@@ -778,7 +789,9 @@ export default function Dashboard({ demoMode = false }) {
       const settings = e?.detail;
       if (!settings || typeof settings !== "object") return;
       if (Array.isArray(settings.visible_pages)) setVisiblePages(sanitizePageList(settings.visible_pages));
-      if (Array.isArray(settings.admin_visible_pages)) setAdminVisiblePages(sanitizePageList(settings.admin_visible_pages));
+      if (Array.isArray(settings.admin_visible_pages)) {
+        setAdminVisiblePages(sanitizePageList(settings.admin_visible_pages, undefined, true));
+      }
       if (Array.isArray(settings.enabled_indices) && settings.enabled_indices.length) {
         const next = normalizeEnabledIndices(settings.enabled_indices, !!settings.mcx_desk_on || settings.enabled_indices.some((i) => ["GOLD", "SILVER", "CRUDEOIL", "NATURALGAS"].includes(i)));
         setEnabledIndices(next);
@@ -890,7 +903,8 @@ export default function Dashboard({ demoMode = false }) {
         adminPages: adminVisiblePages,
         pagesReady,
       });
-      return hasRequiredMemberFeature
+      return (id !== "sell-candidates" || !!authState.is_admin)
+        && hasRequiredMemberFeature
         && pageIsVisible
         && (id !== "adrs" || globalMarketsEnabled === true);
     },
@@ -1218,6 +1232,7 @@ export default function Dashboard({ demoMode = false }) {
   const [oiLoading, setOiLoading] = useState(true);
   const [showStrikeRange, setShowStrikeRange] = useState(false);
   const [showWriterDefense, setShowWriterDefense] = useState(true);
+  const [showSuggestion, setShowSuggestion] = useState(true);
   const [showChartSignals, setShowChartSignals] = useState(false);
   const [keepPositionMarkGlowAfterClose, setKeepPositionMarkGlowAfterClose] = useState(true);
   const [positionMarkGlowPct, setPositionMarkGlowPct] = useState(1);
@@ -1230,6 +1245,7 @@ export default function Dashboard({ demoMode = false }) {
     : {};
   const effectiveWriterDefense = !!authState.is_admin
     && (memberProPreferences.show_writer_defense ?? showWriterDefense);
+  const effectiveSuggestion = !!authState.is_admin && showSuggestion;
   const effectiveChartSignals = !!authState.is_admin
     && (memberProPreferences.show_chart_signals ?? showChartSignals);
   const effectiveDeskAiShow = deskAiShow && (
@@ -1616,6 +1632,7 @@ export default function Dashboard({ demoMode = false }) {
           direction: a.direction,
           windowLabel: winLabel,
           strikes: a.strikes,
+          isAdmin: !!authState.is_admin,
         });
         const isDemoSample = demoMode && a.sample === true;
         surfaceAlert({
@@ -1646,7 +1663,7 @@ export default function Dashboard({ demoMode = false }) {
     } catch (e) {
       console.error("loadAlerts failed", e);
     }
-  }, [push, nseLive, status, demoMode, playEntitledAlertSound]);
+  }, [push, nseLive, status, demoMode, playEntitledAlertSound, authState.is_admin]);
 
   const loadTickers = useCallback(async () => {
     try {
@@ -1751,7 +1768,9 @@ export default function Dashboard({ demoMode = false }) {
       setPositionsBookPollMs(next);
     }
     if (Array.isArray(d.visible_pages)) setVisiblePages(sanitizePageList(d.visible_pages));
-    if (Array.isArray(d.admin_visible_pages)) setAdminVisiblePages(sanitizePageList(d.admin_visible_pages));
+    if (Array.isArray(d.admin_visible_pages)) {
+      setAdminVisiblePages(sanitizePageList(d.admin_visible_pages, undefined, true));
+    }
     if (typeof d.sitewalkthrough_enabled === "boolean") {
       setSiteWalkthroughEnabled(d.sitewalkthrough_enabled);
     }
@@ -1770,6 +1789,7 @@ export default function Dashboard({ demoMode = false }) {
     if (typeof d.show_strike_range === "boolean") setShowStrikeRange(d.show_strike_range);
     if (typeof d.show_market_memory === "boolean") setShowMarketMemory(d.show_market_memory);
     if (typeof d.show_writer_defense === "boolean") setShowWriterDefense(d.show_writer_defense);
+    if (typeof d.show_suggestion === "boolean") setShowSuggestion(d.show_suggestion);
     if (typeof d.show_chart_signals === "boolean") setShowChartSignals(d.show_chart_signals);
     if (typeof d.position_mark_glow_after_close === "boolean") setKeepPositionMarkGlowAfterClose(d.position_mark_glow_after_close);
     if (Number.isFinite(Number(d.position_mark_glow_pct))) setPositionMarkGlowPct(Number(d.position_mark_glow_pct));
@@ -2298,6 +2318,7 @@ export default function Dashboard({ demoMode = false }) {
         windowLabel: timeframeLabel,
         pe: changeSummary.pe,
         ce: changeSummary.ce,
+        isAdmin: !!authState.is_admin,
       });
       surfaceAlert({
         toastFn: changeSummary.bullish ? toast.success : toast.error,
@@ -2351,6 +2372,7 @@ export default function Dashboard({ demoMode = false }) {
         windowLabel: timeframeLabel,
         pe: changeSummary.pe,
         ce: changeSummary.ce,
+        isAdmin: !!authState.is_admin,
       });
       const isBull = (which === "PE" && pctVal >= 0) || (which === "CE" && pctVal < 0);
       surfaceAlert({
@@ -2381,7 +2403,7 @@ export default function Dashboard({ demoMode = false }) {
     }
   }, [
     changeSummary, lastPulledAt, activeIndex, timeframeLabel, push, changeAlertPct,
-    previous, status, pushActivity, indexInAlertFocus, authState.is_member,
+    previous, status, pushActivity, indexInAlertFocus, authState.is_admin, authState.is_member,
     memberPreferences.oi_change_threshold_pct, memberPreferences.alert_cooldown_seconds,
     memberCanReceiveOiChange, memberAlertIndexEnabled, playEntitledAlertSound,
   ]);
@@ -2393,6 +2415,7 @@ export default function Dashboard({ demoMode = false }) {
       side: shift.side,
       value: shift.value,
       window: shift.window,
+      isAdmin: !!authState.is_admin,
     });
     surfaceAlert({
       toastFn: toast.error,
@@ -3535,6 +3558,35 @@ export default function Dashboard({ demoMode = false }) {
                   </TabsContent>
                   )}
 
+                  {tabOn("sell-candidates") && (
+                    <TabsContent value="sell-candidates" className="mt-0">
+                      <div className="flex items-center justify-between mb-2 gap-2 min-w-0">
+                        <PageBrandTitle
+                          kicker={activeIndex}
+                          title="Sell Candidates — Admin analysis"
+                          testId="sell-candidates-page-title"
+                        />
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Timeframe: <b>{timeframeLabel}</b> · recomputes every minute
+                        </div>
+                      </div>
+                      <SellCandidatesPanel
+                        current={filteredCurrent}
+                        previous={previous}
+                        indexName={activeIndex}
+                        lotSize={oiSettings.lotSize?.[activeIndex]}
+                        vixNow={current?.vix || status?.vix}
+                        vixOpen={vixSessionOpen}
+                        step={indexMeta[activeIndex]?.step || INDEX_STEP[activeIndex] || 50}
+                        vrp={vrp}
+                        lastComputedAt={sellCandidateTick}
+                      />
+                      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+                        <TimeframePills value={timeframe} onChange={setTimeframe} />
+                      </div>
+                    </TabsContent>
+                  )}
+
                   {(tabOn("buildup")) && (
                     <TabsContent value="buildup" className="mt-0">
                     <PageBrandTitle
@@ -3804,6 +3856,20 @@ export default function Dashboard({ demoMode = false }) {
                       onDeskAiPositions={(on) => patchDeskAi({ desk_ai_positions: !!on })}
                       onDeskAiRadar={(on) => patchDeskAi({ desk_ai_radar: !!on })}
                       onOpenTelegramPrefs={authState.is_admin ? () => setTelegramPrefsOpen(true) : undefined}
+                      suggestion={
+                        effectiveSuggestion ? (
+                          <SuggestionBox
+                            indexName={activeIndex}
+                            marketIntel={marketIntel}
+                            changeSummary={changeSummary}
+                            spot={current?.price || current?.atm}
+                            vixNow={current?.vix || status?.vix}
+                            vixOpen={vixSessionOpen}
+                            sessionDate={dataStatus?.data_date || current?.timestamp || lastPulledAt}
+                            isLiveSession={!!status?.market?.is_market_open}
+                          />
+                        ) : null
+                      }
                     />
                   </Panel>
                 </>
@@ -3959,6 +4025,7 @@ export default function Dashboard({ demoMode = false }) {
 
       <HugeShiftModal
         shift={hugeShift}
+        isAdmin={!!authState.is_admin}
         onClose={dismissHugeShift}
         onCloseAll={dismissAllHugeShifts}
         onReplayAtMoment={replayHugeShiftMoment}

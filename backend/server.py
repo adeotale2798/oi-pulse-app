@@ -1373,22 +1373,30 @@ DASHBOARD_PAGE_KEYS = {
     "oi-change", "open-interest", "strike-table",
     "buildup", "positions", "alerts", "activity", "holidays",
     "straddle", "index-events", "cas", "market-intel", "adrs",
+    "sell-candidates",
 }
+ADMIN_ONLY_DASHBOARD_PAGE_KEYS = {"sell-candidates"}
 
 
 def _sanitize_settings_catalog_values(settings: dict, valid_indices=None, fallback_empty=True) -> dict:
-    """Remove retired page/index IDs while preserving required-selection validation."""
-    settings["show_suggestion"] = False
+    """Keep recommendation pages in Admin settings, never in the public page list."""
     for key in ("visible_pages", "admin_visible_pages"):
         pages = settings.get(key)
         if not isinstance(pages, list):
             continue
         valid = list(dict.fromkeys(
-            page for page in pages if isinstance(page, str) and page in DASHBOARD_PAGE_KEYS
+            page for page in pages
+            if isinstance(page, str)
+            and page in DASHBOARD_PAGE_KEYS
+            and (key == "admin_visible_pages" or page not in ADMIN_ONLY_DASHBOARD_PAGE_KEYS)
         ))
         if not valid and fallback_empty:
             defaults = DEFAULT_SETTINGS.get(key) or ["oi-change"]
-            valid = [page for page in defaults if page in DASHBOARD_PAGE_KEYS]
+            valid = [
+                page for page in defaults
+                if page in DASHBOARD_PAGE_KEYS
+                and (key == "admin_visible_pages" or page not in ADMIN_ONLY_DASHBOARD_PAGE_KEYS)
+            ]
         settings[key] = valid
 
     indices = set(valid_indices if valid_indices is not None else INDEX_CONFIG)
@@ -1465,6 +1473,7 @@ class SettingsIn(BaseModel):
     show_strike_range: Optional[bool] = None  # sidebar Strike Range steppers
     show_market_memory: Optional[bool] = None  # OI Change historical level memory card
     show_writer_defense: Optional[bool] = None  # Writer Defense map on Open Interest tab
+    show_suggestion: Optional[bool] = None  # Admin-only OI posture suggestion card
     show_chart_signals: Optional[bool] = None  # Gamma wall / institution CE·PE chips under OI Change chart
     position_mark_glow_after_close: Optional[bool] = None  # Keep near-ATM position ring after configured close
     position_mark_glow_pct: Optional[float] = None  # Glow S/L only within this % of spot
@@ -2127,11 +2136,14 @@ async def set_expiry(index_name: str, payload: ExpiryIn, _admin: bool = Depends(
 
 
 @api_router.get("/settings")
-async def get_settings(reload: bool = Query(False)):
+async def get_settings(request: Request, reload: bool = Query(False)):
     # Keep weekday alert focus in sync (same as /config) so the desk never
     # reads a stale/null alert_enabled_indices and suppresses toasts.
     # Mongo reload only when Admin configuration asks (?reload=true). The
     # public Dashboard used to hit this every 60s and pin the origin.
+    # Admin's configuration reload is the only settings read allowed to return private controls.
+    if reload:
+        await require_admin(request)
     if tracker and reload:
         try:
             await tracker.reload_settings_from_db()
@@ -2144,6 +2156,8 @@ async def get_settings(reload: bool = Query(False)):
             pass
     data = dict(_live_settings())
     data.pop("_id", None)
+    if not reload:
+        data["show_suggestion"] = False
     try:
         from universe import without_paused_mcx, set_mcx_desk_available
         data["mcx_desk_on"] = bool(tracker.settings.get("mcx_desk_on")) if tracker else bool(data.get("mcx_desk_on"))
@@ -2168,6 +2182,8 @@ async def get_settings(reload: bool = Query(False)):
     except Exception:
         data["known_indices"] = list(INDEX_CONFIG.keys())
         _sanitize_settings_catalog_values(data)
+    if not reload:
+        data["admin_visible_pages"] = []
     return data
 
 
@@ -2221,7 +2237,9 @@ async def update_settings(payload: SettingsIn, _admin: bool = Depends(require_ad
         for p in pages:
             if p not in DASHBOARD_PAGE_KEYS:
                 raise HTTPException(400, f"Unknown dashboard page: {p}")
-        patch["visible_pages"] = pages
+        patch["visible_pages"] = [
+            page for page in pages if page not in ADMIN_ONLY_DASHBOARD_PAGE_KEYS
+        ]
     if "admin_visible_pages" in patch:
         pages = list(patch["admin_visible_pages"] or [])
         if not pages:
@@ -3888,7 +3906,7 @@ async def error_log_purge(
 
 
 @api_router.get("/config")
-async def get_config():
+async def get_config(request: Request):
     s = dict(_live_settings())
     if tracker:
         try:
@@ -3898,6 +3916,7 @@ async def get_config():
         except Exception:
             pass
     _sanitize_settings_catalog_values(s)
+    is_admin = await _is_admin_request(request)
     poll_interval_seconds = clamp_oi_poll_seconds(s)
     straddle_poll = clamp_straddle_poll_seconds(s)
     positions_poll = clamp_positions_poll_seconds(s)
@@ -3929,7 +3948,7 @@ async def get_config():
         "straddle_enabled_indices": [i for i in (s.get("straddle_enabled_indices", STRADDLE_INDICES) or []) if i in enabled],
         "alert_enabled_indices": [i for i in (s.get("alert_enabled_indices") or []) if i in enabled] or s.get("alert_enabled_indices"),
         "visible_pages": s.get("visible_pages"),
-        "admin_visible_pages": s.get("admin_visible_pages"),
+        "admin_visible_pages": s.get("admin_visible_pages") if is_admin else [],
         "sitewalkthrough_enabled": bool(s.get("sitewalkthrough_enabled", True)),
         "market_open_ist": s.get("market_open_ist", open_hm),
         "market_close_ist": s.get("market_close_ist", close_hm),
@@ -3937,7 +3956,8 @@ async def get_config():
         "show_strike_range": bool(s.get("show_strike_range", False)),
         "show_market_memory": s.get("show_market_memory", True) is not False,
         "show_writer_defense": bool(s.get("show_writer_defense", True)),
-        "show_suggestion": False,
+        # Recommendation availability is disclosed only to the authenticated Admin desk.
+        "show_suggestion": bool(s.get("show_suggestion")) if is_admin else False,
         "show_chart_signals": bool(s.get("show_chart_signals", False)),
         "position_mark_glow_after_close": s.get("position_mark_glow_after_close", True) is not False,
         "position_mark_glow_pct": float(s.get("position_mark_glow_pct") or 1.0),

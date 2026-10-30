@@ -483,7 +483,11 @@ def test_google_exchange_saves_sanitized_attribution_only_for_new_members(monkey
             self.updated.append((query, update, upsert))
 
     class MemberSessions:
+        def __init__(self):
+            self.inserted = []
+
         async def insert_one(self, _document):
+            self.inserted.append(_document)
             return None
 
     class Response:
@@ -547,11 +551,12 @@ def test_google_exchange_saves_sanitized_attribution_only_for_new_members(monkey
     monkeypatch.setattr(httpx, "AsyncClient", Client)
 
     new_members = Members()
+    new_sessions = MemberSessions()
     monkeypatch.setattr(server, "db", SimpleNamespace(
         members=new_members,
-        member_sessions=MemberSessions(),
+        member_sessions=new_sessions,
     ))
-    asyncio.run(server.google_exchange({
+    first_login = asyncio.run(server.google_exchange({
         "code": "one-time-code",
         "redirect_uri": "https://striklenz.com/login",
         "attribution": {
@@ -564,13 +569,17 @@ def test_google_exchange_saves_sanitized_attribution_only_for_new_members(monkey
         "utm_source": "newsletter",
         "referrer_host": "news.example",
     }
+    assert first_login["is_member"] is True
+    assert first_login["email"] == "new@example.test"
+    assert new_sessions.inserted[0]["user_id"] == "google-subject"
 
     existing_members = Members({"_id": "google-subject", "acquisition": {"utm_source": "original"}})
+    repeat_sessions = MemberSessions()
     monkeypatch.setattr(server, "db", SimpleNamespace(
         members=existing_members,
-        member_sessions=MemberSessions(),
+        member_sessions=repeat_sessions,
     ))
-    asyncio.run(server.google_exchange({
+    repeat_login = asyncio.run(server.google_exchange({
         "code": "one-time-code",
         "redirect_uri": "https://striklenz.com/login",
         "attribution": {"utm_source": "later-login"},
@@ -578,3 +587,7 @@ def test_google_exchange_saves_sanitized_attribution_only_for_new_members(monkey
     existing_fields = existing_members.updated[0][1]["$set"]
     assert "acquisition" not in existing_fields
     assert "$setOnInsert" not in existing_members.updated[0][1]
+    assert repeat_login["is_member"] is True
+    assert repeat_login["email"] == "new@example.test"
+    assert repeat_sessions.inserted[0]["user_id"] == new_sessions.inserted[0]["user_id"]
+    assert repeat_login["member_token"] != first_login["member_token"]

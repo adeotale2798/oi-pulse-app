@@ -1,11 +1,11 @@
 import { pageAllowed, sanitizePageList } from "./dashboardPages";
 
-describe("retired dashboard pages", () => {
-  it("never allows Sell Candidates for Admins, members, or guests", () => {
+describe("Admin-only dashboard pages", () => {
+  it("allows Sell Candidates on the Admin desk but never for members or guests", () => {
     expect(pageAllowed("sell-candidates", {
       isAdmin: true,
       adminPages: ["sell-candidates"],
-    })).toBe(false);
+    })).toBe(true);
     expect(pageAllowed("sell-candidates", {
       isAdmin: false,
       visiblePages: ["sell-candidates"],
@@ -17,8 +17,10 @@ describe("retired dashboard pages", () => {
     })).toBe(false);
   });
 
-  it("strips legacy candidate-page IDs from saved page lists", () => {
+  it("strips candidate-page IDs from public lists and preserves Admin lists", () => {
     expect(sanitizePageList(["sell-candidates", "oi-change"])).toEqual(["oi-change"]);
     expect(sanitizePageList(["sell-candidates"])).toEqual(["oi-change"]);
+    expect(sanitizePageList(["sell-candidates", "oi-change"], undefined, true))
+      .toEqual(["sell-candidates", "oi-change"]);
   });
 });

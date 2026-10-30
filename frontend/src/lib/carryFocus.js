@@ -202,7 +202,10 @@ function uniq(arr) {
   });
 }
 
-export function sellerCarryAdvice({ band, holidayAdvice, vix, giftPct, focusCount = 0 }) {
+export function sellerCarryAdvice({ band, holidayAdvice, vix, giftPct, focusCount = 0, isAdmin = false }) {
+  if (!isAdmin) {
+    return "This brief reports overnight market and book conditions; it does not provide trade suggestions.";
+  }
   const v = vix != null && Number.isFinite(Number(vix)) ? Number(vix) : null;
   const g = giftPct != null && Number.isFinite(Number(giftPct)) ? Number(giftPct) : null;
   const bits = [];

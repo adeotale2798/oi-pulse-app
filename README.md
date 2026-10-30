@@ -18,7 +18,7 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **OI Change** | Call vs Put OI delta vs a chosen lookback (1m … session), with a compact GEX guide, snapshot time, and estimated rupee hedging notional per 1% move in Indian units. GEX uses valid option legs within a fixed ±3% spot band and the configured contract lot size; it remains a noisy estimate (watch areas, not support/resistance; dealer sign is an assumption). After expiry, it can show the last valid same-session snapshot, clearly timestamped. On phones, GEX opens in a short bottom sheet with the current reading and direction check first; thresholds and strike areas expand on demand. The separate up/down lean requires price, OI-change and dashboard-bias agreement; otherwise it says there is no clear direction. |
 | **Open Interest** | Strike bars, writer-defense map, last-pull truth |
 | **Strike Table** | Compact CE/PE grid with optional gamma / institution chips |
-| **Sell recommendations** | Not provided to any account type; the service does not rank or recommend instruments or strikes to sell |
+| **Sell Candidates** | Internal Admin-only analysis; never shown to guests or paid members |
 | **Build-up** | Fresh OI adding vs covering |
 | **Market Intelligence** | News with a simple index risk, tentative direction, and main headline first; shows today's NSE-scheduled constituent results with a precise result-news found / not found match |
 | **Positions** | Live F&O and MCX broker book (admin publisher session, or guest’s own broker); the P&L journal follows the MCX session even when MCX OI polling is disabled |
@@ -30,7 +30,7 @@ The publisher's broker session polls the option chain on a cadence you set (15 /
 | **Trade journal** | Admin daily P&L journal; Pro users get a separate private notes journal |
 
 Guests never share the publisher positions token. If **Positions** is ticked Public, they connect their own broker for *their* book. Charts always stay on the publisher OI feed.
-OI measurements, alerts, and market context are informational; StrikLenz does not provide sell candidates or sell recommendations to Admins, guests, or members.
+OI measurements, alerts, and market context are informational for customers. Ranked sell candidates and conditional sell-side guidance are restricted to the authenticated Admin workspace and are not provided to guests or paid members.
 
 ---
 
@@ -52,7 +52,7 @@ React desk  ◄── /api/config + /api/settings ──┘
 1. NSE pre-market starts at **09:00 IST**; OI polling starts at **09:15** and runs through the configured close (default 15:40). The desk labels the 09:00–09:15 period **Pre-market**, not stale. GIFT Nifty keeps its own sessions.
 2. **Change windows** compare the latest snapshot to one ~N minutes earlier (never yesterday’s session).
 3. **Fresh Pull** (admin) wipes today’s OI board and takes one live tick per enabled index.
-4. **Auth**: admin password session (`X-Admin-Token`); Google sign-in creates a durable member session; guest sign-in (`X-Guest-Token`) is separately controlled by the Admin Settings → Google Sign-In guest switch and the Public access window. Guest sign-in defaults off; disabling it blocks new guest entry without revoking existing sessions. Member login remains independent of the guest-access switch.
+4. **Auth**: admin password session (`X-Admin-Token`); Google sign-in creates a browser-persisted member session that refreshes its 30-day expiry while active and reconnects to the same member record by Google's stable identity; guest sign-in (`X-Guest-Token`) is separately controlled by the Admin Settings → Google Sign-In guest switch and the Public access window. Guest sign-in defaults off; disabling it blocks new guest entry without revoking existing sessions. Member login remains independent of the guest-access switch.
 
 ## Membership
 

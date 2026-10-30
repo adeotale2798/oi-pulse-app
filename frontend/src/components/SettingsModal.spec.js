@@ -232,7 +232,7 @@ describe("SettingsModal mobile layout and independent saves", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("removes retired Sell Candidates from both dashboard page lists on save", async () => {
+  it("keeps Sell Candidates Admin-only and persists the Admin suggestion toggle", async () => {
     api.get.mockResolvedValueOnce({
       data: {
         ...savedDesk,
@@ -247,9 +247,15 @@ describe("SettingsModal mobile layout and independent saves", () => {
       modal.querySelector('[data-testid="settings-pane-pages"]').click();
     });
 
-    expect(modal.querySelector('[data-testid="visible-page-sell-candidates"]')).toBeNull();
-    expect(modal.querySelector('[data-testid="show-suggestion"]')).toBeNull();
-    expect(modal.textContent).not.toContain("Sell Candidates");
+    const publicCandidates = modal.querySelector('[data-testid="visible-page-sell-candidates"]');
+    expect(publicCandidates).not.toBeNull();
+    expect(publicCandidates.disabled).toBe(true);
+    expect(modal.querySelector('[data-testid="admin-page-sell-candidates"]')).not.toBeNull();
+    const showSuggestion = modal.querySelector('[data-testid="show-suggestion"]');
+    expect(showSuggestion.getAttribute("aria-checked")).toBe("true");
+    await act(async () => {
+      showSuggestion.click();
+    });
 
     await act(async () => {
       modal.querySelector('[data-testid="visible-page-open-interest"]').click();
@@ -260,8 +266,8 @@ describe("SettingsModal mobile layout and independent saves", () => {
 
     expect(api.post).toHaveBeenCalledWith("/settings", expect.objectContaining({
       visible_pages: ["oi-change", "open-interest"],
-      admin_visible_pages: ["open-interest"],
+      admin_visible_pages: ["open-interest", "sell-candidates"],
+      show_suggestion: false,
     }));
-    expect(api.post.mock.calls[0][1]).not.toHaveProperty("show_suggestion");
   });
 });

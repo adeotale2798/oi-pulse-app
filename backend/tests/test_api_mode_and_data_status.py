@@ -558,11 +558,13 @@ def test_admin_settings_update_and_effect(monkeypatch):
             "oi_poll_interval_seconds": 30,
             "straddle_poll_interval_seconds": 60,
             "positions_poll_interval_seconds": 2,
+            "show_suggestion": True,
         })
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["oi_poll_interval_seconds"] == 30
         assert data["positions_poll_interval_seconds"] == 2
+        assert data["show_suggestion"] is True
         assert data["visible_pages"] == ["oi-change"]
         assert data["admin_visible_pages"] == ["adrs"]
         # GET /api/config should reflect the new poll interval
@@ -625,7 +627,7 @@ def test_settings_reads_drop_retired_dashboard_page_ids(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["visible_pages"] == ["oi-change", "positions"]
-    assert data["admin_visible_pages"] == ["adrs"]
+    assert data["admin_visible_pages"] == []
     assert data["enabled_indices"] == ["NIFTY"]
     assert data["alert_enabled_indices"] == ["NIFTY"]
     assert "OLDINDEX" not in data["straddle_enabled_indices"]
@@ -633,5 +635,50 @@ def test_settings_reads_drop_retired_dashboard_page_ids(monkeypatch):
     assert data["lot_sizes"] == {"NIFTY": 25}
     config = client.get("/api/config").json()
     assert config["visible_pages"] == ["oi-change", "positions"]
-    assert config["admin_visible_pages"] == ["adrs"]
+    assert config["admin_visible_pages"] == []
     assert config["enabled_indices"] == ["NIFTY"]
+
+
+def test_suggestion_setting_is_admin_only(monkeypatch):
+    class FakeSettingsTracker:
+        settings = {
+            **server.DEFAULT_SETTINGS,
+            "show_suggestion": True,
+            "visible_pages": ["oi-change", "sell-candidates"],
+            "admin_visible_pages": ["oi-change", "sell-candidates"],
+        }
+
+    async def admin_header(request):
+        return request.headers.get("x-admin-token") == "valid"
+
+    monkeypatch.setattr(server, "tracker", FakeSettingsTracker())
+    monkeypatch.setattr(server, "db", None)
+    monkeypatch.setattr(server, "_is_admin_request", admin_header)
+    client = TestClient(server.app)
+
+    public_config = client.get("/api/config")
+    assert public_config.status_code == 200
+    assert public_config.json()["show_suggestion"] is False
+    assert public_config.json()["visible_pages"] == ["oi-change"]
+    assert public_config.json()["admin_visible_pages"] == []
+
+    public_settings = client.get("/api/settings")
+    assert public_settings.status_code == 200
+    assert public_settings.json()["show_suggestion"] is False
+    assert public_settings.json()["admin_visible_pages"] == []
+
+    unauthorized_reload = client.get("/api/settings?reload=true")
+    assert unauthorized_reload.status_code == 401
+
+    admin_config = client.get("/api/config", headers={"x-admin-token": "valid"})
+    assert admin_config.status_code == 200
+    assert admin_config.json()["show_suggestion"] is True
+    assert admin_config.json()["admin_visible_pages"] == ["oi-change", "sell-candidates"]
+
+    admin_settings = client.get(
+        "/api/settings?reload=true",
+        headers={"x-admin-token": "valid"},
+    )
+    assert admin_settings.status_code == 200
+    assert admin_settings.json()["show_suggestion"] is True
+    assert admin_settings.json()["admin_visible_pages"] == ["oi-change", "sell-candidates"]

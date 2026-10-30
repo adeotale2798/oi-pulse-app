@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 from desk_guide import maybe_guide
 import pytest
+from starlette.requests import Request
 
 
 def test_compact_strips_noise_and_caps_lists():
@@ -187,6 +188,23 @@ def test_carry_desk_radar_guides_differ():
     assert carry != desk
     assert radar != desk
     assert compact_snapshot({"surface": "desk-panel"})["surface"] == "desk"
+
+
+@pytest.mark.parametrize("role", ["guest", "member"])
+def test_desk_guide_rejects_non_admin_trade_guidance(role):
+    from fastapi.testclient import TestClient
+    import server
+
+    async def non_admin_role(request: Request):
+        return role
+
+    server.app.dependency_overrides[server.require_desk_user] = non_admin_role
+    try:
+        response = TestClient(server.app).post("/api/desk-guide", json={})
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Trade guidance is available to Admin only"
+    finally:
+        server.app.dependency_overrides.pop(server.require_desk_user, None)
 
 
 def test_carry_outside_keeps_impact_only():

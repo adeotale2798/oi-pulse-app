@@ -23,10 +23,21 @@ assert.equal(pageAllowed("holidays", { pagesReady: true, visiblePages: ["oi-chan
 assert.equal(pageAllowed("holidays", { pagesReady: true, visiblePages: ["oi-change", "holidays"] }), true);
 assert.equal(pageAllowed("holidays", { pagesReady: true, isAdmin: true, adminPages: ["oi-change"] }), false);
 assert.equal(pageAllowed("index-events", { pagesReady: true, visiblePages: ["oi-change"] }), false);
+assert.equal(pageAllowed("sell-candidates", {
+  pagesReady: true, isAdmin: true, adminPages: ["sell-candidates"],
+}), true);
+assert.equal(pageAllowed("sell-candidates", {
+  pagesReady: true, isAdmin: false, visiblePages: ["sell-candidates"],
+}), false);
 
 assert.deepEqual(sanitizePageList(null), ["oi-change"]);
 assert.deepEqual(sanitizePageList([]), ["oi-change"]);
 assert.deepEqual(sanitizePageList(["adrs", "oi-change"]), ["adrs", "oi-change"]);
+assert.deepEqual(sanitizePageList(["sell-candidates", "oi-change"]), ["oi-change"]);
+assert.deepEqual(
+  sanitizePageList(["sell-candidates", "oi-change"], undefined, true),
+  ["sell-candidates", "oi-change"],
+);
 
 assert.equal(memberFeatureAllowed("market_intel", { isMember: true, features: [] }), false);
 assert.equal(memberFeatureAllowed("market_intel", { isMember: true, features: ["market_intel"] }), true);

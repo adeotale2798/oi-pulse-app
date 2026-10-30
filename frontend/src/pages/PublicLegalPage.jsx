@@ -26,7 +26,7 @@ const LEGAL_PAGES = {
         title: "Information, analytics, and trading risk",
         paragraphs: [
           "Market data, OI, alerts, event summaries, analytics, AI-generated market context, and other outputs are informational tools. They are not individualized investment, trading, legal, tax, or accounting advice, and are not an offer or recommendation to buy or sell any instrument.",
-          "The service does not provide ranked sell candidates or recommendations about which instrument or strike to sell for any account type.",
+          "Guests and paid members do not receive ranked sell candidates or recommendations about which instrument or strike to sell. That analysis is restricted to the authenticated Admin workspace and is not a customer feature.",
           "Metrics and alerts use data and assumptions that may be incomplete, delayed, stale, revised, or unsuitable for your strategy. They are not probabilities of profit or guarantees of any outcome. Verify market data, positions, margin, and orders directly with your broker before acting.",
           "Options, futures, and other leveraged products involve substantial risk, including rapid losses and, for some strategies, losses exceeding the amount initially committed. You make and remain responsible for your trading decisions and for assessing whether a product or strategy is suitable for you.",
         ],

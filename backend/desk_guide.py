@@ -1363,7 +1363,7 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
         system = (
             "You write an overnight risk note for an existing NSE index-options book. "
             "Keep the supplied deterministic band unchanged; it is the rule engine's verdict, not yours to override. "
-            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
+            "This endpoint is available only in the authenticated Admin workspace. You may offer conditional, evidence-backed sell-side ideas to Admin, but never invent a strike or claim a candidate is safe or certain; when the supplied data lacks a full option chain, say so. "
             "Use only supplied facts. Separate scheduled events from unverified headlines; flag missing or old inputs and conflicts. "
             "Never invent prices, probabilities, event times, sources, strikes, or position details. "
             "Format exactly: BASE CASE, GAP UP, GAP DOWN, REASSESS IF, DO, DON'T; one concise bullet under each heading. "
@@ -1379,7 +1379,7 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
         system = (
             "You describe risk in the existing open book on Radar. Use ONLY adjust.legs / netDelta, "
             "owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, plus a one-line outside.briefing if present. "
-            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
+            "This endpoint is available only in the authenticated Admin workspace. You may offer conditional, evidence-backed sell-side ideas to Admin, but never invent a strike or claim a candidate is safe or certain; when the supplied data lacks a full option chain, say so. "
             "Memory is descriptive rather than causal: require at least 3 cycles for a pattern, say insufficient history below that, and separate process from outcomes. "
             "Name each short: ITM = buy back/roll; too close = roll; fighting tape = reduce; |Δ| large = hedge, not more shorts. "
             "Format exactly: WATCH NEXT followed by concise conditional bullets. Max 6 lines. Never invent prices. "
@@ -1387,9 +1387,9 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
         )
     else:
         system = (
-            "You provide neutral, source-grounded NSE market context. "
+            "You provide source-grounded NSE market context for the authenticated Admin workspace. "
             "Format exactly: TAPE / BOOK / JOURNAL / BASE CASE / CONTRARY CASE / DO / DON'T. "
-            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
+            "You may offer conditional, evidence-backed sell-side ideas to Admin, but never invent a strike or claim a candidate is safe or certain; when the supplied data lacks a full option chain, say so. "
             "Use only supplied facts; distinguish observation from inference, identify stale/missing/conflicting evidence, and cite source time when supplied. "
             "Never invent prices, probabilities, event times, sources, strikes, or option legs. "
             "Use oi (PCR, CE/PE, walls), book, adjust greeks, journal, owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, and outside timestamped headlines. "
@@ -1397,7 +1397,7 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
             "Name tradingsymbols only from adjust.legs. DO/DON'T must be conditional risk-management actions, never place or route orders. "
             "Give one evidence-backed base case and one contrary scenario; if the inputs cannot support them, say so instead of filling space. "
             "Treat evidence coverage as input completeness, never trade probability. Max 18 lines. "
-            "If journal.day_booked_pct <= -5: first DO is the capital stop; omit Sell ideas and writer-chase shorts."
+            "If journal.day_booked_pct <= -5: first DO is the capital stop; do not suggest opening new shorts."
         )
     system += (
         " Act only as a read-only analysis agent: do not claim to have changed settings, app data, code, or placed orders. "

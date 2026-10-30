@@ -4,6 +4,18 @@
  */
 export const RELEASE_NOTES = [
   {
+    version: "21.06",
+    date: "2026-10-30",
+    user: [
+      "Ranked sell candidates and conditional sell-side guidance are restored to the authenticated Admin workspace only.",
+      "Guests and paid members continue to receive neutral shared alerts and market-only Desk AI.",
+    ],
+    admin: [
+      "The Admin desk can enable the Sell Candidates page and OI posture card; public page settings cannot enable them.",
+      "Admin-only configuration responses expose the recommendation toggle, and the trade-guidance API remains restricted to Admin.",
+    ],
+  },
+  {
     version: "20.81",
     date: "2026-10-29",
     user: [

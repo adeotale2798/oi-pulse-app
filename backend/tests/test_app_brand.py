@@ -24,10 +24,10 @@ def test_adrs_is_allowed_dashboard_page():
     start = text.index("DASHBOARD_PAGE_KEYS")
     block = text[start:text.index("}", start)]
     assert '"adrs"' in block
-    assert '"sell-candidates"' not in block
+    assert '"sell-candidates"' in block
 
 
-def test_settings_sanitizer_removes_retired_page_and_suggestion_setting():
+def test_settings_sanitizer_keeps_sell_candidates_admin_only():
     from server import _sanitize_settings_catalog_values
 
     settings = {
@@ -39,5 +39,5 @@ def test_settings_sanitizer_removes_retired_page_and_suggestion_setting():
     _sanitize_settings_catalog_values(settings)
 
     assert settings["visible_pages"] == ["oi-change"]
-    assert settings["admin_visible_pages"] == ["open-interest"]
-    assert settings["show_suggestion"] is False
+    assert settings["admin_visible_pages"] == ["sell-candidates", "open-interest"]
+    assert settings["show_suggestion"] is True

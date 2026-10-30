@@ -1,5 +1,15 @@
 # Changelog
 
+## V21.06 — 2026-10-30
+
+Restore sell-candidate analysis, the OI posture card, and conditional sell-side
+guidance to the authenticated Admin workspace only. Public and member page
+settings cannot enable the candidate page; shared customer alerts and Pro Desk
+AI remain neutral. Admin settings and configuration responses expose the
+recommendation toggle only to Admin, and the trade-guidance API remains
+Admin-only. Existing desks restore the page and posture card once on upgrade;
+later Admin visibility choices are preserved.
+
 ## V21.05 — 2026-10-30
 
 Replace remaining short-entry language in OI alerts, volatility guides, and

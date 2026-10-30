@@ -96,4 +96,22 @@ describe("AuthGate disabled-plan access", () => {
     expect(container.querySelector("[data-testid='member-dashboard']")).not.toBeNull();
     expect(container.textContent).not.toContain("subscription");
   });
+
+  it("restores an authenticated Google member directly to the dashboard", async () => {
+    api.get.mockResolvedValue({ data: {
+      requires_login: false,
+      is_admin: false,
+      is_guest: false,
+      is_member: true,
+      membership: { plan: "normal", enabled: true, features: ["oi_change"] },
+    } });
+
+    await act(async () => {
+      root.render(<AuthGate><div data-testid="member-dashboard">Desk</div></AuthGate>);
+      await Promise.resolve();
+    });
+
+    expect(api.get).toHaveBeenCalledWith("/auth/state", { timeout: 2500 });
+    expect(container.querySelector("[data-testid='member-dashboard']")).not.toBeNull();
+  });
 });
