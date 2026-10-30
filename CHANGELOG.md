@@ -1,5 +1,65 @@
 # Changelog
 
+## V21.05 — 2026-10-30
+
+Replace remaining short-entry language in OI alerts, volatility guides, and
+market summaries with neutral observations. Positions summaries now describe
+existing-book exposure without treating low risk as an entry signal. OI and
+volatility calculations, existing-position risk controls, and order workflows
+are unchanged.
+
+## V21.04 — 2026-10-30
+
+Remove ranked sell candidates and sell-idea feeds from dashboard, Positions,
+and Desk AI for every account type. Retired page settings are filtered on both
+the frontend and backend, and public plan configuration cannot restore the
+surface. Keep neutral OI data and existing-position risk management unchanged.
+Show the publication-readiness notice only to authenticated Admins; hide it
+from public visitors until operator/contact details and legal review are ready.
+
+## V21.03 — 2026-10-30
+
+Expand public trust disclosures to cover account and content responsibilities,
+optional Admin CAS order submission, broker execution risks, current data
+categories and retention, provider roles, subscription confirmation,
+renewal/cancellation behavior, and missing self-service privacy/refund support.
+Add a visible publication-readiness notice for the missing operator identity,
+support channels, request process, and legal review; do not imply these draft
+pages are a complete legal or regulatory approval.
+
+## V21.02 — 2026-10-30
+
+Publish public Terms, Privacy, Subscription & Refund, and Market Risk pages,
+linked from the landing and sign-in footers. Describe current data retention,
+account controls, billing behavior, and market-data risks honestly, including
+launch items that still need operator/legal review. Make Admin membership
+analytics readable on phones with responsive charts and stacked reconciliation,
+cohort, and new-joiner cards. Rename the Admin settings shortcut to
+Subscriptions/Analytics.
+
+## V21.01 — 2026-10-30
+
+Improve membership reporting with date-bounded billing/checkout reads, targeted
+refund baselines, monthly reconciliation CSV export, first-charge cohort
+tracking for new subscriptions, and Admin-visible query volume and duration.
+Clarify cohort attrition versus churn and charge events versus renewals.
+Capture optional fixed-category cancellation reasons and report aggregate
+reason counts without collecting free text.
+
+## V21.00 — 2026-10-30
+
+Add a separate Admin membership analytics dashboard for configurable signup
+cohorts, checkout-to-paid conversion, current plan mix, paid-cohort retention,
+new-joiner management links, and optional first-signup attribution. Separate
+estimated MRR from verified Razorpay collections/refunds, add a monthly
+reconciliation worksheet and CSV export, retain first successful charge dates,
+and report query duration and record counts. Bound billing and checkout reads
+to the selected period while accounting for cumulative refunds from before the
+period. Label cohort attrition and payment events without claiming an
+unsupported churn or renewal rate. Capture optional structured cancellation
+reasons without free-text personal data. Historical revenue and cohort gaps
+remain disclosed.
+
 ## V20.81 — 2026-10-29
 
 Show enabled and recently traded broker instruments separately in the Admin

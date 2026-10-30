@@ -5,6 +5,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
 import server
 from starlette.requests import Request
 
@@ -47,6 +49,24 @@ def _webhook_request(event):
     }, receive)
 
 
+def _json_request(payload):
+    body = json.dumps(payload).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/billing/cancel",
+        "headers": [(b"content-type", b"application/json")],
+        "query_string": b"",
+        "server": ("striklenz.com", 443),
+        "scheme": "https",
+        "client": ("127.0.0.1", 1234),
+    }, receive)
+
+
 def _configure_webhook(monkeypatch, event):
     end = (datetime.now(timezone.utc) + timedelta(days=10)).timestamp()
     subscription = Collection({
@@ -56,6 +76,7 @@ def _configure_webhook(monkeypatch, event):
         "cadence": "monthly",
         "status": "active",
         "current_end": end,
+        "paid_cohort_tracking_enabled": True,
     })
     members = Collection()
     billing_events = Collection()
@@ -151,6 +172,7 @@ def test_partial_refund_does_not_remove_subscription_entitlement(monkeypatch):
         "subscription_id": "sub-123",
         "amount": 10000,
         "amount_refunded": 2500,
+        "currency": "INR",
     })
     subscription, members, billing_events, audit, _journal, _kite, request = _configure_webhook(monkeypatch, event)
 
@@ -159,8 +181,42 @@ def test_partial_refund_does_not_remove_subscription_entitlement(monkeypatch):
     assert result == {"ok": True, "ignored": True}
     assert subscription.updated == []
     assert members.updated == []
-    assert billing_events.updated == []
+    stored_event = billing_events.updated[0][1]["$setOnInsert"]
+    assert stored_event["payment_id"] == "pay-123"
+    assert stored_event["amount_minor"] == 10000
+    assert stored_event["refunded_amount_minor"] == 2500
+    assert stored_event["currency"] == "INR"
     assert audit.inserted == []
+
+
+def test_subscription_charge_persists_verified_payment_amount(monkeypatch):
+    event = {
+        "id": "provider-event-123",
+        "event": "subscription.charged",
+        "created_at": int(datetime.now(timezone.utc).timestamp()),
+        "payload": {
+            "subscription": {"entity": {"id": "sub-123"}},
+            "payment": {"entity": {
+                "id": "pay-123",
+                "subscription_id": "sub-123",
+                "amount": 199900,
+                "currency": "INR",
+                "status": "captured",
+            }},
+        },
+    }
+    _subscription, _members, billing_events, _audit, _journal, _kite, request = _configure_webhook(monkeypatch, event)
+
+    result = asyncio.run(server.razorpay_webhook(request))
+
+    assert result == {"ok": True}
+    stored_event = billing_events.updated[0][1]["$setOnInsert"]
+    assert stored_event["event_type"] == "subscription.charged"
+    assert stored_event["subscription_id"] == "sub-123"
+    assert stored_event["payment_id"] == "pay-123"
+    assert stored_event["amount_minor"] == 199900
+    assert stored_event["currency"] == "INR"
+    assert _subscription.updated[0][1]["$min"]["first_paid_at"] == event["created_at"]
 
 
 def test_duplicate_webhook_event_is_not_applied_twice(monkeypatch):
@@ -189,6 +245,53 @@ def test_out_of_order_webhook_cannot_restore_access(monkeypatch):
     assert members.updated == []
     assert audit.inserted == []
     assert billing_events.updated[0][1]["$setOnInsert"]["ignored_as_stale"] is True
+
+
+def test_stale_charge_records_amount_without_restoring_subscription_status(monkeypatch):
+    event = _event("subscription.charged")
+    event["created_at"] = 100
+    event["payload"]["payment"] = {"entity": {
+        "id": "pay-stale",
+        "subscription_id": "sub-123",
+        "amount": 50000,
+        "currency": "INR",
+    }}
+    subscription, members, billing_events, audit, _journal, _kite, request = _configure_webhook(monkeypatch, event)
+    subscription.document["last_event_created_at"] = 200
+    subscription.document["status"] = "cancelled"
+
+    result = asyncio.run(server.razorpay_webhook(request))
+
+    assert result == {"ok": True, "ignored": True, "stale": True}
+    assert subscription.updated == [(
+        {"_id": "sub-123"},
+        {"$min": {"first_paid_at": 100}},
+        False,
+    )]
+    assert members.updated == []
+    stale_record = billing_events.updated[0][1]["$setOnInsert"]
+    assert stale_record["ignored_as_stale"] is True
+    assert stale_record["payment_id"] == "pay-stale"
+    assert stale_record["amount_minor"] == 50000
+    assert audit.inserted == []
+    assert subscription.updated[0][1]["$min"]["first_paid_at"] == 100
+
+
+def test_legacy_subscription_renewal_is_not_mislabeled_as_first_paid(monkeypatch):
+    event = _event("subscription.charged")
+    event["created_at"] = 300
+    event["payload"]["payment"] = {"entity": {
+        "id": "pay-legacy",
+        "subscription_id": "sub-123",
+        "amount": 50000,
+        "currency": "INR",
+    }}
+    subscription, _members, _billing_events, _audit, _journal, _kite, request = _configure_webhook(monkeypatch, event)
+    subscription.document.pop("paid_cohort_tracking_enabled")
+
+    asyncio.run(server.razorpay_webhook(request))
+
+    assert "$min" not in subscription.updated[0][1]
 
 
 def test_member_cancellation_ends_access_immediately(monkeypatch):
@@ -249,7 +352,7 @@ def test_member_cancellation_ends_access_immediately(monkeypatch):
     monkeypatch.setattr(server, "_record_member_audit", record_audit)
     monkeypatch.setattr("httpx.AsyncClient", Client)
 
-    result = asyncio.run(server.membership_cancel(None))
+    result = asyncio.run(server.membership_cancel(_json_request({"reason": "price"})))
 
     assert result == {
         "ok": True,
@@ -267,6 +370,20 @@ def test_member_cancellation_ends_access_immediately(monkeypatch):
         "subscription": {"status": "cancelled", "current_end": current_end},
     }) == "normal"
     assert audit_events[0][3]["access_ends_immediately"] is True
+    assert audit_events[0][3]["reason"] == "price"
+
+
+def test_member_cancellation_rejects_unrecognized_reason_and_free_text(monkeypatch):
+    async def member_context(_request):
+        return ({"member_id": "member-123", "member": {}}, {}, "normal")
+
+    monkeypatch.setattr(server, "db", SimpleNamespace())
+    monkeypatch.setattr(server, "_member_context", member_context)
+
+    for payload in ({"reason": "other-but-with-details"}, {"reason": "other", "details": "private text"}):
+        with pytest.raises(server.HTTPException) as error:
+            asyncio.run(server.membership_cancel(_json_request(payload)))
+        assert error.value.status_code == 422
 
 
 def test_membership_profile_exposes_only_callers_redacted_subscription_history(monkeypatch):
@@ -297,6 +414,7 @@ def test_membership_profile_exposes_only_callers_redacted_subscription_history(m
                         "plan": "pro",
                         "status": "past_due",
                         "event_type": "payment.failed",
+                        "reason": "price",
                         "api_secret": "must-not-escape",
                     },
                     "created_at": now,

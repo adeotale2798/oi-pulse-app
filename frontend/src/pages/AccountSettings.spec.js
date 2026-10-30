@@ -97,6 +97,11 @@ describe("AccountSettings immediate paid cancellation", () => {
     const cancelButton = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent.includes("Cancel subscription"));
     expect(cancelButton).not.toBeUndefined();
+    const reasonSelect = container.querySelector("#subscription-cancel-reason");
+    await act(async () => {
+      reasonSelect.value = "price";
+      reasonSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     await act(async () => {
       cancelButton.click();
       await Promise.resolve();
@@ -107,7 +112,7 @@ describe("AccountSettings immediate paid cancellation", () => {
     expect(container.textContent).toContain("Subscription history");
     expect(container.textContent).toContain("Subscription cancelled · paid access ended immediately and Basic resumed");
     expect(container.querySelector('a[href="#subscription-options"]')?.textContent).toContain("Subscribe again");
-    expect(api.post).toHaveBeenCalledWith("/billing/cancel");
+    expect(api.post).toHaveBeenCalledWith("/billing/cancel", { reason: "price" });
     expect(container.textContent).toContain("Basic access");
     expect(toast.success).toHaveBeenCalledWith("Subscription cancelled. Your account is now on Basic.");
   });

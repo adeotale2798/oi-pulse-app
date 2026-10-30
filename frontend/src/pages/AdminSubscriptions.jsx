@@ -7,6 +7,15 @@ import { api } from "@/lib/api";
 
 const PLANS = ["normal", "premium", "pro"];
 const PLAN_LABELS = { normal: "Basic", premium: "Premium", pro: "Pro" };
+const CANCELLATION_REASON_LABELS = {
+  price: "Price",
+  not_using: "Not using it enough",
+  missing_features: "Missing features",
+  technical_issue: "Technical issue",
+  broker_setup: "Broker setup was difficult",
+  switching: "Switching to another service",
+  other: "Other",
+};
 
 function formatDate(value, includeTime = false) {
   const parsed = typeof value === "number" ? value * 1000 : Date.parse(value);
@@ -25,12 +34,16 @@ export default function AdminSubscriptions() {
   const [auditMemberId, setAuditMemberId] = useState(null);
   const [auditEvents, setAuditEvents] = useState([]);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [memberFilterId, setMemberFilterId] = useState(null);
+  const [memberFilterId, setMemberFilterId] = useState(
+    () => new URLSearchParams(window.location.search).get("member_id"),
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     const [membersResult, healthResult] = await Promise.allSettled([
-      api.get("/admin/members"),
+      api.get(memberFilterId
+        ? `/admin/members?member_id=${encodeURIComponent(memberFilterId)}`
+        : "/admin/members"),
       api.get("/admin/subscription-health"),
     ]);
     if (membersResult.status === "fulfilled") {
@@ -47,7 +60,7 @@ export default function AdminSubscriptions() {
       toast.error(message);
     }
     setLoading(false);
-  }, []);
+  }, [memberFilterId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -102,15 +115,22 @@ export default function AdminSubscriptions() {
     }, 0);
   };
 
-  const auditLabel = (event) => ({
-    admin_member_updated: "Admin changed member access or storage settings",
-    broker_credentials_saved: "Member saved or replaced broker app credentials",
-    broker_credentials_deleted: "Member removed saved broker app credentials",
-    broker_session_disconnected: "Member signed out of the broker session",
-    subscription_checkout_created: "Member started secure checkout",
-    subscription_renewal_cancelled: "Member cancelled subscription and returned to Basic",
-    subscription_status_changed: "Payment provider updated subscription status",
-  }[event] || String(event || "").replaceAll("_", " "));
+  const auditLabel = (event) => {
+    const labels = {
+      admin_member_updated: "Admin changed member access or storage settings",
+      broker_credentials_saved: "Member saved or replaced broker app credentials",
+      broker_credentials_deleted: "Member removed saved broker app credentials",
+      broker_session_disconnected: "Member signed out of the broker session",
+      subscription_checkout_created: "Member started secure checkout",
+      subscription_renewal_cancelled: "Member cancelled subscription and returned to Basic",
+      subscription_status_changed: "Payment provider updated subscription status",
+    };
+    const label = labels[event.event_type] || String(event.event_type || "").replaceAll("_", " ");
+    const reason = CANCELLATION_REASON_LABELS[event.details?.reason];
+    return event.event_type === "subscription_renewal_cancelled" && reason
+      ? `${label} · Reason: ${reason}`
+      : label;
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-7 text-slate-900 sm:px-6">
@@ -128,9 +148,14 @@ export default function AdminSubscriptions() {
               </div>
             </div>
           </div>
-          <button type="button" disabled={loading} onClick={load} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to="/admin/membership-analytics" className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+              Membership analytics
+            </Link>
+            <button type="button" disabled={loading} onClick={load} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </div>
         </header>
 
         <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5" aria-label="Subscription health" data-testid="subscription-health">
@@ -156,7 +181,7 @@ export default function AdminSubscriptions() {
                 </div>
               ))}
               {[
-                ["Renewals / charges", health.all_time?.renewals],
+                ["Charge events", health.all_time?.charge_events],
                 ["Cancellations", health.all_time?.cancellations],
                 ["Failed payments", health.all_time?.failed_payments],
                 ["Basic members blocked", health.blocked_basic_members],

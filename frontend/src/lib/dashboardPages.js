@@ -2,12 +2,14 @@
 
 export const HOME_PAGE = "oi-change";
 export const BOOT_VISIBLE_PAGES = [HOME_PAGE];
+const DISABLED_PAGE_IDS = new Set(["sell-candidates"]);
 
 /**
  * Before pagesReady, only HOME_PAGE is allowed so a reload cannot flash
  * Straddle / CAS / ADRs / etc. to guests.
  */
 export function pageAllowed(id, { isAdmin, visiblePages, adminPages, pagesReady = true } = {}) {
+  if (DISABLED_PAGE_IDS.has(id)) return false;
   if (pagesReady === false) return id === HOME_PAGE;
   if (isAdmin) {
     if (!Array.isArray(adminPages) || adminPages.length === 0) return true;
@@ -22,6 +24,9 @@ export function memberFeatureAllowed(feature, { isMember, features } = {}) {
 }
 
 export function sanitizePageList(ids, fallback = BOOT_VISIBLE_PAGES) {
-  if (!Array.isArray(ids) || !ids.length) return fallback.slice();
-  return ids.map((id) => String(id || "").trim()).filter(Boolean);
+  const source = Array.isArray(ids) && ids.length ? ids : fallback;
+  const pages = source
+    .map((id) => String(id || "").trim())
+    .filter((id) => id && !DISABLED_PAGE_IDS.has(id));
+  return pages.length ? pages : fallback.filter((id) => !DISABLED_PAGE_IDS.has(id));
 }

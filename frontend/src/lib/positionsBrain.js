@@ -310,10 +310,10 @@ export function computePositionsBrain({ rows = [], stats = {}, vix = null } = {}
 
   let deployment =
     heat >= 70
-      ? "Do not deploy more short premium. Cut the named leg first."
+      ? "Current book has elevated path risk; the named leg is the largest contributor."
       : heat >= 45
-        ? "Keep existing carry. New shorts only farther from the watch strike, small size."
-        : "Normal size is fine if the new strike is farther than the current nearest short.";
+        ? "Current book has moderate path risk; the watch list identifies concentrated legs."
+        : "Current book heat is low on available inputs; this is not an entry signal.";
 
   let mode = decision.mode;
   let urgency = decision.urgency;
@@ -335,7 +335,7 @@ export function computePositionsBrain({ rows = [], stats = {}, vix = null } = {}
     label = cap.level === "defend" ? "Stop the day" : "No new shorts";
     action = cap.doLine;
     summary = cap.headline;
-    deployment = "Do not sell more premium. A GOOD book score is path risk, not a green light after a capital hit.";
+    deployment = "Capital risk is elevated. A GOOD book score is path risk, not a green light after a capital hit.";
     plan = [cap.doLine, ...cap.dontLines, ...plan.slice(0, 2)];
   }
 

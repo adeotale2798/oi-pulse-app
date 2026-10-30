@@ -120,7 +120,6 @@ def compact_snapshot(body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     journal = _compact_journal(b.get("journal"))
     memory = _compact_memory(b.get("memory"))
     market_memory = _compact_market_memory(b.get("market_memory"))
-    sells = _compact_sells(b.get("sells"))
     index = _clip(b.get("index"))[:16] or None
     session_focus = _clip(b.get("session_focus") or index)[:16] or None
 
@@ -163,7 +162,6 @@ def compact_snapshot(body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "journal": journal,
         "memory": memory,
         "market_memory": market_memory,
-        "sells": sells,
         "evidence_quality": _evidence_quality({
             "oi": _compact_oi(b.get("oi")),
             "gift_quote": _compact_quote(b.get("gift_quote")),
@@ -439,35 +437,6 @@ def _compact_market_memory(raw: Any) -> Optional[Dict[str, Any]]:
         except (TypeError, ValueError):
             continue
     return {"index": _clip(raw.get("index"))[:16], "levels": levels} if levels else None
-
-
-def _compact_sells(raw: Any) -> List[Dict[str, Any]]:
-    rows = raw if isinstance(raw, list) else []
-    out: List[Dict[str, Any]] = []
-    for item in rows[:3]:
-        if not isinstance(item, dict):
-            continue
-        side = _clip(item.get("side")).upper()[:2]
-        if side not in ("CE", "PE"):
-            side = None
-        strike = item.get("strike")
-        score = item.get("score")
-        try:
-            strike = float(strike) if strike is not None else None
-        except (TypeError, ValueError):
-            strike = None
-        try:
-            score = float(score) if score is not None else None
-        except (TypeError, ValueError):
-            score = None
-        out.append({
-            "s": _clip(item.get("s"))[:28] or None,
-            "strike": strike,
-            "side": side,
-            "score": score,
-            "why": _clip(item.get("why"))[:80] or None,
-        })
-    return out
 
 
 def _compact_journal(raw: Any) -> Optional[Dict[str, Any]]:
@@ -928,25 +897,6 @@ def _memory_line(snap: Dict[str, Any]) -> Optional[str]:
     return "Book memory (owner strategy): " + outcome + (f" | {process_line}" if process_line else "")
 
 
-def _sells_line(snap: Dict[str, Any]) -> Optional[str]:
-    rows = snap.get("sells") if isinstance(snap.get("sells"), list) else []
-    bits = []
-    for item in rows[:3]:
-        if not isinstance(item, dict):
-            continue
-        label = item.get("s") or " ".join(
-            str(x) for x in (item.get("strike"), item.get("side")) if x is not None
-        ).strip()
-        why = item.get("why")
-        if label and why:
-            bits.append(f"{label} — {why}")
-        elif label:
-            bits.append(str(label))
-    if not bits:
-        return None
-    return "Sell ideas (your ranker): " + "; ".join(bits)
-
-
 def _compose_carry(snap: Dict[str, Any]) -> str:
     """Overnight: do / don't for the open book — greeks, IV, VIX, events, journal."""
     bits: List[str] = []
@@ -1169,25 +1119,9 @@ def _compose_desk(snap: Dict[str, Any]) -> str:
         dont.extend(cap["dont"])
     seller = [e.get("seller") for e in evs[:3] if e.get("seller")]
     buyer = [e.get("buyer") for e in evs[:3] if e.get("buyer")]
-    if not (cap and cap.get("stop_sells")):
-        for row in (snap.get("oi") or [])[:2]:
-            if not isinstance(row, dict):
-                continue
-            ce = int(row.get("ceChg") or 0)
-            pe = int(row.get("peChg") or 0)
-            idx = row.get("idx") or "Index"
-            if ce > pe:
-                do.append(f"{idx}: call writers — prefer CE shorts / do not chase PE shorts.")
-                dont.append(f"{idx}: do not add PE shorts into a call-writer tape.")
-            else:
-                do.append(f"{idx}: put writers — prefer PE shorts / do not chase CE shorts.")
-                dont.append(f"{idx}: do not add CE shorts into a put-writer tape.")
     named_lines = _named_action_lines(snap)
     do.extend(named_lines["do"])
     dont.extend(named_lines["dont"])
-    sl = _sells_line(snap)
-    if sl and not (cap and cap.get("stop_sells")):
-        do.append(sl)
     do.extend(seller[:2])
     if buyer:
         dont.append("Buyers: " + "; ".join(buyer[:2]))
@@ -1195,7 +1129,7 @@ def _compose_desk(snap: Dict[str, Any]) -> str:
     if vix is not None and vix >= 18:
         dont.append(f"VIX {vix:.1f} — size down, do not sell more naked premium.")
     bits.append("DO")
-    bits.extend(f"  {t}" for t in (do[:4] or ["Stay with session writers; do not fade a one-print cash spike."]))
+    bits.extend(f"  {t}" for t in (do[:4] or ["Treat OI and writer activity as observations, not trade instructions."]))
     bits.append("DON'T")
     bits.extend(f"  {t}" for t in (dont[:4] or ["Do not invent a trade if OI and cash are quiet."]))
     if not bits:
@@ -1229,10 +1163,7 @@ def _compose_positions(snap: Dict[str, Any]) -> str:
         hedge = f"Hedge |Δ| {ndf:.0f} — futures or far OTM option, not more shorts"
         if hedge not in watch:
             watch.append(hedge)
-    sl = _sells_line(snap)
     cap = _capital_coach(snap)
-    if sl and not (cap and cap.get("stop_sells")):
-        watch.append(sl)
     if cap:
         watch = [cap["do"]] + list(cap.get("dont") or []) + watch
     ml = _memory_line(snap)
@@ -1430,8 +1361,9 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
     surface = str(snap.get("surface") or "desk")
     if surface == "carry":
         system = (
-            "You write an overnight HOLD note for NSE index-option sellers. "
+            "You write an overnight risk note for an existing NSE index-options book. "
             "Keep the supplied deterministic band unchanged; it is the rule engine's verdict, not yours to override. "
+            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
             "Use only supplied facts. Separate scheduled events from unverified headlines; flag missing or old inputs and conflicts. "
             "Never invent prices, probabilities, event times, sources, strikes, or position details. "
             "Format exactly: BASE CASE, GAP UP, GAP DOWN, REASSESS IF, DO, DON'T; one concise bullet under each heading. "
@@ -1445,8 +1377,9 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
         )
     elif surface == "positions":
         system = (
-            "You coach the open shorts book on Radar. Use ONLY adjust.legs / netDelta, optional sells "
-            "(explain the ranker, do not invent a list), owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, plus a one-line outside.briefing if present. "
+            "You describe risk in the existing open book on Radar. Use ONLY adjust.legs / netDelta, "
+            "owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, plus a one-line outside.briefing if present. "
+            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
             "Memory is descriptive rather than causal: require at least 3 cycles for a pattern, say insufficient history below that, and separate process from outcomes. "
             "Name each short: ITM = buy back/roll; too close = roll; fighting tape = reduce; |Δ| large = hedge, not more shorts. "
             "Format exactly: WATCH NEXT followed by concise conditional bullets. Max 6 lines. Never invent prices. "
@@ -1454,11 +1387,12 @@ async def _call_llm(snap: Dict[str, Any]) -> str:
         )
     else:
         system = (
-            "You are an NSE index-options desk for sellers first, then buyers. "
+            "You provide neutral, source-grounded NSE market context. "
             "Format exactly: TAPE / BOOK / JOURNAL / BASE CASE / CONTRARY CASE / DO / DON'T. "
+            "Never identify or rank sell candidates, recommend an instrument or strike to sell, or suggest opening a new short position. "
             "Use only supplied facts; distinguish observation from inference, identify stale/missing/conflicting evidence, and cite source time when supplied. "
             "Never invent prices, probabilities, event times, sources, strikes, or option legs. "
-            "Use oi (PCR, CE/PE, walls), book, adjust greeks, journal, owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, sells (explain top 3 from the ranker only), and outside timestamped headlines. "
+            "Use oi (PCR, CE/PE, walls), book, adjust greeks, journal, owner-scoped memory.summary/buckets for outcomes and memory.process separately for execution habits, and outside timestamped headlines. "
             "Memory is descriptive rather than causal: require at least 3 cycles for a pattern, say insufficient history below that, and separate process from outcomes. "
             "Name tradingsymbols only from adjust.legs. DO/DON'T must be conditional risk-management actions, never place or route orders. "
             "Give one evidence-backed base case and one contrary scenario; if the inputs cannot support them, say so instead of filling space. "

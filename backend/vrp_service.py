@@ -103,21 +103,17 @@ def _parkinson_vol(highs: List[float], lows: List[float]) -> Optional[float]:
 
 
 def _classify_vrp(vrp: Optional[float]) -> Dict[str, str]:
-    """Zone classification per the trader's spec:
-       VRP > +2      → rich premium, sell size
-       +0.5 to +2    → fair premium
-       -0.5 to +0.5  → thin edge, reduce size
-       < -0.5        → negative edge, skip / defensive-only
+    """Classify implied volatility relative to recent realized volatility.
     """
     if vrp is None:
         return {"regime": "unknown", "label": "—", "tone": "slate", "zone": "unknown"}
     if vrp >= 2:
-        return {"regime": "rich", "label": "Rich premium — sell size", "tone": "emerald", "zone": "rich"}
+        return {"regime": "rich", "label": "IV above realized volatility", "tone": "emerald", "zone": "rich"}
     if vrp >= 0.5:
-        return {"regime": "fair", "label": "Fair premium", "tone": "emerald", "zone": "fair"}
+        return {"regime": "fair", "label": "IV modestly above realized volatility", "tone": "emerald", "zone": "fair"}
     if vrp >= -0.5:
-        return {"regime": "thin", "label": "Thin edge — reduce size", "tone": "amber", "zone": "thin"}
-    return {"regime": "poor", "label": "HV outrunning IV — SKIP", "tone": "rose", "zone": "poor"}
+        return {"regime": "thin", "label": "IV near realized volatility", "tone": "amber", "zone": "thin"}
+    return {"regime": "poor", "label": "Realized volatility above IV", "tone": "rose", "zone": "poor"}
 
 
 def _classify_trend(series: List[Dict[str, Any]]) -> Dict[str, Any]:

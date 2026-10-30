@@ -195,7 +195,7 @@ DEFAULT_SETTINGS = {
     "visible_pages": ["oi-change", "open-interest", "strike-table", "buildup", "positions", "alerts", "activity", "holidays", "straddle", "index-events", "market-intel", "adrs"],
     # Admin's own dashboard tabs (independent of guest visibility)
     "admin_visible_pages": [
-        "oi-change", "open-interest", "strike-table", "sell-candidates", "buildup",
+        "oi-change", "open-interest", "strike-table", "buildup",
         "positions", "alerts", "activity", "holidays", "straddle", "index-events", "cas", "market-intel", "adrs",
     ],
     # Sidebar Strike Range steppers — off by default (ATM quick-picks cover most use)
@@ -204,7 +204,7 @@ DEFAULT_SETTINGS = {
     # Writer Defense map on Open Interest tab (admin-togglable)
     "show_writer_defense": True,
     # Suggestion posture card under the right panel (admin-togglable)
-    "show_suggestion": True,
+    "show_suggestion": False,
     # Desk AI — one header on/off for the whole desk. Radar stays a Positions tick.
     "desk_ai_ask": True,
     "desk_ai_positions": False,
@@ -526,7 +526,7 @@ class OITracker:
             "market_open_ist", "market_close_ist", "second_session_ist",
             "expire_admin_on_market_close", "admin_session_ttl_minutes",
             "alert_enabled_indices", "alert_indices_override_date",
-            "show_strike_range", "show_writer_defense", "show_suggestion",
+            "show_strike_range", "show_writer_defense",
             "show_chart_signals", "position_mark_glow_after_close", "position_mark_glow_pct",
             "alert_toast_opacity",
             "overnight_popup_opacity", "market_intel_popup_opacity", "indicative_popup_opacity",

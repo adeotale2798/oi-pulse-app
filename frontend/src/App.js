@@ -13,6 +13,7 @@ import { installDeskErrorLog } from "@/lib/errorLog";
 import { api } from "@/lib/api";
 import { loadPublicEntryAuthState } from "@/lib/authBoot";
 import { isSiteWalkthroughPath } from "@/lib/siteWalkthroughApi";
+import { captureMembershipAttribution } from "@/lib/membershipAttribution";
 
 const Landing = lazy(() => import("@/pages/Landing"));
 const SiteWalkthrough = lazy(() => import("@/pages/SiteWalkthrough"));
@@ -22,6 +23,8 @@ const AdminLogin = lazy(() => import("@/pages/AdminLogin"));
 const AdminSettings = lazy(() => import("@/pages/AdminSettings"));
 const AdminLandingPage = lazy(() => import("@/pages/AdminLandingPage"));
 const AdminSubscriptions = lazy(() => import("@/pages/AdminSubscriptions"));
+const AdminMembershipAnalytics = lazy(() => import("@/pages/AdminMembershipAnalytics"));
+const PublicLegalPage = lazy(() => import("@/pages/PublicLegalPage"));
 const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
 const MemberJournal = lazy(() => import("@/pages/MemberJournal"));
 const KiteCallback = lazy(() => import("@/pages/KiteCallback"));
@@ -100,12 +103,14 @@ function AppRoutes({ isAdminHost }) {
           {isAdminHost ? (
             <>
               <Route path="/sitewalkthrough" element={<SiteWalkthrough />} />
+              <Route path="/legal/:document" element={<PublicLegalPage />} />
               <Route path="/" element={<AdminLogin />} />
               <Route path="/admin" element={<AdminLogin />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin/settings" element={<AdminSettings />} />
               <Route path="/admin/settings/landingpage" element={<AdminLandingPage />} />
               <Route path="/admin/subscriptions" element={<AdminSubscriptions />} />
+              <Route path="/admin/membership-analytics" element={<AdminMembershipAnalytics />} />
               <Route path="/kite-callback" element={<KiteCallback />} />
               <Route path="/account" element={<AuthGate><AccountSettings /></AuthGate>} />
               <Route path="/account/journal" element={<AuthGate><MemberJournal /></AuthGate>} />
@@ -122,6 +127,7 @@ function AppRoutes({ isAdminHost }) {
           ) : (
             <>
               <Route path="/sitewalkthrough" element={<SiteWalkthrough />} />
+              <Route path="/legal/:document" element={<PublicLegalPage />} />
               <Route path="/" element={<PublicEntry />} />
               <Route path="/login" element={<Login />} />
               <Route path="/admin" element={<AdminLogin />} />
@@ -129,6 +135,7 @@ function AppRoutes({ isAdminHost }) {
               <Route path="/admin/settings" element={<AdminSettings />} />
               <Route path="/admin/settings/landingpage" element={<AdminLandingPage />} />
               <Route path="/admin/subscriptions" element={<AdminSubscriptions />} />
+              <Route path="/admin/membership-analytics" element={<AdminMembershipAnalytics />} />
               <Route path="/account" element={<AuthGate><AccountSettings /></AuthGate>} />
               <Route path="/account/journal" element={<AuthGate><MemberJournal /></AuthGate>} />
               <Route path="/kite-callback" element={<KiteCallback />} />
@@ -164,6 +171,15 @@ function AppRoutes({ isAdminHost }) {
 function App() {
   const isAdminHost =
     window.location.hostname === "admin.striklenz.com";
+
+  useEffect(() => {
+    // Keep first-touch campaign tags before landing-page navigation drops the query string.
+    captureMembershipAttribution(
+      window.location.search,
+      document.referrer,
+      window.location.hostname,
+    );
+  }, []);
 
   return (
     <div className="App">

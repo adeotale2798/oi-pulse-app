@@ -5,7 +5,7 @@
 // Each guide function returns a React node describing:
 //   • what the metric measures (1-line summary)
 //   • its zone thresholds as a table (current zone highlighted)
-//   • the action suggestion at the CURRENT reading
+//   • a neutral interpretation of the CURRENT reading
 //
 // Kept as pure functional JSX so the InfoTip Popover can render them as-is.
 // -----------------------------------------------------------------------------
@@ -22,7 +22,7 @@ const zoneClass = (active, tone) => {
   return "text-slate-800 dark:text-slate-100 font-semibold";
 };
 
-function ZoneTable({ title, description, zones, currentZone, action }) {
+function ZoneTable({ title, description, zones, currentZone, interpretation }) {
   return (
     <div className="space-y-2 text-xs">
       <div className="font-semibold text-slate-900 dark:text-slate-100">{title}</div>
@@ -35,9 +35,9 @@ function ZoneTable({ title, description, zones, currentZone, action }) {
           </div>
         ))}
       </div>
-      {action && (
+      {interpretation && (
         <div className="border-t border-slate-200 dark:border-slate-700 pt-1 text-slate-700 dark:text-slate-200">
-          <span className="font-semibold">Now:</span> {action}
+          <span className="font-semibold">Reading:</span> {interpretation}
         </div>
       )}
     </div>
@@ -49,27 +49,27 @@ function ZoneTable({ title, description, zones, currentZone, action }) {
 // ---------------------------------------------------------------------------
 export function ivRankGuide(ivRank) {
   const zones = [
-    { key: "rich",   range: "≥ 70",    label: "Rich · sell aggressively",     tone: "emerald" },
-    { key: "high",   range: "50 – 69", label: "Above average · sell OK",      tone: "emerald" },
-    { key: "fair",   range: "30 – 49", label: "Fair · normal size",           tone: "amber" },
-    { key: "low",    range: "15 – 29", label: "Cheap · reduce size",          tone: "amber" },
-    { key: "veryLow",range: "< 15",    label: "Very cheap · avoid selling",   tone: "rose" },
+    { key: "rich",   range: "≥ 70",    label: "High relative IV",              tone: "emerald" },
+    { key: "high",   range: "50 – 69", label: "Above-average relative IV",      tone: "emerald" },
+    { key: "fair",   range: "30 – 49", label: "Mid-range relative IV",          tone: "amber" },
+    { key: "low",    range: "15 – 29", label: "Below-average relative IV",      tone: "amber" },
+    { key: "veryLow",range: "< 15",    label: "Very low relative IV",           tone: "rose" },
   ];
-  let currentZone = null, action = null;
+  let currentZone = null, interpretation = null;
   if (ivRank != null) {
-    if (ivRank >= 70)      { currentZone = "rich";    action = "Rich premium environment — writers get paid well for the risk."; }
-    else if (ivRank >= 50) { currentZone = "high";    action = "Above-average premium — normal position sizing OK."; }
-    else if (ivRank >= 30) { currentZone = "fair";    action = "Fair premium — trade regular size but avoid over-selling."; }
-    else if (ivRank >= 15) { currentZone = "low";     action = "Premium is thin — smaller size, wider strikes, shorter DTE."; }
-    else                   { currentZone = "veryLow"; action = "Skip premium selling — market not paying enough for the risk."; }
+    if (ivRank >= 70)      { currentZone = "rich";    interpretation = "Implied volatility is high relative to its recent range."; }
+    else if (ivRank >= 50) { currentZone = "high";    interpretation = "Implied volatility is above its recent midpoint."; }
+    else if (ivRank >= 30) { currentZone = "fair";    interpretation = "Implied volatility is near the middle of its recent range."; }
+    else if (ivRank >= 15) { currentZone = "low";     interpretation = "Implied volatility is below its recent midpoint."; }
+    else                   { currentZone = "veryLow"; interpretation = "Implied volatility is near the bottom of its recent range."; }
   }
   return (
     <ZoneTable
       title="IV Rank"
-      description={"How rich India VIX is vs its recent range. Higher = better for premium sellers."}
+      description="How India VIX compares with its recent range. Higher values indicate relatively higher implied volatility."
       zones={zones}
       currentZone={currentZone}
-      action={action}
+      interpretation={interpretation}
     />
   );
 }
@@ -79,25 +79,25 @@ export function ivRankGuide(ivRank) {
 // ---------------------------------------------------------------------------
 export function vrpGuide(vrp) {
   const zones = [
-    { key: "rich", range: "> +2",           label: "Rich · sell size",            tone: "emerald" },
-    { key: "fair", range: "+0.5 to +2",     label: "Fair · normal size",          tone: "emerald" },
-    { key: "thin", range: "-0.5 to +0.5",   label: "Thin · reduce size",          tone: "amber" },
-    { key: "poor", range: "< -0.5",         label: "HV outrunning IV · SKIP",     tone: "rose" },
+    { key: "rich", range: "> +2",           label: "IV above realized volatility",       tone: "emerald" },
+    { key: "fair", range: "+0.5 to +2",     label: "IV modestly above realized volatility", tone: "emerald" },
+    { key: "thin", range: "-0.5 to +0.5",   label: "IV near realized volatility",        tone: "amber" },
+    { key: "poor", range: "< -0.5",         label: "Realized volatility above IV",       tone: "rose" },
   ];
-  let currentZone = null, action = null;
+  let currentZone = null, interpretation = null;
   if (vrp != null) {
-    if (vrp >= 2)         { currentZone = "rich"; action = "IV meaningfully above realised vol — best selling environment."; }
-    else if (vrp >= 0.5)  { currentZone = "fair"; action = "Sellers over-paid vs actual movement — trade normal size."; }
-    else if (vrp >= -0.5) { currentZone = "thin"; action = "Edge is thin — reduce size, widen strikes, prefer shorter DTE."; }
-    else                  { currentZone = "poor"; action = "Realised vol is running ABOVE implied vol — sellers are under-paid. SKIP."; }
+    if (vrp >= 2)         { currentZone = "rich"; interpretation = "Implied volatility is meaningfully above recent realized volatility."; }
+    else if (vrp >= 0.5)  { currentZone = "fair"; interpretation = "Implied volatility is modestly above recent realized volatility."; }
+    else if (vrp >= -0.5) { currentZone = "thin"; interpretation = "Implied and recent realized volatility are close."; }
+    else                  { currentZone = "poor"; interpretation = "Recent realized volatility is above implied volatility."; }
   }
   return (
     <ZoneTable
       title="Volatility Risk Premium (IV − HV₁₀)"
-      description="Is IV cheap or expensive relative to how the market is actually moving right now? Better than IV Rank alone because it compares against real movement, not history."
+      description="Compares implied volatility with recent realized movement, rather than only with its historical range."
       zones={zones}
       currentZone={currentZone}
-      action={action}
+      interpretation={interpretation}
     />
   );
 }

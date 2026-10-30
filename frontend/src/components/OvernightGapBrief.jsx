@@ -20,7 +20,7 @@ import {
   writeCarryLeft,
 } from "@/lib/carryDock";
 import { carryCase, eventDisplayName, sellerCarryAdvice, summarizeBook, writerBiasLine } from "@/lib/carryFocus";
-import { compactBookFromPositions, compactJournalFromPeriod, compactSellIdeas, compactTradeMemory, daysAgoIST, tapeFromBiasRow } from "@/lib/deskAiTape";
+import { compactBookFromPositions, compactJournalFromPeriod, compactTradeMemory, daysAgoIST, tapeFromBiasRow } from "@/lib/deskAiTape";
 import { formatEvidenceAsOf, parseGuideSections } from "@/lib/deskAiLayout";
 import { todayIST } from "@/lib/holidays";
 import { cashSessionFocusIndex, overnightBiasIndices } from "@/lib/deskFocus";
@@ -175,7 +175,7 @@ export default function OvernightGapBrief({
   const boxRef = useRef(null);
   const skipClickRef = useRef(false);
   const userPinnedRef = useRef(null);
-  const packedBookRef = useRef({ book: null, adjust: null, journal: null, sells: [], memory: null });
+  const packedBookRef = useRef({ book: null, adjust: null, journal: null, memory: null });
 
   useEffect(() => {
     if (active) bringToFront();
@@ -485,8 +485,6 @@ export default function OvernightGapBrief({
     setLoading(true);
     try {
       const rows = [];
-      const focus = cashSessionFocusIndex(ist.weekday);
-      let sells = [];
       for (const idx of names) {
         try {
           const data = await fetchOIChange(idx, 15, { also: "session" });
@@ -503,19 +501,15 @@ export default function OvernightGapBrief({
             asOf: data?.current?.timestamp ?? null,
             dataStatus: data?.data_status?.label ?? null,
           });
-          if (idx === focus || (!sells.length && idx === names[0])) {
-            sells = compactSellIdeas(idx, data?.current, sessPrev || data?.previous, vixLive ?? vix);
-          }
         } catch {
           rows.push({ index: idx, bias: null, minutes: null, price: null });
         }
       }
-      packedBookRef.current = { ...packedBookRef.current, sells };
       setBiases(rows);
     } finally {
       setLoading(false);
     }
-  }, [active, minimized, activeIndex, ist.weekday, vix, vixLive]);
+  }, [active, minimized, activeIndex, ist.weekday]);
 
   const loadIndexImpacts = useCallback(async () => {
     if (!active || minimized) return;
@@ -565,7 +559,6 @@ export default function OvernightGapBrief({
       packedBookRef.current = {
         ...(isAdmin && canReadPositions ? compactBookFromPositions(positionsRes.data) : {}),
         ...(isAdmin ? { journal: compactJournalFromPeriod(journalRes) } : {}),
-        sells: packedBookRef.current?.sells || [],
         memory,
       };
     } catch {
@@ -670,7 +663,6 @@ export default function OvernightGapBrief({
     adjust: packedBookRef.current?.adjust,
     journal: packedBookRef.current?.journal,
     memory: tradeMemory || packedBookRef.current?.memory,
-    sells: packedBookRef.current?.sells,
   };
 
   useEffect(() => {
@@ -698,7 +690,6 @@ export default function OvernightGapBrief({
           oi: p.oi,
           journal: p.journal,
           memory: p.memory,
-          sells: p.sells,
           vix: p.vix,
           vix_quote: p.vix_quote,
           giftPct: p.giftPct,

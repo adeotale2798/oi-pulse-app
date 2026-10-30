@@ -139,6 +139,7 @@ def test_checkout_attaches_offer_and_records_first_period_price(monkeypatch):
     subscription_update = collections.member_subscriptions.updated[0][1]["$set"]
     assert subscription_update["first_period_price"] == 799
     assert subscription_update["offer_id"] == "offer_monthly"
+    assert subscription_update["paid_cohort_tracking_enabled"] is True
 
 
 async def _async_noop(*_args, **_kwargs):

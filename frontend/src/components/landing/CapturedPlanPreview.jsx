@@ -419,7 +419,7 @@ function ActivitySnapshot({ snapshot }) {
 }
 
 export default function CapturedPlanPreview({ featureId, snapshot }) {
-  if (["oi_change", "open_interest", "strike_table", "buildup", "writer_defense", "chart_signal_chips", "sell_candidates", "suggestion_window"].includes(featureId)) {
+  if (["oi_change", "open_interest", "strike_table", "buildup", "writer_defense", "chart_signal_chips", "suggestion_window"].includes(featureId)) {
     return <OiSnapshot featureId={featureId} snapshot={snapshot} />;
   }
   if (featureId === "straddle") return <StraddleSnapshot snapshot={snapshot} />;

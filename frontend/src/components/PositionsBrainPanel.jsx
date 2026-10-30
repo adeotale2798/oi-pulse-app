@@ -57,7 +57,7 @@ function BrainSectionHeader({ title, tip, tone = "slate", testId }) {
 
 export default function PositionsBrainPanel({ open, onClose, rows = [], stats = {}, vix = null }) {
   const brain = computePositionsBrain({ rows, stats, vix });
-  const seller = computeBookVerdict({
+  const riskVerdict = computeBookVerdict({
     netDelta: brain.netDelta,
     netTheta: brain.netTheta,
     shortCount: brain.shortCount,
@@ -144,9 +144,9 @@ export default function PositionsBrainPanel({ open, onClose, rows = [], stats = 
               </div>
             </div>
             <div className="mt-2 text-[11px] text-slate-600">
-            Seller verdict:{" "}
+            Book risk:{" "}
             <span className="font-semibold text-slate-900">
-              {brain.mode === "CAPITAL" ? "Capital stop — ignore add-from-book-score" : seller.headline}
+              {brain.mode === "CAPITAL" ? "Capital stop — risk score is not an entry signal" : riskVerdict.headline}
             </span>
               <span className="text-slate-400"> · data {brain.dataQuality}%</span>
             </div>

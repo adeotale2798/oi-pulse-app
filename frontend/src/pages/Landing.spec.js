@@ -135,6 +135,10 @@ describe("public landing page plan details", () => {
     expect(container.querySelector("[data-testid='pricing-features-normal']").textContent).toContain("OI Change dashboard");
     expect(container.querySelector("[data-testid='pricing-features-premium']").textContent).toContain("Market Intel");
     expect(container.querySelector("[data-testid='pricing-features-pro']").textContent).toContain("Your open positions");
+    expect(container.querySelector('footer a[href="/legal/terms"]')).not.toBeNull();
+    expect(container.querySelector('footer a[href="/legal/privacy"]')).not.toBeNull();
+    expect(container.querySelector('footer a[href="/legal/subscriptions"]')).not.toBeNull();
+    expect(container.querySelector('footer a[href="/legal/risk"]')).not.toBeNull();
 
     await act(async () => {
       container.querySelector("[data-testid='pricing-more-info-normal']").click();

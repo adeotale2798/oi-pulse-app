@@ -70,6 +70,8 @@ assert.equal(healthy.mode, "SAFE");
 assert.ok(healthy.heat < 45, `healthy heat ${healthy.heat}`);
 assert.equal(healthy.putCount, 1);
 assert.equal(healthy.callCount, 1);
+assert.match(healthy.deployment, /not an entry signal/i);
+assert.doesNotMatch(healthy.deployment, /new shorts only|normal size is fine/i);
 assert.ok(healthy.plan.some((p) => /24000/.test(p) && /26000/.test(p)), "plan names real short strikes");
 assert.ok(!healthy.contributors.some((c) => c.id === "theta"), "positive theta is not heat");
 

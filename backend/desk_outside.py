@@ -133,16 +133,16 @@ def seller_note(pct: Optional[float], weightage: Optional[float]) -> str:
         p = float(pct or 0)
         w = float(weightage or 0)
     except (TypeError, ValueError):
-        return "heavyweight moving — size shorts"
+        return "heavyweight price context unavailable"
     wt = f"{w:.1f}% wt" if w else "heavyweight"
     if p <= -1.2:
-        return f"{wt} dumping — index can slip the put wall; do not add PE shorts"
+        return f"{wt} fell sharply — downside pressure; nearby support may be tested"
     if p <= -0.7:
-        return f"{wt} heavy — respect downside; fade only if puts still adding on the chart"
+        return f"{wt} declined — downside pressure is present"
     if p >= 1.2:
-        return f"{wt} ripping — call wall can get tested; do not chase CE shorts"
+        return f"{wt} rose sharply — upside momentum; nearby resistance may be tested"
     if p >= 0.7:
-        return f"{wt} bid — upside squeeze risk on sold calls"
+        return f"{wt} advanced — upside momentum is present"
     return f"{wt} in play"
 
 

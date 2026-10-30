@@ -43,6 +43,13 @@ from poll_intervals import (
 from oi_change_lookback import lookback_floor
 from oi_service import INDEX_CONFIG
 from universe import catalog_public, DESK_IDS
+from membership_analytics import (
+    analytics_date_range,
+    build_membership_analytics,
+    sanitize_signup_attribution,
+    signup_member_ids_in_range,
+    verified_payment_fields,
+)
 from vrp_service import compute_vrp
 from market_hours import (
     is_market_open, IST, MARKET_OPEN, is_weekend, display_hours, configure_hours,
@@ -1363,7 +1370,7 @@ class ModeIn(BaseModel):
 
 
 DASHBOARD_PAGE_KEYS = {
-    "oi-change", "open-interest", "strike-table", "sell-candidates",
+    "oi-change", "open-interest", "strike-table",
     "buildup", "positions", "alerts", "activity", "holidays",
     "straddle", "index-events", "cas", "market-intel", "adrs",
 }
@@ -1371,6 +1378,7 @@ DASHBOARD_PAGE_KEYS = {
 
 def _sanitize_settings_catalog_values(settings: dict, valid_indices=None, fallback_empty=True) -> dict:
     """Remove retired page/index IDs while preserving required-selection validation."""
+    settings["show_suggestion"] = False
     for key in ("visible_pages", "admin_visible_pages"):
         pages = settings.get(key)
         if not isinstance(pages, list):
@@ -1457,7 +1465,6 @@ class SettingsIn(BaseModel):
     show_strike_range: Optional[bool] = None  # sidebar Strike Range steppers
     show_market_memory: Optional[bool] = None  # OI Change historical level memory card
     show_writer_defense: Optional[bool] = None  # Writer Defense map on Open Interest tab
-    show_suggestion: Optional[bool] = None  # Suggestion window under right panel
     show_chart_signals: Optional[bool] = None  # Gamma wall / institution CE·PE chips under OI Change chart
     position_mark_glow_after_close: Optional[bool] = None  # Keep near-ATM position ring after configured close
     position_mark_glow_pct: Optional[float] = None  # Glow S/L only within this % of spot
@@ -3930,7 +3937,7 @@ async def get_config():
         "show_strike_range": bool(s.get("show_strike_range", False)),
         "show_market_memory": s.get("show_market_memory", True) is not False,
         "show_writer_defense": bool(s.get("show_writer_defense", True)),
-        "show_suggestion": bool(s.get("show_suggestion", True)),
+        "show_suggestion": False,
         "show_chart_signals": bool(s.get("show_chart_signals", False)),
         "position_mark_glow_after_close": s.get("position_mark_glow_after_close", True) is not False,
         "position_mark_glow_pct": float(s.get("position_mark_glow_pct") or 1.0),
@@ -7842,7 +7849,6 @@ class DeskGuideIn(BaseModel):
     journal: Optional[Dict[str, Any]] = None
     memory: Optional[Dict[str, Any]] = None
     market_memory: Optional[Dict[str, Any]] = None
-    sells: Optional[List[Any]] = None
     index: Optional[str] = None
     session_focus: Optional[str] = None
     force: Optional[bool] = False
@@ -8990,10 +8996,12 @@ async def google_exchange(payload: dict, request: Request):
         "google_subject": subject,
     }}
     if not member and not legacy_member:
+        # Attribution is first-touch account metadata; repeat logins never overwrite it.
         member_update["$setOnInsert"] = {
             "created_at": now_iso,
             "plan": "normal",
             "preferences": default_preferences,
+            "acquisition": sanitize_signup_attribution((payload or {}).get("attribution")),
         }
     try:
         await db.members.update_one(
@@ -9574,7 +9582,7 @@ async def admin_subscription_health(_admin: bool = Depends(require_admin)):
     return {
         "active_members_by_plan": active_members,
         "all_time": {
-            "renewals": await billing_events.count_documents({"event_type": "subscription.charged"}),
+            "charge_events": await billing_events.count_documents({"event_type": "subscription.charged"}),
             "cancellations": await billing_events.count_documents({"event_type": "subscription.cancelled"}),
             "failed_payments": await billing_events.count_documents({"event_type": "payment.failed"}),
         },
@@ -9587,6 +9595,172 @@ async def admin_subscription_health(_admin: bool = Depends(require_admin)):
         "basic_plan_enabled": basic_enabled,
         "membership_experience_enabled": experience_enabled,
     }
+
+
+@api_router.get("/admin/membership-analytics")
+async def admin_membership_analytics(
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    days: Optional[int] = Query(None, ge=1, le=366),
+    _admin: bool = Depends(require_admin),
+):
+    if db is None:
+        raise HTTPException(503, "Database unavailable")
+    try:
+        start_day, end_day, start, end = analytics_date_range(from_date, to_date, days)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    started_at = time.perf_counter()
+    start_epoch = int(start.timestamp())
+    end_epoch = int(end.timestamp())
+    platform_doc = await _load_platform_config()
+    members = await db.members.find(
+        {},
+        {
+            "_id": 1, "name": 1, "email": 1, "plan": 1, "created_at": 1,
+            "disabled_at": 1, "admin_plan_override": 1, "subscription": 1,
+            "acquisition": 1,
+        },
+    ).to_list(length=None)
+    subscriptions = await db.member_subscriptions.find(
+        {},
+        {
+            "_id": 1, "user_id": 1, "plan": 1, "cadence": 1, "status": 1,
+            "current_end": 1, "first_paid_at": 1,
+        },
+    ).to_list(length=None)
+    cohort_member_ids = signup_member_ids_in_range(members, start, end)
+    cohort_subscription_ids = [
+        str(subscription["_id"])
+        for subscription in subscriptions
+        if subscription.get("_id") is not None
+        and str(subscription.get("user_id") or "") in cohort_member_ids
+    ]
+    cohort_charge_events = []
+    if cohort_subscription_ids:
+        cohort_charge_events = await db.billing_events.find(
+            {
+                "event_type": "subscription.charged",
+                "subscription_id": {"$in": cohort_subscription_ids},
+                "$or": [
+                    {"event_created_at": {"$gte": start_epoch, "$lt": int(time.time()) + 1}},
+                    {
+                        "$or": [
+                            {"event_created_at": {"$exists": False}},
+                            {"event_created_at": None},
+                        ],
+                        "received_at": {"$gte": start, "$lt": datetime.now(timezone.utc)},
+                    },
+                ],
+            },
+            {"_id": 0, "subscription_id": 1},
+        ).to_list(length=None)
+    checkout_audits = await db.member_audit.find(
+        {
+            "event_type": "subscription_checkout_created",
+            "created_at": {"$gte": start, "$lt": end},
+        },
+        {"_id": 0, "member_id": 1, "created_at": 1},
+    ).to_list(length=None)
+    billing_events = await db.billing_events.find(
+        {
+            "event_type": {
+                "$in": [
+                    "subscription.charged",
+                    "subscription.cancelled",
+                    "payment.failed",
+                    "payment.refunded",
+                ]
+            },
+            "$or": [
+                {"event_created_at": {"$gte": start_epoch, "$lt": end_epoch}},
+                {"received_at": {"$gte": start, "$lt": end}},
+            ],
+        },
+        {
+            "_id": 1, "event_type": 1, "subscription_id": 1, "event_created_at": 1,
+            "received_at": 1, "payment_id": 1, "amount_minor": 1,
+            "refunded_amount_minor": 1, "currency": 1,
+        },
+    ).to_list(length=None)
+    cancellation_audits = await db.member_audit.find(
+        {
+            "event_type": "subscription_renewal_cancelled",
+            "created_at": {"$gte": start, "$lt": end},
+        },
+        {"_id": 0, "details.reason": 1, "created_at": 1},
+    ).to_list(length=None)
+    refund_payment_ids = sorted({
+        str(event.get("payment_id"))
+        for event in billing_events
+        if event.get("event_type") == "payment.refunded" and event.get("payment_id")
+    })
+    prior_refund_events = []
+    if refund_payment_ids:
+        prior_refund_events = await db.billing_events.find(
+            {
+                "event_type": "payment.refunded",
+                "payment_id": {"$in": refund_payment_ids},
+                "$or": [
+                    {"event_created_at": {"$lt": start_epoch}},
+                    {
+                        "$or": [
+                            {"event_created_at": {"$exists": False}},
+                            {"event_created_at": None},
+                        ],
+                        "received_at": {"$lt": start},
+                    },
+                ],
+            },
+            {
+                "_id": 1, "event_type": 1, "payment_id": 1,
+                "event_created_at": 1, "received_at": 1,
+                "refunded_amount_minor": 1, "currency": 1,
+            },
+        ).to_list(length=None)
+    membership_config = _platform_membership(platform_doc)
+    result = build_membership_analytics(
+        members=members,
+        subscriptions=subscriptions,
+        checkout_audits=checkout_audits,
+        billing_events=billing_events,
+        prior_refund_events=prior_refund_events,
+        cohort_charge_events=cohort_charge_events,
+        cancellation_audits=cancellation_audits,
+        membership_config=membership_config,
+        pricing_config=_platform_pricing(platform_doc),
+        start_day=start_day,
+        end_day=end_day,
+        effective_member_plan=_effective_member_plan,
+    )
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000)
+    documents_read = {
+        "members": len(members),
+        "subscriptions": len(subscriptions),
+        "checkouts": len(checkout_audits),
+        "billing_events": len(billing_events),
+        "cohort_charge_events": len(cohort_charge_events),
+        "cancellation_audits": len(cancellation_audits),
+        "prior_refund_events": len(prior_refund_events),
+    }
+    result["performance"] = {
+        "elapsed_ms": elapsed_ms,
+        "documents_read": documents_read,
+        "total_documents_read": sum(documents_read.values()),
+    }
+    log = logging.getLogger("server")
+    if elapsed_ms >= 2000 or result["performance"]["total_documents_read"] >= 10000:
+        log.warning(
+            "Membership analytics load is elevated",
+            extra={"elapsed_ms": elapsed_ms, "documents_read": documents_read},
+        )
+    else:
+        log.info(
+            "Membership analytics generated",
+            extra={"elapsed_ms": elapsed_ms, "documents_read": documents_read},
+        )
+    return result
 
 
 @api_router.get("/admin/members/{member_id}/audit")
@@ -9820,6 +9994,7 @@ async def membership_checkout(payload: dict, request: Request):
             "discount_percent": discount,
             "offer_id": offer_id or None,
             "first_period_price": first_period_offer_price,
+            "paid_cohort_tracking_enabled": True,
             "created_at": now,
             "updated_at": now,
         }},
@@ -9866,6 +10041,44 @@ async def membership_cancel(request: Request):
     sess, _config, _plan = await _member_context(request)
     if db is None:
         raise HTTPException(503, "Database unavailable")
+    cancellation_reason = None
+    if request is not None:
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > 1024:
+                    raise HTTPException(413, "Cancellation request is too large")
+            except ValueError as exc:
+                raise HTTPException(400, "Invalid cancellation request") from exc
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 1024:
+                raise HTTPException(413, "Cancellation request is too large")
+        if body:
+            try:
+                cancellation_payload = json.loads(body)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(400, "Invalid cancellation request") from exc
+            if not isinstance(cancellation_payload, dict):
+                raise HTTPException(400, "Invalid cancellation request")
+            if set(cancellation_payload) - {"reason"}:
+                raise HTTPException(422, "Only a cancellation reason may be submitted")
+            cancellation_reason = cancellation_payload.get("reason")
+            allowed_reasons = {
+                "price",
+                "not_using",
+                "missing_features",
+                "technical_issue",
+                "broker_setup",
+                "switching",
+                "other",
+            }
+            if cancellation_reason is not None and (
+                not isinstance(cancellation_reason, str)
+                or cancellation_reason not in allowed_reasons
+            ):
+                raise HTTPException(422, "Choose a valid cancellation reason")
     sub_id = str((sess["member"].get("subscription") or {}).get("id") or "")
     if not sub_id:
         raise HTTPException(404, "No provider subscription is linked to this account")
@@ -9917,11 +10130,17 @@ async def membership_cancel(request: Request):
     if current_end is not None:
         member_update["subscription.current_end"] = current_end
     await db.members.update_one({"_id": sess["member_id"]}, {"$set": member_update})
+    cancellation_details = {
+        "current_end": current_end,
+        "access_ends_immediately": True,
+    }
+    if cancellation_reason:
+        cancellation_details["reason"] = cancellation_reason
     await _record_member_audit(
         sess["member_id"],
         "subscription_renewal_cancelled",
         "member",
-        {"current_end": current_end, "access_ends_immediately": True},
+        cancellation_details,
     )
     return {"ok": True, "status": "cancelled", "plan": "normal", "current_end": current_end}
 
@@ -9956,14 +10175,26 @@ async def razorpay_webhook(request: Request):
     if delivered:
         return {"ok": True, "duplicate": True}
     payload_data = event.get("payload") or {}
-    subscription = ((payload_data.get("subscription") or {}).get("entity") or {})
+    subscription_payload = payload_data.get("subscription")
+    subscription = (
+        subscription_payload.get("entity")
+        if isinstance(subscription_payload, dict)
+        else {}
+    ) or {}
+    if not isinstance(subscription, dict):
+        subscription = {}
     subscription_id = str(subscription.get("id") or "")
-    payment = {}
+    payment_payload = payload_data.get("payment")
+    payment = (
+        payment_payload.get("entity")
+        if isinstance(payment_payload, dict)
+        else {}
+    ) or {}
+    if not isinstance(payment, dict):
+        payment = {}
     if not subscription_id and event_type in ("payment.failed", "payment.refunded"):
-        payment = ((payload_data.get("payment") or {}).get("entity") or {})
         subscription_id = str(payment.get("subscription_id") or "")
-    elif event_type in ("payment.failed", "payment.refunded"):
-        payment = ((payload_data.get("payment") or {}).get("entity") or {})
+    payment_fields = verified_payment_fields(payment)
     stored = await db.member_subscriptions.find_one({"_id": subscription_id}) if subscription_id else None
     if not stored:
         return {"ok": True, "ignored": True}
@@ -9973,18 +10204,31 @@ async def razorpay_webhook(request: Request):
     except (TypeError, ValueError):
         event_created_at = None
     last_event_created_at = stored.get("last_event_created_at")
+    first_paid_at = (
+        event_created_at
+        if event_created_at is not None
+        else int(datetime.now(timezone.utc).timestamp())
+    )
     if (
         event_created_at is not None
         and isinstance(last_event_created_at, (int, float))
         and event_created_at < last_event_created_at
     ):
+        # A stale lifecycle update cannot restore access, but its signed payment amount still belongs in revenue history.
+        if event_type == "subscription.charged" and stored.get("paid_cohort_tracking_enabled") is True:
+            await db.member_subscriptions.update_one(
+                {"_id": subscription_id},
+                {"$min": {"first_paid_at": first_paid_at}},
+            )
         await db.billing_events.update_one(
             {"_id": event_id},
             {"$setOnInsert": {
                 "event_type": event_type,
                 "subscription_id": subscription_id,
                 "received_at": datetime.now(timezone.utc),
+                "event_created_at": event_created_at,
                 "ignored_as_stale": True,
+                **payment_fields,
             }},
             upsert=True,
         )
@@ -10002,11 +10246,23 @@ async def razorpay_webhook(request: Request):
     }
     status = state_by_event.get(event_type)
     if event_type == "payment.refunded":
-        amount = int(payment.get("amount") or 0)
-        amount_refunded = int(payment.get("amount_refunded") or 0)
+        amount = payment_fields.get("amount_minor") or 0
+        amount_refunded = payment_fields.get("refunded_amount_minor") or 0
         if amount > 0 and amount_refunded >= amount:
             status = "refunded"
     if not status:
+        if event_type == "payment.refunded":
+            await db.billing_events.update_one(
+                {"_id": event_id},
+                {"$setOnInsert": {
+                    "event_type": event_type,
+                    "subscription_id": subscription_id,
+                    "received_at": datetime.now(timezone.utc),
+                    "event_created_at": event_created_at,
+                    **payment_fields,
+                }},
+                upsert=True,
+            )
         return {"ok": True, "ignored": True}
     current_end = subscription.get("current_end")
     now = datetime.now(timezone.utc)
@@ -10022,7 +10278,11 @@ async def razorpay_webhook(request: Request):
         set_fields["current_end"] = current_end
     if payment.get("id"):
         set_fields["last_payment_id"] = str(payment["id"])
-    await db.member_subscriptions.update_one({"_id": subscription_id}, {"$set": set_fields})
+    subscription_update = {"$set": set_fields}
+    if event_type == "subscription.charged" and stored.get("paid_cohort_tracking_enabled") is True:
+        # Mongo's $min keeps the first observed successful charge stable under retries and out-of-order webhooks.
+        subscription_update["$min"] = {"first_paid_at": first_paid_at}
+    await db.member_subscriptions.update_one({"_id": subscription_id}, subscription_update)
     member_update = {
         "subscription.id": subscription_id,
         "subscription.plan": stored.get("plan"),
@@ -10045,6 +10305,7 @@ async def razorpay_webhook(request: Request):
             "subscription_id": subscription_id,
             "received_at": now,
             "event_created_at": event_created_at,
+            **payment_fields,
         }},
         upsert=True,
     )
@@ -10328,6 +10589,26 @@ async def _ensure_mongo_indexes():
         )
         await db.member_journal.create_index([("user_id", 1), ("date", 1)], unique=True)
         await db.billing_events.create_index("event_type", name="idx_billing_events_event_type")
+        await db.billing_events.create_index(
+            [("event_type", 1), ("event_created_at", 1)],
+            name="idx_billing_events_type_provider_time",
+        )
+        await db.billing_events.create_index(
+            [("event_type", 1), ("subscription_id", 1), ("event_created_at", 1)],
+            name="idx_billing_events_type_subscription_time",
+        )
+        await db.billing_events.create_index(
+            [("event_type", 1), ("received_at", 1)],
+            name="idx_billing_events_type_received_time",
+        )
+        await db.billing_events.create_index(
+            [("payment_id", 1), ("event_type", 1), ("event_created_at", 1)],
+            name="idx_billing_events_payment_refund_time",
+        )
+        await db.member_audit.create_index(
+            [("event_type", 1), ("created_at", 1)],
+            name="idx_member_audit_type_created_at",
+        )
         await db.straddle_samples.create_index([("index", 1), ("trade_date", 1), ("expiry", 1)])
         await db.straddle_samples.create_index([("index", 1), ("ts", 1)])
         await db.straddle_samples.create_index("created_at")

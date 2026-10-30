@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { dealerGammaGuide, formatGexSnapshotTime, getGexDirectionalRead } from "./metricGuides";
+import { dealerGammaGuide, formatGexSnapshotTime, getGexDirectionalRead, ivRankGuide, vrpGuide } from "./metricGuides";
 import {
   computeDealerGamma,
   computeDealerGammaFromSnapshots,
@@ -69,6 +69,22 @@ describe("dealer gamma guide", () => {
     expect(container.querySelector('[data-testid="gex-current-threshold"]')?.textContent)
       .toContain("Your value is above +₹0.5 L Cr.");
     expect(container.textContent).toContain("₹0.5 L Cr means ₹50,000 crore");
+  });
+
+  it("keeps volatility guides descriptive rather than recommending trades", async () => {
+    await act(async () => {
+      root.render(
+        <>
+          {ivRankGuide(75)}
+          {vrpGuide(2.5)}
+        </>,
+      );
+    });
+
+    expect(container.textContent).toContain("High relative IV");
+    expect(container.textContent).toContain("IV above realized volatility");
+    expect(container.textContent).toContain("Reading:");
+    expect(container.textContent).not.toMatch(/sell|short|entry|position size/i);
   });
 
   it("uses the last valid same-session GEX snapshot after expiry", () => {

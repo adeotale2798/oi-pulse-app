@@ -1,4 +1,4 @@
-/** Carry-brief focus: only what an index-options seller needs overnight. */
+/** Carry-brief focus: key market and existing-book context for the next session. */
 
 export function carryFocusEvents(items = []) {
   const ranked = [];
@@ -26,28 +26,25 @@ export function carryFocusEvents(items = []) {
 }
 
 /**
- * Session OI in seller language.
- * Same read as the OI Change sentiment bar:
- *   bullish = put writers dominating → PE shorts sit with the tape
- *   bearish = call writers dominating → CE shorts sit with the tape
+ * Session OI leadership as a market observation, without suggesting an option side.
  */
 export function writerBiasLine(row) {
   const idx = row?.index || "Index";
   const b = row?.bias;
-  if (!b) return { index: idx, text: "no session OI yet", short: "no OI", comfortable: null };
+  if (!b) return { index: idx, text: "no session OI yet", short: "no OI", oiLeader: null };
   if (b.bullish) {
     return {
       index: idx,
-      text: "PE OI built — put writers dominating; sold puts sit with the tape",
-      short: "Puts sit better",
-      comfortable: "PE",
+      text: "PE OI increased relative to CE OI; bullish interpretation",
+      short: "PE OI lead",
+      oiLeader: "PE",
     };
   }
   return {
     index: idx,
-    text: "CE OI built — call writers dominating; sold calls sit with the tape",
-    short: "Calls sit better",
-    comfortable: "CE",
+    text: "CE OI increased relative to PE OI; bearish interpretation",
+    short: "CE OI lead",
+    oiLeader: "CE",
   };
 }
 
@@ -161,8 +158,7 @@ export function carryCase({
   for (const row of biases || []) {
     const line = writerBiasLine(row);
     if (!row?.bias) continue;
-    if (line.comfortable === "CE") why.push(`${row.index}: call writers dominating — CE shorts sit with the tape`);
-    else if (line.comfortable === "PE") why.push(`${row.index}: put writers dominating — PE shorts sit with the tape`);
+    why.push(`${row.index}: ${line.text}`);
   }
 
   if (book?.shortCount) {
@@ -171,14 +167,8 @@ export function carryCase({
       const row = (biases || []).find((b) => String(b.index || "").toUpperCase() === idx);
       const line = writerBiasLine(row || { index: idx });
       const heavy = heavierShortSide(bag);
-      if (!line.comfortable || !heavy) continue;
-      if (heavy === line.comfortable) {
-        why.push(`${idx}: more ${heavy} shorts — aligned with session writers`);
-      } else if (line.comfortable === "CE") {
-        whyNot.push(`${idx}: you are short more PE while call writers dominate (CE shorts sit with the tape)`);
-      } else {
-        whyNot.push(`${idx}: you are short more CE while put writers dominate (PE shorts sit with the tape)`);
-      }
+      if (!line.oiLeader || !heavy) continue;
+      why.push(`${idx}: current short mix is heavier in ${heavy}; session OI lead is ${line.oiLeader}`);
     }
   } else if (book && book.shortCount === 0 && book.openCount === 0) {
     why.push("No open F&O shorts in the connected book");

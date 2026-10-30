@@ -11,7 +11,6 @@ import StrikeTable from "@/components/StrikeTable";
 import SentimentBar from "@/components/SentimentBar";
 import HugeShiftModal from "@/components/HugeShiftModal";
 import OverflowTabBar from "@/components/OverflowTabBar";
-import SuggestionBox from "@/components/SuggestionBox";
 import InfoTip from "@/components/InfoTip";
 import InfoTilesRow, { DEFAULT_TILE_IDS } from "@/components/InfoTilesRow";
 import MobileBottomNav from "@/components/MobileBottomNav";
@@ -50,7 +49,6 @@ import EventRiskWidget from "@/components/EventRiskWidget";
 import StraddleChart from "@/components/StraddleChart";
 import CasPanel from "@/components/CasPanel";
 import PageBrandTitle from "@/components/PageBrandTitle";
-import SellCandidatesPanel from "@/components/SellCandidatesPanel";
 import RightPanel from "@/components/RightPanel";
 import {
   loadTabOrder,
@@ -111,7 +109,6 @@ const DASHBOARD_PAGES = [
   { v: "oi-change", l: "OI Change" },
   { v: "open-interest", l: "Open Interest" },
   { v: "strike-table", l: "Strike Table" },
-  { v: "sell-candidates", l: "Sell Candidates" },
   { v: "buildup", l: "Build-up" },
   { v: "positions", l: "Positions" },
   { v: "alerts", l: "Alerts" },
@@ -144,7 +141,6 @@ const MEMBER_PAGE_FEATURES = {
   "oi-change": "oi_change",
   "open-interest": "open_interest",
   "strike-table": "strike_table",
-  "sell-candidates": "sell_candidates",
   buildup: "buildup",
   positions: "positions",
   alerts: "alerts",
@@ -161,7 +157,7 @@ const MEMBER_PAGE_FEATURES = {
 const ALERT_INTENSITY = 0.35;
 const NOTIF_LS = "oiDeskNotif";
 const WALKTHROUGH_PAGES = [
-  "oi-change", "open-interest", "strike-table", "sell-candidates", "buildup",
+  "oi-change", "open-interest", "strike-table", "buildup",
   "positions", "alerts", "activity", "holidays", "straddle", "index-events",
   "market-intel", "adrs",
 ];
@@ -629,14 +625,6 @@ export default function Dashboard({ demoMode = false }) {
     });
   }, [iepWindowOn]);
 
-  // Force Sell Candidates panel to recompute every minute so scores stay fresh
-  // even if the underlying OI snapshot only ticks every 30s.
-  const [scTick, setScTick] = useState(Date.now());
-  useEffect(() => {
-    const iv = setInterval(() => setScTick(Date.now()), 60_000);
-    return () => clearInterval(iv);
-  }, []);
-
   // VRP (Volatility Risk Premium) — one per active index. Fetched on index
   // change and refreshed every 5 minutes (EOD data doesn't change intraday).
   const [vrp, setVrp] = useState(null);
@@ -895,8 +883,6 @@ export default function Dashboard({ demoMode = false }) {
         isMember: authState.is_member,
         features: authState.membership?.features,
       });
-      // Candidate-style trade surfaces remain available to Admin regardless of guest/member page ticks.
-      const adminOnlyPage = id === "sell-candidates";
       // Member pages fail closed unless the plan explicitly grants that page.
       const pageIsVisible = pageAllowed(id, {
         isAdmin: !!authState.is_admin,
@@ -904,8 +890,7 @@ export default function Dashboard({ demoMode = false }) {
         adminPages: adminVisiblePages,
         pagesReady,
       });
-      return (!adminOnlyPage || !!authState.is_admin)
-        && hasRequiredMemberFeature
+      return hasRequiredMemberFeature
         && pageIsVisible
         && (id !== "adrs" || globalMarketsEnabled === true);
     },
@@ -1233,7 +1218,6 @@ export default function Dashboard({ demoMode = false }) {
   const [oiLoading, setOiLoading] = useState(true);
   const [showStrikeRange, setShowStrikeRange] = useState(false);
   const [showWriterDefense, setShowWriterDefense] = useState(true);
-  const [showSuggestion, setShowSuggestion] = useState(true);
   const [showChartSignals, setShowChartSignals] = useState(false);
   const [keepPositionMarkGlowAfterClose, setKeepPositionMarkGlowAfterClose] = useState(true);
   const [positionMarkGlowPct, setPositionMarkGlowPct] = useState(1);
@@ -1246,8 +1230,6 @@ export default function Dashboard({ demoMode = false }) {
     : {};
   const effectiveWriterDefense = !!authState.is_admin
     && (memberProPreferences.show_writer_defense ?? showWriterDefense);
-  const effectiveSuggestion = !!authState.is_admin
-    && (memberProPreferences.show_suggestion ?? showSuggestion);
   const effectiveChartSignals = !!authState.is_admin
     && (memberProPreferences.show_chart_signals ?? showChartSignals);
   const effectiveDeskAiShow = deskAiShow && (
@@ -1788,7 +1770,6 @@ export default function Dashboard({ demoMode = false }) {
     if (typeof d.show_strike_range === "boolean") setShowStrikeRange(d.show_strike_range);
     if (typeof d.show_market_memory === "boolean") setShowMarketMemory(d.show_market_memory);
     if (typeof d.show_writer_defense === "boolean") setShowWriterDefense(d.show_writer_defense);
-    if (typeof d.show_suggestion === "boolean") setShowSuggestion(d.show_suggestion);
     if (typeof d.show_chart_signals === "boolean") setShowChartSignals(d.show_chart_signals);
     if (typeof d.position_mark_glow_after_close === "boolean") setKeepPositionMarkGlowAfterClose(d.position_mark_glow_after_close);
     if (Number.isFinite(Number(d.position_mark_glow_pct))) setPositionMarkGlowPct(Number(d.position_mark_glow_pct));
@@ -3554,35 +3535,6 @@ export default function Dashboard({ demoMode = false }) {
                   </TabsContent>
                   )}
 
-                  {(tabOn("sell-candidates")) && (
-                    <TabsContent value="sell-candidates" className="mt-0">
-                    <div className="flex items-center justify-between mb-2 gap-2 min-w-0">
-                      <PageBrandTitle
-                        kicker={activeIndex}
-                        title="Sell Candidates — safest strikes to short"
-                        testId="sell-candidates-page-title"
-                      />
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Timeframe: <b>{timeframeLabel}</b> · auto-recomputes every 60s
-                      </div>
-                    </div>
-                    <SellCandidatesPanel
-                      current={filteredCurrent}
-                      previous={previous}
-                      indexName={activeIndex}
-                      lotSize={oiSettings.lotSize?.[activeIndex]}
-                      vixNow={current?.vix || status?.vix}
-                      vixOpen={vixSessionOpen}
-                      step={indexMeta[activeIndex]?.step || INDEX_STEP[activeIndex] || 50}
-                      vrp={vrp}
-                      lastComputedAt={scTick}
-                    />
-                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
-                      <TimeframePills value={timeframe} onChange={setTimeframe} />
-                    </div>
-                  </TabsContent>
-                  )}
-
                   {(tabOn("buildup")) && (
                     <TabsContent value="buildup" className="mt-0">
                     <PageBrandTitle
@@ -3640,12 +3592,9 @@ export default function Dashboard({ demoMode = false }) {
                       current={filteredCurrent || current}
                       previous={previous}
                       vix={current?.vix || status?.vix}
-                      vixOpen={vixSessionOpen}
-                      oiSettings={oiSettings}
                       activeIndex={activeIndex}
                       expiry={selectedExpiry}
                       step={indexMeta[activeIndex]?.step || INDEX_STEP[activeIndex] || 50}
-                      vrp={vrp}
                       expiriesMeta={expiriesMeta}
                       onPinNearestWeekly={handleChangeExpiry}
                       positionsPollMs={positionsPollMs}
@@ -3855,20 +3804,6 @@ export default function Dashboard({ demoMode = false }) {
                       onDeskAiPositions={(on) => patchDeskAi({ desk_ai_positions: !!on })}
                       onDeskAiRadar={(on) => patchDeskAi({ desk_ai_radar: !!on })}
                       onOpenTelegramPrefs={authState.is_admin ? () => setTelegramPrefsOpen(true) : undefined}
-                      suggestion={
-                        effectiveSuggestion ? (
-                          <SuggestionBox
-                            indexName={activeIndex}
-                            marketIntel={marketIntel}
-                            changeSummary={changeSummary}
-                            spot={current?.price || current?.atm}
-                            vixNow={current?.vix || status?.vix}
-                            vixOpen={vixSessionOpen}
-                            sessionDate={dataStatus?.data_date || current?.timestamp || lastPulledAt}
-                            isLiveSession={!!status?.market?.is_market_open}
-                          />
-                        ) : null
-                      }
                     />
                   </Panel>
                 </>

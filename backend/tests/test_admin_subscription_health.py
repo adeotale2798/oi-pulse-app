@@ -79,7 +79,7 @@ def test_admin_subscription_health_reports_current_access_and_all_time_billing(m
 
     assert result == {
         "active_members_by_plan": {"normal": 0, "premium": 1, "pro": 1},
-        "all_time": {"renewals": 2, "cancellations": 1, "failed_payments": 1},
+        "all_time": {"charge_events": 2, "cancellations": 1, "failed_payments": 1},
         "blocked_basic_members": 4,
         "blocked_basic_member_list": [
             {"id": "basic", "name": "Basic member", "email": "basic@example.test", "payment_status": None},
